@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oriel Local Time Tracker</title>
+    <script>
+        (() => {
+            const supportedThemes = new Set(['graphite', 'light', 'reference']);
+            let theme = 'graphite';
+            try {
+                const storedTheme = localStorage.getItem('theme');
+                theme = storedTheme === 'variant' ? 'reference' : storedTheme;
+                theme = supportedThemes.has(theme) ? theme : 'graphite';
+            } catch (error) {
+                theme = 'graphite';
+            }
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
+    <link rel="stylesheet" href="/css/vendor.css">
+    <link rel="stylesheet" href="/assets/vendor/phosphor/regular/style.css">
+    <link rel="stylesheet" href="/assets/vendor/phosphor/fill/style.css">
+    <link rel="stylesheet" href="/assets/vendor/phosphor/bold/style.css">
+    <link rel="stylesheet" href="/assets/vendor/inter/400.css">
+    <link rel="stylesheet" href="/assets/vendor/inter/500.css">
+    <link rel="stylesheet" href="/assets/vendor/inter/600.css">
+    <link rel="stylesheet" href="/css/index.css">
+</head>
+<body class="app-shell h-screen w-screen flex flex-col overflow-hidden text-[13px]">
+
+    <!-- Top Header Bar -->
+    <div class="app-chrome flex items-center justify-between px-5 shrink-0 z-30">
+        <div class="flex items-center gap-4">
+            <div class="brand-status-control mr-2" aria-label="Oriel tracking status">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="tracking-status-wrap">
+                    <span id="tracking-status-indicator" class="tracking-status-dot tracking-status-dot--starting" role="status" aria-label="Tracking starting"></span>
+                    <span id="tracking-status-tooltip" class="tracking-status-tooltip" role="tooltip">Tracking starting</span>
+                </span>
+            </div>
+
+            <div class="relative" id="zoom-dropdown-container">
+                <button class="app-control w-full flex items-center justify-between px-3" id="zoom-dropdown-btn">
+                    <span class="flex items-center gap-1.5">
+                        <i class="ph ph-magnifying-glass-plus text-accent"></i>
+                        <span id="zoom-dropdown-label">5 min</span>
+                    </span>
+                    <i class="ph ph-caret-down transition-transform duration-200" id="zoom-dropdown-caret"></i>
+                </button>
+                <div class="popover absolute top-[calc(100%+4px)] left-0 w-full p-1.5 transition-all duration-200 opacity-0 scale-95 pointer-events-none z-50 flex flex-col gap-0.5" id="zoom-dropdown-menu">
+                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="1">
+                        <span>1 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                    </button>
+                    <button class="is-selected w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="5">
+                        <span>5 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-100 text-xs shrink-0"></i>
+                    </button>
+                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="10">
+                        <span>10 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                    </button>
+                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="15">
+                        <span>15 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                    </button>
+                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="30">
+                        <span>30 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                    </button>
+                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="60">
+                        <span>60 min</span>
+                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="timeline-mode-switch" class="app-tab-group timeline-mode-switch flex items-center gap-1 shrink-0" role="radiogroup" aria-label="Timeline view">
+                <button id="timeline-mode-day" class="app-tab timeline-mode-option app-tab--active timeline-mode-option--active" type="button" data-timeline-mode="day" role="radio" aria-checked="true">Day</button>
+                <button id="timeline-mode-week" class="app-tab timeline-mode-option" type="button" data-timeline-mode="week" role="radio" aria-checked="false">Week</button>
+            </div>
+
+            <div class="app-tab-group flex items-center gap-1 shrink-0" role="tablist" aria-label="Workspaces">
+                <button class="app-tab app-tab--active" id="tab-timeline" role="tab" aria-selected="true">
+                    <i class="ph ph-calendar-blank text-[14px]"></i> Timeline
+                </button>
+                <button class="app-tab" id="tab-projects" role="tab" aria-selected="false">
+                    <i class="ph ph-folder text-[14px]"></i> Projects
+                </button>
+                <button class="app-tab" id="tab-stats" role="tab" aria-selected="false">
+                    <i class="ph ph-chart-bar text-[14px]"></i> Statistics
+                </button>
+            </div>
+
+        </div>
+
+        <div class="flex items-center gap-4">
+            <!-- Date navigation -->
+            <div class="flex items-center gap-4" id="date-navigation">
+                <div class="date-picker-with-actions">
+                    <div class="app-control px-4 flex items-center gap-2 cursor-pointer relative" id="date-picker-trigger">
+                        <i class="ph ph-calendar-blank text-gray-400"></i>
+                        <span id="date-display">Wednesday, 20th May 2026</span>
+                        <input type="date" id="date-picker-input" aria-label="Select timeline date" class="sr-only" tabindex="-1">
+                        <div id="date-picker-popover" role="dialog" aria-label="Select timeline date" class="popover hidden absolute right-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
+                            <div class="flex items-center justify-between mb-3">
+                                <button id="date-picker-prev-month" type="button" class="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.04] transition focus:outline-none focus:ring-2 focus:ring-blue-500/40" aria-label="Previous month">
+                                    <i class="ph ph-caret-left text-sm"></i>
+                                </button>
+                                <div id="date-picker-month-label" class="text-sm font-bold text-white"></div>
+                                <button id="date-picker-next-month" type="button" class="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.04] transition focus:outline-none focus:ring-2 focus:ring-blue-500/40" aria-label="Next month">
+                                    <i class="ph ph-caret-right text-sm"></i>
+                                </button>
+                            </div>
+                            <div id="date-picker-weekdays" class="grid grid-cols-7 gap-1 text-[10px] text-gray-500 font-bold uppercase mb-1"></div>
+                            <div id="date-picker-days" class="grid grid-cols-7 gap-1"></div>
+                            <div class="flex items-center justify-between border-t border-[#2d2f34] mt-3 pt-3">
+                                <button id="date-picker-clear" type="button" class="text-[11px] font-semibold text-gray-400 hover:text-white transition focus:outline-none">Close</button>
+                                <button id="date-picker-today" type="button" class="button-primary">Today</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="date-navigation-actions">
+                        <button class="app-control app-control--accent px-4" id="btn-today">Today</button>
+                        <div class="date-step-control" role="group" aria-label="Select adjacent day">
+                            <button class="date-step-button" id="btn-prev-day" type="button" aria-label="Previous day"><i class="ph ph-caret-left"></i></button>
+                            <button class="date-step-button" id="btn-next-day" type="button" aria-label="Next day"><i class="ph ph-caret-right"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Main Content Workspace -->
+    <div class="flex-1 flex min-h-0 relative" id="scheduler-workspace">
+
+        <!-- Left Column: Activity Stream Timeline -->
+        <div class="workspace-panel day-timeline-only flex flex-col w-[45%] min-w-[350px] border-r relative">
+            <div class="pane-header border-b flex items-center justify-between px-5 shrink-0">
+                <div class="flex items-center gap-2">
+                    <i class="ph ph-clock-counter-clockwise text-lg"></i>
+                    <h2>Activity Stream</h2>
+                </div>
+                <div class="flex items-center gap-4 text-gray-400">
+                    <button class="icon-button" title="Jump to Current Time" id="btn-jump-current"><i class="ph ph-arrow-line-down text-lg"></i></button>
+                </div>
+            </div>
+
+            <div class="pane-subhead border-b flex items-center px-5 shrink-0">
+                <span class="section-label">Recorded Activity</span>
+            </div>
+
+            <!-- Scrollable Timeline -->
+            <div class="timeline-container timeline-container--scrollbar-hidden app-scrollbar-safe" id="memory-aid-container">
+                <div class="timeline-grid" id="memory-aid-grid"></div>
+                <div class="items-layer" id="memory-aid-items"></div>
+
+                <!-- Contextual Details Popover -->
+                <div id="activity-details-popup" class="popover absolute left-[92px] right-[38px] p-5 z-40 hidden flex flex-col gap-4 text-white">
+                    <div class="flex justify-between items-start border-b border-[#2d2f34] pb-2.5">
+                        <div class="flex items-center gap-2">
+                            <div class="w-6 h-6 flex items-center justify-center" id="popup-icon-container">
+                                <!-- Dynamic favicon/icon -->
+                            </div>
+                            <span class="font-bold text-sm" id="popup-app-name">Brave</span>
+                        </div>
+                        <button id="popup-close-btn" class="text-gray-400 hover:text-white transition">
+                            <i class="ph ph-x text-lg"></i>
+                        </button>
+                    </div>
+                    <!-- Single details layout -->
+                    <div id="popup-single-details" class="flex flex-col gap-3">
+                        <div class="flex flex-col gap-1">
+                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Title</span>
+                            <div class="text-xs font-semibold leading-relaxed break-words text-white" id="popup-title">Activity Title</div>
+                        </div>
+                        <div class="flex flex-col gap-1" id="popup-url-container">
+                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">URL / Host</span>
+                            <a href="#" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:underline truncate" id="popup-url">https://github.com</a>
+                        </div>
+                    </div>
+
+                    <!-- Multi details layout -->
+                    <div id="popup-multi-details" class="flex flex-col gap-2.5 hidden">
+                        <span class="section-label">Recorded Activity Breakdown</span>
+                        <div class="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="popup-multi-list-container">
+                            <!-- Injected dynamically by JS -->
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 border-t border-[#2d2f34]/80 pt-3">
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duration</span>
+                            <div class="text-xs font-semibold mt-0.5 text-accent" id="popup-duration">15 min</div>
+                        </div>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Time Range</span>
+                            <div class="text-xs font-semibold mt-0.5 text-gray-200" id="popup-range">09:15 - 09:30</div>
+                        </div>
+                        <div class="activity-mix-summary hidden col-span-2" id="popup-activity-mix-container">
+                            <div class="activity-mix-summary__heading">
+                                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Activity Mix</span>
+                                <button type="button" class="activity-mix-info" id="popup-activity-mix-info" aria-label="Activity Mix help">
+                                    <i class="ph ph-info text-xs"></i>
+                                </button>
+                            </div>
+                            <span class="activity-mix-summary__label" id="popup-activity-mix-label"></span>
+                        </div>
+                    </div>
+                    <button id="popup-assign-btn" class="button-primary mt-1">
+                        <i class="ph ph-plus-circle text-base"></i> Assign to Project
+                    </button>
+                </div>
+            </div>
+
+        </div>
+        <div id="activity-mix-tooltip" class="activity-mix-tooltip hidden" role="tooltip"></div>
+
+        <!-- Resize Handler -->
+        <div class="day-timeline-only w-1 flex items-center justify-center cursor-col-resize transition shrink-0 border-r border-[#2d2f34]" id="resize-handle"></div>
+
+        <!-- Middle Column: Logged Time Entries Grid -->
+        <div class="workspace-panel day-timeline-only flex flex-col flex-1 min-w-[350px] border-r">
+            <div class="pane-header border-b flex items-center justify-between px-5 shrink-0">
+                <div class="flex items-center gap-2">
+                    <i class="ph ph-calendar-check text-lg"></i>
+                    <h2>Time Entries</h2>
+                </div>
+                <div class="flex items-center gap-3 text-gray-400">
+                    <button class="icon-button" title="Time Entry Rules" id="btn-rules"><i class="ph ph-lightbulb text-lg"></i></button>
+                    <button class="icon-button" title="Settings" id="btn-settings"><i class="ph ph-sliders-horizontal text-lg"></i></button>
+                </div>
+            </div>
+
+            <div class="pane-subhead border-b flex items-center justify-center px-5 shrink-0">
+                <span class="text-[11px] font-semibold text-gray-400 tracking-wide">Click & drag down to log a time entry</span>
+            </div>
+
+            <!-- Scrollable Timeline Grid for Time Entries -->
+            <div class="timeline-container app-scrollbar-safe" id="time-entries-container">
+                <div class="timeline-grid" id="time-entries-grid"></div>
+                <div class="items-layer" id="time-entries-items"></div>
+            </div>
+        </div>
+
+        <div id="week-timeline-workspace" class="week-timeline-workspace hidden flex-1 min-w-0 min-h-0">
+            <div id="week-timeline-container" class="week-timeline-container app-scrollbar-safe">
+                <div id="week-timeline-grid" class="week-timeline-grid"></div>
+            </div>
+        </div>
+
+        <!-- Floating Action Bar for selected Activity Stream assignment -->
+        <div id="timeline-selection-overlay" class="day-timeline-only absolute inset-y-0 left-0 right-[340px] pointer-events-none">
+            <div id="multi-select-bar" class="popover hidden absolute bottom-6 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-3rem)] gap-8 pointer-events-auto p-3.5 flex items-center justify-between z-30 transition-all duration-200">
+                <div class="flex items-center gap-2">
+                    <i class="ph ph-check-square-offset text-accent text-lg"></i>
+                    <span class="text-white font-semibold text-[12px]"><span id="lbl-selected-count" class="inline-block w-[4ch] text-right tabular-nums">0</span> items selected</span>
+                </div>
+                <div class="flex gap-2">
+                    <button class="button-secondary" id="btn-select-similar">Similar</button>
+                    <button class="button-secondary" id="btn-clear-selection">Deselect</button>
+                    <button class="button-primary" id="btn-assign-selected">
+                        Assign
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Work Summary Statistics and AI Assistant -->
+        <div class="side-summary day-timeline-only w-[340px] flex flex-col shrink-0" id="work-times-sidebar">
+            <div class="pane-header flex items-center justify-between px-5 border-b">
+                <div class="sidebar-tab-group work-times-title" role="tablist" aria-label="Sidebar panels">
+                    <button type="button" class="sidebar-tab is-active" id="sidebar-tab-work-times" role="tab" aria-selected="true" aria-controls="work-times-panel">
+                        <i class="ph ph-chart-pie-slice"></i>
+                        <span>Work Times</span>
+                    </button>
+                    <button type="button" class="sidebar-tab" id="sidebar-tab-ai" role="tab" aria-selected="false" aria-controls="ai-sidebar-panel">
+                        <i class="ph ph-sparkle"></i>
+                        <span>Ask AI</span>
+                    </button>
+                </div>
+                <button class="icon-button" title="Collapse Sidebar" aria-label="Collapse Sidebar" aria-pressed="false" id="btn-toggle-work-times">
+                    <i class="ph ph-sidebar-simple text-lg"></i>
+                </button>
+            </div>
+
+            <div class="side-summary-content app-scrollbar-safe p-5 flex flex-col gap-6 overflow-y-auto flex-1">
+                <div class="sidebar-panel flex flex-col gap-6" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
+
+                <!-- Main Stats Panel -->
+                <div class="surface-panel p-5 flex flex-col gap-4">
+
+                    <!-- Recorded Activity -->
+                    <div>
+                        <div class="flex justify-between items-center text-[13px] font-semibold mb-1.5">
+                            <span class="text-gray-100">Recorded Active Time</span>
+                            <span class="text-white font-bold" id="stat-captured-active">0h 0m</span>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-[#2d2f34] my-1"></div>
+
+                    <!-- Logged Projects -->
+                    <div>
+                        <div class="flex justify-between items-center text-[13px] font-semibold mb-1.5">
+                            <span class="text-gray-100">Project Logged Time</span>
+                            <span class="text-emerald-400 font-bold" id="stat-project-total">0h 0m</span>
+                        </div>
+                        <div class="w-full bg-[#0d0e10] h-1.5 rounded-full overflow-hidden border border-[#2d2f34]">
+                            <div class="bg-emerald-500 h-full rounded-full w-0 transition-all duration-500" id="bar-project"></div>
+                        </div>
+                        <div class="work-breakdown-row text-[11px] text-gray-400 mt-2">
+                            <span>Billable Hours</span>
+                            <span id="stat-billable">0h 0m</span>
+                        </div>
+                        <div class="work-breakdown-row text-[11px] text-gray-400">
+                            <span>Non-Billable</span>
+                            <span id="stat-nonbillable">0h 0m</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Projects Breakdown List -->
+                <div>
+                    <h3 class="font-bold text-[13px] uppercase tracking-wider text-gray-400 mb-3 px-1">Total Project Time</h3>
+                    <div class="flex flex-col gap-2.5" id="projects-breakdown-list">
+                        <!-- Project item seeded here -->
+                        <div class="empty-state p-4 text-gray-400">
+                            No time entries logged for this day. Click and drag in the scheduler to create one!
+                        </div>
+                    </div>
+                </div>
+
+                </div>
+
+                <div class="sidebar-panel sidebar-panel--ai hidden flex flex-col gap-4 min-h-0 flex-1" id="ai-sidebar-panel" role="tabpanel" aria-labelledby="sidebar-tab-ai">
+                    <div class="ai-topbar">
+                        <div class="ai-topbar-actions">
+                            <button type="button" class="button-secondary ai-new-chat-button" id="ai-new-chat-button" title="Start New Chat" aria-label="Start New Chat" disabled>
+                                <i class="ph ph-plus"></i>
+                                <span>New</span>
+                            </button>
+                            <button type="button" class="icon-button ai-settings-button" id="ai-settings-button" title="AI Settings" aria-label="AI Settings" aria-expanded="false" aria-controls="ai-settings-panel">
+                                <i class="ph ph-gear-six"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="surface-panel ai-settings-panel app-scrollbar-safe hidden" id="ai-settings-panel">
+                        <div class="ai-settings-header">
+                            <div class="ai-settings-heading">
+                                <span>AI Settings</span>
+                                <span>Keys stay in macOS Keychain.</span>
+                            </div>
+                            <button type="button" class="icon-button ai-settings-close-button" id="ai-settings-close-button" aria-label="Close AI Settings">
+                                <i class="ph ph-x"></i>
+                            </button>
+                            <div class="ai-settings-state">
+                                <span class="status-pill ai-settings-key-status" id="ai-settings-key-status">Add key</span>
+                                <span class="ai-settings-feedback" id="ai-settings-feedback" role="status" aria-live="polite"></span>
+                            </div>
+                        </div>
+                        <div class="ai-settings-grid">
+                            <div class="ai-field">
+                                <span>Provider</span>
+                                <div class="ai-provider-list" id="ai-provider-list" role="radiogroup" aria-label="AI provider">
+                                    <button type="button" class="ai-provider-card" data-ai-provider="openai" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">OpenAI</span>
+                                        <span class="ai-provider-key-state" id="ai-provider-openai-key-state">No key</span>
+                                    </button>
+                                    <button type="button" class="ai-provider-card" data-ai-provider="google" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">Gemini</span>
+                                        <span class="ai-provider-key-state" id="ai-provider-google-key-state">No key</span>
+                                    </button>
+                                    <button type="button" class="ai-provider-card" data-ai-provider="anthropic" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">Claude</span>
+                                        <span class="ai-provider-key-state" id="ai-provider-anthropic-key-state">No key</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <label class="ai-field">
+                                <span>Model</span>
+                                <div class="ai-model-picker">
+                                    <button type="button" class="field ai-model-picker-button" id="ai-model-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="ai-model-picker-menu">
+                                        <span id="ai-model-picker-label">gpt-5.2</span>
+                                        <i class="ph ph-caret-down"></i>
+                                    </button>
+                                    <div class="ai-model-picker-menu popover hidden" id="ai-model-picker-menu" role="listbox">
+                                        <input type="search" class="field ai-settings-input ai-model-search-input" id="ai-model-search-input" aria-label="Search AI models" placeholder="Search or type model ID">
+                                        <div class="ai-model-option-list app-scrollbar-safe" id="ai-model-option-list"></div>
+                                        <button type="button" class="button-secondary ai-model-refresh-button" id="ai-model-refresh-button">
+                                            <i class="ph ph-arrows-clockwise"></i>
+                                            <span id="ai-model-refresh-label">Refresh from provider...</span>
+                                        </button>
+                                        <div class="ai-model-refresh-confirm hidden" id="ai-model-refresh-confirm" role="group" aria-label="Confirm model refresh">
+                                            <span id="ai-model-refresh-confirm-text">Refresh models from provider?</span>
+                                            <div class="ai-model-refresh-confirm-actions">
+                                                <button type="button" class="button-primary" id="ai-model-refresh-confirm-button">
+                                                    Refresh now
+                                                </button>
+                                                <button type="button" class="button-secondary" id="ai-model-refresh-cancel-button">
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <span class="ai-model-refresh-meta" id="ai-model-refresh-meta"></span>
+                            </label>
+                            <label class="ai-field ai-field--key">
+                                <span>API Key</span>
+                                <div class="ai-key-input-shell">
+                                    <input type="password" class="field ai-settings-input" id="ai-api-key-input" aria-label="AI API key" placeholder="Paste API key" autocomplete="off">
+                                    <button type="button" class="icon-button ai-key-edit-button hidden" id="ai-key-edit-button" title="Replace saved API key" aria-label="Replace saved API key">
+                                        <i class="ph ph-pencil-simple"></i>
+                                    </button>
+                                </div>
+                            </label>
+                            <div class="ai-key-actions">
+                                <button type="button" class="button-primary ai-key-save-button" id="ai-key-save-button">
+                                    <i class="ph ph-check"></i>
+                                    <span id="ai-key-save-label">Save key</span>
+                                </button>
+                                <button type="button" class="button-secondary ai-key-cancel-button hidden" id="ai-key-cancel-button">
+                                    Cancel
+                                </button>
+                            </div>
+                            <button type="button" class="button-secondary ai-key-remove-button hidden" id="ai-key-delete-button" title="Remove saved API key" aria-label="Remove saved API key">
+                                <i class="ph ph-trash"></i>
+                                Remove saved key
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="ai-chat-messages app-scrollbar-safe" id="ai-chat-messages" aria-live="polite"></div>
+
+                    <div class="ai-composer" aria-busy="false">
+                        <div class="ai-prompt-chips" aria-label="Suggested AI prompts">
+                            <button type="button" class="ai-prompt-chip" data-ai-prompt="What did I do today?">What did I do today?</button>
+                            <button type="button" class="ai-prompt-chip" data-ai-prompt="Suggest entries">Suggest entries</button>
+                        </div>
+                        <div class="ai-chat-input-shell">
+                            <textarea class="ai-chat-input" id="ai-chat-input" rows="3" placeholder="Ask about this day..." aria-label="Ask AI about selected day"></textarea>
+                        </div>
+                        <div class="ai-composer-footer">
+                            <span class="ai-status-line">
+                                <span class="ai-loading-spinner hidden" id="ai-loading-spinner" aria-hidden="true"></span>
+                                <span id="ai-status"></span>
+                            </span>
+                            <button type="button" class="button-primary shrink-0" id="ai-send-button">
+                                <i class="ph ph-paper-plane-tilt"></i>
+                                <span>Send</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proper Project Management Board -->
+    <div id="projects-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 app-scrollbar-safe">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">Project Portfolio</h1>
+                <p class="text-gray-400 text-xs mt-1">Manage client projects, identity colors, billing defaults, and logged summaries.</p>
+            </div>
+            <button class="button-primary" id="btn-projects-page-new">
+                <i class="ph-bold ph-plus"></i> Create Project
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="projects-page-grid">
+            <!-- Injected dynamically by JS -->
+        </div>
+    </div>
+
+    <!-- Reporting workspace -->
+    <div id="stats-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
+        <!-- Period picker row -->
+        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4 border-b border-[#2d2f34] pb-5">
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">Reporting & Statistics</h1>
+                <p class="text-gray-400 text-xs mt-1">Deep analysis of program usage, website navigation, and tracked-to-logged conversion rates.</p>
+            </div>
+
+            <div class="flex items-center gap-2.5">
+                <!-- Preset range selection buttons -->
+                <div class="range-group flex items-center gap-1 shrink-0" id="stats-presets-container">
+                    <button class="range-pill range-pill--active" data-range="today">Today</button>
+                    <button class="range-pill" data-range="yesterday">Yesterday</button>
+                    <button class="range-pill" data-range="week">This Week</button>
+                    <button class="range-pill" data-range="last7">Last 7 Days</button>
+                    <button class="range-pill" data-range="last30">Last 30 Days</button>
+                    <button class="range-pill" data-range="all">All Time</button>
+                    <button class="range-pill" data-range="custom">Custom</button>
+                </div>
+
+                <!-- Custom dates input range (hidden by default) -->
+                <div class="flex items-center gap-2 hidden" id="stats-custom-range-inputs">
+                    <input type="date" id="stats-start-date" class="field text-xs px-2.5">
+                    <span class="text-gray-400 text-xs">to</span>
+                    <input type="date" id="stats-end-date" class="field text-xs px-2.5">
+                </div>
+            </div>
+        </div>
+
+        <div class="summary-band">
+            <!-- Captured Hours -->
+            <div class="summary-metric">
+                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Captured</span>
+                <span class="summary-value" id="stat-card-captured">0h 0m</span>
+                <span class="text-[10px] text-gray-400">Total active macOS/Browser time</span>
+            </div>
+
+            <!-- Logged Hours -->
+            <div class="summary-metric">
+                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Logged</span>
+                <span class="summary-value" id="stat-card-logged">0h 0m</span>
+                <span class="text-[10px] text-gray-400">Time entries allocated to projects</span>
+            </div>
+
+            <!-- Billable vs Non-Billable Earnings -->
+            <div class="summary-metric">
+                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Billable Earnings</span>
+                <span class="summary-value summary-value--success" id="stat-card-earnings">$0.00</span>
+                <span class="text-[10px] text-gray-400" id="stat-card-billable-hours">0.0h of billable work</span>
+            </div>
+
+            <!-- Conversion Rate Card -->
+            <div class="summary-metric">
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Conversion Efficiency</span>
+                    <span class="text-xs font-semibold text-accent" id="stat-card-conversion-percent">0%</span>
+                </div>
+
+                <!-- Progress bar -->
+                <div class="w-full bg-gray-800 rounded-full h-2 shadow-inner overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-500" style="width: 0%; background: var(--accent);" id="stat-card-conversion-bar"></div>
+                </div>
+                <span class="text-[10px] text-gray-400">Ratio of logged time to captured time</span>
+            </div>
+        </div>
+
+        <!-- Charts Dashboard (Double column layout) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <!-- Left Chart Card: Used Programs Donut -->
+            <div class="report-panel p-6 flex flex-col gap-4">
+                <div class="flex items-center gap-2 pb-2 border-b border-[#2d2f34]/80">
+                    <i class="ph ph-desktop text-accent text-lg"></i>
+                    <h3 class="font-bold text-sm text-white tracking-wide">Top Applications</h3>
+                </div>
+                <div class="flex flex-col md:flex-row items-center gap-6 py-4">
+                    <div class="relative w-44 h-44 shrink-0 flex items-center justify-center">
+                        <canvas id="canvas-programs" width="176" height="176" class="w-full h-full"></canvas>
+                        <!-- Center text overlay -->
+                        <div class="absolute flex flex-col items-center justify-center text-center">
+                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Apps</span>
+                            <span class="text-xs font-semibold text-white mt-0.5" id="lbl-programs-count">0 items</span>
+                        </div>
+                    </div>
+                    <div class="flex-1 w-full flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="list-programs-legend">
+                        <!-- Legend and breakdown injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Chart Card: Visited Websites Donut -->
+            <div class="report-panel p-6 flex flex-col gap-4">
+                <div class="flex items-center gap-2 pb-2 border-b border-[#2d2f34]/80">
+                    <i class="ph ph-globe text-blue-400 text-lg"></i>
+                    <h3 class="font-bold text-sm text-white tracking-wide">Top Websites</h3>
+                </div>
+                <div class="flex flex-col md:flex-row items-center gap-6 py-4">
+                    <div class="relative w-44 h-44 shrink-0 flex items-center justify-center">
+                        <canvas id="canvas-websites" width="176" height="176" class="w-full h-full"></canvas>
+                        <!-- Center text overlay -->
+                        <div class="absolute flex flex-col items-center justify-center text-center">
+                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Sites</span>
+                            <span class="text-xs font-semibold text-white mt-0.5" id="lbl-websites-count">0 items</span>
+                        </div>
+                    </div>
+                    <div class="flex-1 w-full flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="list-websites-legend">
+                        <!-- Legend and breakdown injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Create/Edit Time Entry -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="time-entry-modal">
+        <div class="modal-panel w-[420px] relative flex flex-col gap-4 transition-all duration-200" id="time-entry-modal-content">
+            <h3 class="modal-title text-base border-b pb-3" id="modal-title">Log Time Entry</h3>
+
+            <div class="flex gap-6" id="modal-split-container">
+                <!-- Left Column: Recorded Activity Snapshot -->
+                <div class="flex-1 flex flex-col gap-2.5 max-h-[460px] overflow-y-auto pr-3 border-r border-[#2d2f34]/80 app-scrollbar-safe hidden" id="modal-left-panel">
+                    <label class="section-label flex items-center gap-1.5 shrink-0">
+                        <i class="ph ph-sparkle"></i> Recorded Activity Snapshot
+                    </label>
+                    <div class="flex flex-col gap-2" id="modal-memory-aid-list">
+                        <!-- Snapshot of activities inside the range injected dynamically by JS -->
+                    </div>
+                </div>
+
+                <!-- Right Column: Log Inputs Panel -->
+                <div class="w-[370px] shrink-0 flex flex-col gap-4" id="modal-right-panel">
+                    <!-- Timing preview -->
+                    <div class="flex justify-between items-center bg-[#0d0e10] border border-[#2d2f34] px-4 py-3 rounded-xl">
+                        <div>
+                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Start Time</div>
+                            <input type="text" class="bg-transparent text-sm font-semibold text-white focus:outline-none w-20 border-b border-transparent focus:border-blue-500 mt-0.5" id="modal-start-time">
+                        </div>
+                        <div class="h-6 w-[1px] bg-[#2d2f34]"></div>
+                        <div class="text-center px-2">
+                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duration</div>
+                            <div class="text-sm font-bold text-blue-400 mt-0.5" id="modal-duration-lbl">15 min</div>
+                        </div>
+                        <div class="h-6 w-[1px] bg-[#2d2f34]"></div>
+                        <div class="text-right">
+                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">End Time</div>
+                            <input type="text" class="bg-transparent text-sm font-semibold text-white focus:outline-none w-20 border-b border-transparent focus:border-blue-500 mt-0.5 text-right" id="modal-end-time">
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Activity Description</label>
+                        <input type="text" placeholder="What were you working on?" class="field px-3.5 text-[13px]" id="modal-description-input">
+                    </div>
+
+                    <!-- Project Selector Grid -->
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Allocate to Project</label>
+                        <div class="grid grid-cols-2 gap-2 mt-1 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
+                            <!-- Visual grid rendered by JS -->
+                        </div>
+                        <input type="hidden" id="modal-project-select" value="">
+                    </div>
+
+                    <!-- Task Selector -->
+                    <div class="flex flex-col gap-1.5 hidden" id="modal-task-container">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Task</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select" id="modal-task-select" aria-label="Task">
+                                <option value="">No task</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <!-- Billable Status (Hidden, auto-inherited from project) -->
+                    <input type="checkbox" class="sr-only" id="modal-billable-toggle">
+
+                    <!-- Action buttons -->
+                    <div class="flex justify-between items-center border-t border-[#2d2f34] pt-4 mt-2 shrink-0">
+                        <button class="text-red-500 hover:text-red-400 text-sm font-medium transition hidden" id="modal-btn-delete">Delete Log</button>
+                        <div class="flex gap-2.5 ml-auto">
+                            <button class="button-secondary" id="modal-btn-cancel">Cancel</button>
+                            <button class="button-primary" id="modal-btn-save">Save Entry</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Add Project -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="project-modal">
+        <div class="modal-panel w-[360px] relative flex flex-col gap-4">
+            <h3 class="modal-title text-base border-b pb-3">Create New Project</h3>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Project Name</label>
+                <input type="text" placeholder="e.g. Acme Website Design" class="field px-3 text-[13px]" id="project-name-input">
+            </div>
+
+            <!-- Color Presets -->
+            <div class="flex flex-col gap-2">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Project Color</label>
+                <div class="grid grid-cols-6 gap-2 border border-[#2d2f34] bg-[#0d0e10] p-3 rounded-xl justify-items-center" id="project-colors-grid"></div>
+                <input type="color" class="hidden" id="project-color-input" value="#3b82f6">
+            </div>
+
+            <!-- Pricing Profile -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pricing Mode</label>
+                <div class="custom-select-wrapper w-full">
+                    <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="project-rate-type">
+                        <option value="none">No billing rate (Free/Internal)</option>
+                        <option value="hourly">Hourly Rate (Time-based billing)</option>
+                        <option value="fixed">Fixed Rate (Flat project price)</option>
+                    </select>
+                    <i class="ph ph-caret-down custom-select-icon"></i>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5 hidden" id="project-currency-container">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Currency</label>
+                <div class="custom-select-wrapper w-full">
+                    <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="project-currency">
+                        <option value="$">USD ($)</option>
+                        <option value="€">EUR (€)</option>
+                        <option value="£">GBP (£)</option>
+                        <option value="¥">JPY/CNY (¥)</option>
+                        <option value="₹">INR (₹)</option>
+                    </select>
+                    <i class="ph ph-caret-down custom-select-icon"></i>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1.5 hidden" id="project-hourly-rate-container">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Hourly Rate</label>
+                <input type="number" placeholder="0.00" min="0" class="field px-3 text-[13px]" id="project-hourly-rate">
+            </div>
+
+            <div class="flex flex-col gap-1.5 hidden" id="project-fixed-rate-container">
+                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Fixed Rate</label>
+                <input type="number" placeholder="0.00" min="0" class="field px-3 text-[13px]" id="project-fixed-rate">
+            </div>
+
+            <div class="flex items-center justify-between bg-[#141416]/50 p-2.5 rounded-lg border border-[#2d2f34] mt-1">
+                <span class="text-sm font-semibold text-white">Default Billable</span>
+                <label class="oriel-toggle oriel-toggle--sm" for="project-billable-toggle">
+                    <input type="checkbox" value="" class="oriel-toggle-input" id="project-billable-toggle" checked>
+                    <span class="oriel-toggle-track" aria-hidden="true"></span>
+                </label>
+            </div>
+
+            <div class="flex justify-end gap-2 border-t border-[#2d2f34] pt-4 mt-2">
+                <button class="button-secondary" id="project-btn-cancel">Cancel</button>
+                <button class="button-primary" id="project-btn-save">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Auto-Assignment Rules Manager -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="rules-modal">
+        <div class="modal-panel w-[750px] relative flex flex-col gap-4">
+            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
+                <h3 class="text-base font-bold text-white flex items-center gap-1.5">
+                    <i class="ph ph-lightbulb text-yellow-400"></i> Auto-Assignment Rules
+                </h3>
+                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="rules-modal-btn-close">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+
+            <div class="flex gap-6 max-h-[480px]">
+                <!-- Left Column: Create Rule Form -->
+                <div class="w-[300px] shrink-0 flex flex-col gap-3.5 border-r border-[#2d2f34]/80 pr-6">
+                    <h4 class="section-label">Create New Rule</h4>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">When captured field</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-field-select">
+                                <option value="app">Application Name</option>
+                                <option value="title">Window / Tab Title</option>
+                                <option value="url">URL / Domain</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Match type</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-match-select">
+                                <option value="contains">Contains (Case Insensitive)</option>
+                                <option value="equals">Equals Exact (Case Insensitive)</option>
+                                <option value="regex">Regular Expression</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pattern value</label>
+                        <input type="text" placeholder="e.g. Slack or YNAB" class="field px-3 text-[13px] w-full" id="rule-pattern-input">
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Assign to Project</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-project-select">
+                                <!-- Seeded dynamically -->
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <button class="button-primary shrink-0 mt-2" id="rule-btn-save">
+                        <i class="ph-bold ph-plus"></i> Add Rule
+                    </button>
+                </div>
+
+                <!-- Right Column: Active Rules List -->
+                <div class="flex-1 flex flex-col gap-2.5 overflow-hidden">
+                    <h4 class="section-label shrink-0">Active Rules</h4>
+
+                    <div class="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 app-scrollbar-safe" id="rules-list-container">
+                        <!-- Seeded by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Settings -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="settings-modal">
+        <div class="modal-panel modal-panel--scroll w-[600px] max-h-[88vh] relative flex flex-col gap-5">
+            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
+                <h3 class="text-base font-bold text-white flex items-center gap-1.5">
+                    <i class="ph ph-sliders text-blue-400"></i> Preferences & Settings
+                </h3>
+                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="settings-modal-btn-close">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+
+            <div id="settings-modal-body" class="modal-scroll-content settings-modal-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
+                <!-- Appearance -->
+                <div class="surface-panel p-3.5 flex items-center justify-between gap-4">
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs font-bold text-gray-300 uppercase tracking-wide" for="settings-theme-select">Theme</label>
+                        <span class="text-[11px] text-gray-400">Choose Dark, Light, or Neutral.</span>
+                    </div>
+                    <div class="custom-select-wrapper w-[150px] shrink-0">
+                        <select class="custom-select" id="settings-theme-select">
+                            <option value="graphite">Dark</option>
+                            <option value="light">Light</option>
+                            <option value="reference">Neutral</option>
+                        </select>
+                        <i class="ph ph-caret-down custom-select-icon"></i>
+                    </div>
+                </div>
+
+                <!-- Context-switching note -->
+                <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3.5 flex gap-3">
+                    <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
+                    <div class="flex flex-col gap-1 text-[11px]">
+                        <span class="font-bold text-blue-300">How Oriel handles short switches</span>
+                        <p class="text-gray-300 leading-relaxed">
+                            Oriel records short app switches so your activity stays accurate and auditable. In dense breakdowns, very brief foreground changes are hidden after 60 seconds to reduce visual noise while keeping logged time aligned with recorded activity.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Optional branded website icons -->
+                <div class="surface-panel p-3.5 flex flex-col gap-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs font-bold text-gray-300 uppercase tracking-wide" for="settings-logo-dev-icons">Branded Website Icons</label>
+                            <span class="text-[11px] text-gray-400 leading-normal">When enabled, Oriel sends website domains to Logo.dev to retrieve brand icons and caches them locally. Recorded activity remains stored on this Mac.</span>
+                        </div>
+                        <label class="oriel-toggle mt-1" for="settings-logo-dev-icons">
+                            <input type="checkbox" id="settings-logo-dev-icons" class="oriel-toggle-input" aria-label="Fetch branded website icons using Logo.dev">
+                            <span class="oriel-toggle-track" aria-hidden="true"></span>
+                        </label>
+                    </div>
+
+                    <label class="ai-field ai-field--key">
+                        <span>Logo.dev API Key</span>
+                        <span class="text-[11px] text-gray-400 leading-normal">Use your Logo.dev <strong>publishable</strong> key (`pk_...`).</span>
+                        <div class="ai-key-input-shell">
+                            <input type="password" class="field ai-settings-input" id="settings-logo-dev-api-key-input" aria-label="Logo.dev API key" placeholder="Paste publishable key" autocomplete="off">
+                            <button type="button" class="icon-button ai-key-edit-button hidden" id="settings-logo-dev-key-edit-button" title="Replace saved Logo.dev API key" aria-label="Replace saved Logo.dev API key">
+                                <i class="ph ph-pencil-simple"></i>
+                            </button>
+                        </div>
+                    </label>
+                    <div class="ai-key-actions">
+                        <button type="button" class="button-primary ai-key-save-button" id="settings-logo-dev-key-save-button">
+                            <i class="ph ph-check"></i>
+                            <span id="settings-logo-dev-key-save-label">Save key</span>
+                        </button>
+                        <button type="button" class="button-secondary ai-key-cancel-button hidden" id="settings-logo-dev-key-cancel-button">
+                            Cancel
+                        </button>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <button type="button" class="button-secondary ai-key-remove-button hidden" id="settings-logo-dev-key-delete-button" title="Remove saved Logo.dev API key" aria-label="Remove saved Logo.dev API key">
+                            <i class="ph ph-trash"></i>
+                            Remove saved key
+                        </button>
+                        <span class="ai-settings-feedback" id="settings-logo-dev-key-feedback" role="status" aria-live="polite"></span>
+                    </div>
+                </div>
+
+                <!-- Tracking Exclusions -->
+                <div class="flex flex-col gap-3 bg-[#141416]/50 p-3.5 rounded-xl border border-[#2d2f34]">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-sm font-semibold text-white">Tracking Exclusions</span>
+                        <span class="text-[10px] text-gray-400">Do not record matching app, window title, or URL activity. Existing history can be cleaned when adding a rule.</span>
+                    </div>
+                    <div class="grid grid-cols-[1fr_1fr] gap-2">
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="settings-exclusion-field">
+                                <option value="app">Application</option>
+                                <option value="title">Window Title</option>
+                                <option value="url">URL</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="settings-exclusion-match">
+                                <option value="contains">Contains</option>
+                                <option value="equals">Equals</option>
+                                <option value="regex">Regular Expression</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="text" placeholder="e.g. Passwords or example.com/private" class="field flex-1 px-3 text-[12px]" id="settings-exclusion-pattern">
+                        <button type="button" class="button-primary shrink-0" id="settings-exclusion-add">
+                            Add
+                        </button>
+                    </div>
+                    <div class="surface-panel px-3 py-2 flex items-center justify-between gap-3">
+                        <div class="flex flex-col gap-0.5">
+                            <label class="text-[11px] font-semibold text-gray-300" for="settings-exclusion-apply-history">Clean existing history when adding</label>
+                            <span class="text-[10px] text-gray-500">Runs once after Add succeeds.</span>
+                        </div>
+                        <label class="oriel-toggle oriel-toggle--sm" for="settings-exclusion-apply-history">
+                            <input type="checkbox" id="settings-exclusion-apply-history" class="oriel-toggle-input" aria-label="Clean existing history when adding exclusion">
+                            <span class="oriel-toggle-track" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    <div id="settings-exclusion-status" class="hidden text-[10px] text-gray-400" role="status" aria-live="polite"></div>
+                    <div class="flex flex-col gap-2 max-h-[126px] overflow-y-auto app-scrollbar-safe" id="settings-exclusions-list">
+                        <div class="text-[11px] text-gray-500 italic py-2 text-center">No tracking exclusions configured.</div>
+                    </div>
+                </div>
+
+                <!-- Activity title cleanup -->
+                <div class="surface-panel p-3.5 flex flex-col gap-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex flex-col gap-1">
+                            <span class="text-sm font-semibold text-white">Activity Title Cleanup</span>
+                            <span class="text-[11px] text-gray-400 leading-normal">Remove browser and app status text from displayed activity titles. Raw recorded activity stays unchanged.</span>
+                        </div>
+                        <button type="button" class="button-secondary shrink-0" id="settings-title-cleanup-reset-defaults">
+                            Reset Defaults
+                        </button>
+                    </div>
+                    <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3 flex gap-3">
+                        <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
+                        <div class="flex flex-col gap-1 text-[11px] leading-relaxed">
+                            <span class="font-bold text-blue-300">How title cleanup rules work</span>
+                            <p class="text-gray-300">
+                                Rules use JavaScript regular expressions, applied globally and case-insensitively. Matches are removed from display labels only; invalid regex rules are not saved or applied.
+                            </p>
+                            <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200 underline underline-offset-2">
+                                MDN JavaScript regular expressions guide
+                            </a>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-[1fr_1.5fr] gap-2">
+                        <input type="text" placeholder="Rule name" class="field px-3 text-[12px]" id="settings-title-cleanup-name">
+                        <input type="text" placeholder="Regex pattern to remove" class="field px-3 text-[12px]" id="settings-title-cleanup-pattern">
+                    </div>
+                    <div class="grid grid-cols-[1fr_1fr_auto] gap-2">
+                        <input type="text" placeholder="App contains (optional)" class="field px-3 text-[12px]" id="settings-title-cleanup-app">
+                        <input type="text" placeholder="URL contains (optional)" class="field px-3 text-[12px]" id="settings-title-cleanup-url">
+                        <button type="button" class="button-primary shrink-0" id="settings-title-cleanup-add">
+                            Add Rule
+                        </button>
+                    </div>
+                    <div id="settings-title-cleanup-status" class="hidden text-[10px] text-gray-400" role="status" aria-live="polite"></div>
+                    <div class="flex flex-col gap-2 max-h-[220px] overflow-y-auto app-scrollbar-safe" id="settings-title-cleanup-list">
+                        <div class="text-[11px] text-gray-500 italic py-2 text-center">No title cleanup rules configured.</div>
+                    </div>
+                </div>
+
+                <!-- Danger Zone -->
+                <div class="border-t border-[#2d2f34] pt-4 mt-1 flex flex-col gap-3">
+                    <h4 class="text-xs font-bold text-red-500 uppercase tracking-wide">Danger Zone</h4>
+                    <div class="bg-red-950/10 border border-red-900/20 rounded-xl p-3.5 flex justify-between items-center gap-4">
+                        <div class="flex flex-col gap-0.5">
+                            <span class="text-xs font-bold text-red-300">Purge All Data</span>
+                            <p class="text-[10px] text-gray-400 leading-normal">
+                                Permanently wipe all activities, logged time entries, rules, exclusions, and custom projects.
+                            </p>
+                        </div>
+                        <button class="bg-red-600/20 hover:bg-red-600 border border-red-500/30 hover:border-red-500 text-red-200 hover:text-white text-[11px] font-semibold px-3 py-1.5 rounded-lg transition shrink-0 focus:outline-none" id="settings-btn-purge">
+                            Purge All Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Confirmation modal -->
+    <div class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center hidden" id="confirm-modal">
+        <div class="modal-panel w-[380px] relative flex flex-col gap-4">
+            <div class="flex items-center gap-2.5 text-white font-bold text-base border-b border-[#2d2f34] pb-3" id="confirm-modal-title">Confirm Action</div>
+            <p class="text-xs text-gray-300 leading-relaxed py-1" id="confirm-modal-message">Are you sure you want to perform this action?</p>
+            <div class="flex justify-end gap-2.5 mt-3">
+                <button class="button-secondary" id="confirm-modal-btn-cancel">Cancel</button>
+                <button class="button-primary" id="confirm-modal-btn-confirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Project Details Viewer -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="project-details-modal">
+        <div class="modal-panel modal-panel--scroll w-[650px] relative flex flex-col gap-4">
+            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="w-4 h-4 rounded-full shadow-md" id="proj-details-color"></span>
+                    <h3 class="text-base font-bold text-white flex items-center gap-1.5" id="proj-details-title">
+                        Project Name
+                    </h3>
+                </div>
+                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="proj-details-btn-close">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+
+            <div class="modal-scroll-content app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
+                <!-- Statistics Quick Row -->
+                <div class="grid grid-cols-3 gap-3 bg-[#141416]/50 border border-[#2d2f34] rounded-xl p-4 text-xs">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Time Logged</span>
+                        <span class="font-bold text-white text-base" id="proj-details-total-duration">0h 0m</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Billing Type</span>
+                        <span class="font-bold text-white text-base" id="proj-details-billing-type">Hourly</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Value / Earnings</span>
+                        <span class="font-bold text-emerald-400 text-base" id="proj-details-total-earnings">$0.00</span>
+                    </div>
+                </div>
+
+                <!-- Project Tasks -->
+                <div class="flex flex-col gap-2 shrink-0">
+                    <div class="flex items-center justify-between gap-3">
+                        <h4 class="section-label shrink-0">Tasks</h4>
+                        <div class="flex items-center gap-2 min-w-0 flex-1 justify-end">
+                            <input type="text" placeholder="New task" class="field px-3 text-xs max-w-[220px]" id="proj-details-task-name">
+                            <button type="button" class="button-secondary shrink-0" id="proj-details-task-add">
+                                <i class="ph ph-plus"></i> Add
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-2 max-h-[130px] overflow-y-auto pr-1 app-scrollbar-safe" id="proj-details-tasks-list"></div>
+                </div>
+
+                <!-- Manual Time Logging Collapsible Form -->
+                <div class="flex flex-col gap-2 shrink-0">
+                    <button class="button-primary w-full flex items-center justify-between px-4" id="proj-details-toggle-manual-form">
+                        <span class="flex items-center gap-1.5">
+                            <i class="ph ph-plus-circle text-[14px]"></i>
+                            Log Manual Time / Import History
+                        </span>
+                        <i class="ph ph-caret-down transition-transform duration-200" id="proj-details-form-caret"></i>
+                    </button>
+
+                    <div class="hidden flex flex-col gap-4 bg-[#141416]/50 border border-[#2d2f34] rounded-xl p-4 transition-all duration-200 animate-[fadeIn_0.2s_ease-out]" id="proj-details-manual-form-container">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Date</label>
+                                <input type="date" class="field px-2.5 text-xs" id="proj-details-manual-date">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Hours Worked</label>
+                                <input type="number" min="0" max="24" placeholder="0" class="field px-2.5 text-xs" id="proj-details-manual-hours">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Minutes Worked</label>
+                                <input type="number" min="0" max="59" placeholder="0" class="field px-2.5 text-xs" id="proj-details-manual-minutes">
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Activity Description / Import Notes</label>
+                            <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field px-3 text-xs" id="proj-details-manual-description">
+                        </div>
+
+                        <div class="flex justify-end gap-2 border-t border-[#2d2f34]/40 pt-3">
+                            <button type="button" class="button-secondary" id="proj-details-manual-cancel">Cancel</button>
+                            <button type="button" class="button-primary" id="proj-details-manual-save">
+                                <i class="ph-bold ph-check"></i> Log Time
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex flex-col gap-2.5 overflow-hidden">
+                    <h4 class="section-label shrink-0">Historical Entries Log</h4>
+
+                    <div class="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 max-h-[300px] app-scrollbar-safe" id="proj-details-entries-list">
+                        <div class="text-center text-gray-500 text-xs py-8 italic">No entries logged to this project yet.</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modular Script Imports -->
+    <script src="/js/data-client.js"></script>
+    <script src="/js/state.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/scroll.js"></script>
+    <script src="/js/timeline.js"></script>
+    <script src="/js/week-view.js"></script>
+    <script src="/js/modals.js"></script>
+    <script src="/js/projects.js"></script>
+    <script src="/js/reporting.js"></script>
+    <script src="/js/ai-sidebar.js"></script>
+    <script src="/js/main.js"></script>
+</body>
+</html>

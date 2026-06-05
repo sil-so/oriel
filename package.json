@@ -1,0 +1,17 @@
+{
+  "name": "oriel-local-tracker",
+  "version": "1.0.0",
+  "description": "Local-first native macOS time tracker with a transitional development server",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "build:assets": "node script/build_frontend_assets.mjs",
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.2.5",
+    "@phosphor-icons/web": "2.1.1",
+    "tailwindcss": "3.4.17"
+  }
+}

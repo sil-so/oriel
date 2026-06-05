@@ -1,0 +1,50 @@
+.DS_Store
+node_modules/
+.build/
+build/
+.worktrees/
+worktrees/
+.agents/
+docs/superpowers/
+docs/design/
+launch/
+logo/
+skills-lock.json
+
+# Local environment and credentials.
+.env
+.env.*
+!.env.example
+*.p12
+*.cer
+*.cert
+*.mobileprovision
+*.provisionprofile
+
+# Runtime data is recreated locally and may contain private activity history.
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+
+# Local distribution and verification artifacts.
+*.dmg
+*.zip
+*.xcarchive
+*screenshot*.png
+*screenshot*.jpg
+*appshot*.png
+*appshot*.jpg
+
+# Local scratch notes, helpers, and generated experiments.
+scratch/
+
+# Local release experiments kept out of the lean public tree until supported.
+script/package_dmg.sh
+script/package_extension.sh
+script/sign_and_notarize.sh
+
+# Browser verification artifacts.
+.playwright-mcp/

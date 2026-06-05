@@ -1,0 +1,1145 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { test } from 'node:test';
+import vm from 'node:vm';
+
+function loadAiSidebarContext() {
+  const context = {
+    window: {},
+    state: {
+      currentDate: new Date(2026, 4, 25),
+      projects: [
+        {
+          id: 'project-client',
+          name: 'Client',
+          billable: true,
+          tasks: [{ id: 'task-build', name: 'Build', archived: false }]
+        },
+        { id: 'project-admin', name: 'Admin', billable: false, tasks: [] }
+      ],
+      timelineActivities: [
+        {
+          start: new Date(2026, 4, 25, 9, 0).getTime(),
+          end: new Date(2026, 4, 25, 9, 30).getTime(),
+          app: 'Brave Browser',
+          title: 'Client Portal - Brave Browser',
+          url: 'https://client.example.com/projects/secret?token=abc123',
+          bundleId: 'com.brave.Browser',
+          appPath: '/Applications/Brave Browser.app'
+        },
+        {
+          start: new Date(2026, 4, 25, 10, 0).getTime(),
+          end: new Date(2026, 4, 25, 10, 20).getTime(),
+          app: 'Xcode',
+          title: 'OrielApp.swift',
+          url: '',
+          bundleId: 'com.apple.dt.Xcode',
+          appPath: '/Applications/Xcode.app'
+        }
+      ],
+      activities: [],
+      timeEntries: [
+        {
+          id: 'entry-1',
+          start: new Date(2026, 4, 25, 10, 0).getTime(),
+          end: new Date(2026, 4, 25, 10, 15).getTime(),
+          projectId: 'project-client',
+          taskId: 'task-build',
+          description: 'Implementation',
+          billable: true,
+          activities: [{ duration: 15 * 60 * 1000 }]
+        }
+      ],
+      settings: {
+        aiProvider: '',
+        aiOpenAIModel: 'gpt-5.2',
+        aiGoogleModel: 'gemini-3.5-flash',
+        aiAnthropicModel: 'claude-sonnet-4-20250514'
+      }
+    },
+    localStorage: {
+      values: new Map(),
+      getItem(key) {
+        return this.values.get(key) || null;
+      },
+      setItem(key, value) {
+        this.values.set(key, String(value));
+      }
+    },
+    getFormattedDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    },
+    cleanTitle(title) {
+      return String(title || '').replace(/\s+-\s+Brave Browser$/, '');
+    },
+    setTimeout,
+    clearTimeout,
+    console: {
+      log: console.log,
+      warn: console.warn,
+      error: console.error
+    },
+    URL
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/ai-sidebar.js', 'utf8'), context);
+  return context;
+}
+
+function fakeElement(options = {}) {
+  const classes = new Set();
+  const attributes = {};
+  if (options.className) {
+    String(options.className).split(/\s+/).filter(Boolean).forEach(name => classes.add(name));
+  }
+  const listeners = new Map();
+  const element = {
+    id: options.id || '',
+    dataset: { ...(options.dataset || {}) },
+    value: options.value || '',
+    placeholder: options.placeholder || '',
+    disabled: false,
+    focused: false,
+    _innerHTML: '',
+    classList: {
+      add(value) {
+        classes.add(value);
+      },
+      remove(value) {
+        classes.delete(value);
+      },
+      toggle(value, force) {
+        if (force === undefined ? !classes.has(value) : force) {
+          classes.add(value);
+          return true;
+        }
+        classes.delete(value);
+        return false;
+      },
+      contains(value) {
+        return classes.has(value);
+      }
+    },
+    textContent: '',
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    click(event = {}) {
+      return listeners.get('click')?.({
+        target: element,
+        stopPropagation() {},
+        preventDefault() {},
+        ...event
+      });
+    },
+    focus() {
+      element.focused = true;
+    },
+    setAttribute(name, value) {
+      attributes[name] = String(value);
+    },
+    removeAttribute(name) {
+      delete attributes[name];
+    },
+    getAttribute(name) {
+      return attributes[name] || null;
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector !== '[data-ai-model]') return [];
+      return Array.from(element._innerHTML.matchAll(/data-ai-model="([^"]+)"/g), match => (
+        fakeElement({ dataset: { aiModel: match[1] } })
+      ));
+    },
+    closest() {
+      return null;
+    }
+  };
+  Object.defineProperty(element, 'innerHTML', {
+    get() {
+      return element._innerHTML;
+    },
+    set(value) {
+      element._innerHTML = String(value);
+    }
+  });
+  return element;
+}
+
+function createAiSettingsDom({
+  keyStatus = { openai: true, google: false, anthropic: false },
+  modelListResult = null,
+  confirmResult = true,
+  setTimeoutImpl = setTimeout,
+  clearTimeoutImpl = clearTimeout
+} = {}) {
+  const context = loadAiSidebarContext();
+  context.state.settings.aiProvider = 'openai';
+  context.setTimeout = setTimeoutImpl;
+  context.clearTimeout = clearTimeoutImpl;
+
+  const elements = {};
+  const make = (id, options = {}) => {
+    elements[id] = fakeElement({ id, ...options });
+    return elements[id];
+  };
+
+  [
+    'sidebar-tab-work-times',
+    'sidebar-tab-ai',
+    'work-times-panel',
+    'ai-sidebar-panel',
+    'ai-settings-panel',
+    'ai-settings-button',
+    'ai-settings-close-button',
+    'ai-new-chat-button',
+    'ai-day-label',
+    'ai-chat-messages',
+    'ai-settings-key-status',
+    'ai-settings-feedback',
+    'ai-api-key-input',
+    'ai-key-edit-button',
+    'ai-key-save-button',
+    'ai-key-save-label',
+    'ai-key-cancel-button',
+    'ai-key-delete-button',
+    'ai-model-picker-button',
+    'ai-model-picker-label',
+    'ai-model-picker-menu',
+    'ai-model-search-input',
+    'ai-model-option-list',
+    'ai-model-refresh-button',
+    'ai-model-refresh-label',
+    'ai-model-refresh-confirm',
+    'ai-model-refresh-confirm-text',
+    'ai-model-refresh-confirm-button',
+    'ai-model-refresh-cancel-button',
+    'ai-model-refresh-meta',
+    'ai-loading-spinner',
+    'ai-chat-input',
+    'ai-send-button',
+    'ai-status'
+  ].forEach(id => make(id));
+
+  elements['ai-model-picker-menu'].classList.add('hidden');
+  elements['ai-model-refresh-confirm'].classList.add('hidden');
+  elements['ai-loading-spinner'].classList.add('hidden');
+  const saveLabel = elements['ai-key-save-label'];
+  elements['ai-key-save-button'].querySelector = selector => (selector === 'span' ? saveLabel : null);
+  const refreshIcon = fakeElement();
+  elements['ai-model-refresh-button'].querySelector = selector => {
+    if (selector === 'i') return refreshIcon;
+    if (selector === 'span') return elements['ai-model-refresh-label'];
+    return null;
+  };
+  elements['ai-model-refresh-button']._icon = refreshIcon;
+  const sendLabel = fakeElement();
+  elements['ai-send-button'].querySelector = selector => (selector === 'span' ? sendLabel : null);
+
+  const providerCards = {};
+  ['openai', 'google', 'anthropic'].forEach(provider => {
+    providerCards[provider] = fakeElement({ dataset: { aiProvider: provider } });
+    make(`ai-provider-${provider}-key-state`);
+  });
+
+  const requests = [];
+  context.confirm = () => confirmResult;
+  context.document = {
+    getElementById(id) {
+      return elements[id] || null;
+    },
+    querySelector(selector) {
+      const providerMatch = selector.match(/^\[data-ai-provider="([^"]+)"\]$/);
+      if (providerMatch) return providerCards[providerMatch[1]] || null;
+      if (selector === '.ai-composer') return fakeElement();
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-ai-provider]') return Object.values(providerCards);
+      if (selector === '[data-ai-prompt]') return [];
+      return [];
+    },
+    addEventListener() {}
+  };
+  context.OrielData = {
+    isNative: true,
+    async request(operation, payload) {
+      requests.push({ operation, payload });
+      if (operation === 'ai.keys.status') return keyStatus;
+      if (operation === 'ai.settings.update') {
+        Object.assign(context.state.settings, payload);
+        return context.state.settings;
+      }
+      if (operation === 'ai.models.list') {
+        return typeof modelListResult === 'function' ? modelListResult(payload) : modelListResult;
+      }
+      if (operation === 'ai.keys.delete') {
+        keyStatus[payload.provider] = false;
+        return { ...keyStatus };
+      }
+      if (operation === 'ai.keys.save') {
+        keyStatus[payload.provider] = true;
+        return { ...keyStatus };
+      }
+      return {};
+    }
+  };
+
+  return { context, elements, providerCards, requests };
+}
+
+test('AI chat state is scoped by day and resets to one fresh chat', () => {
+  const context = loadAiSidebarContext();
+  const chats = context.createAiChatState({ maxPromptMessages: 4 });
+
+  const first = chats.ensureChatForDate('2026-05-25');
+  chats.appendMessage('2026-05-25', first.id, { role: 'user', content: 'What did I do?' });
+  chats.appendMessage('2026-05-25', first.id, { role: 'assistant', content: 'You worked on Client.' });
+
+  const secondDay = chats.ensureChatForDate('2026-05-26');
+  assert.notEqual(secondDay.id, first.id);
+  assert.equal(chats.getChatsForDate('2026-05-26').length, 1);
+  assert.equal(chats.getChatsForDate('2026-05-25')[0].messages.length, 2);
+
+  const fresh = chats.resetChatForDate('2026-05-25');
+  assert.notEqual(fresh.id, first.id);
+  assert.equal(chats.getActiveChat('2026-05-25').id, fresh.id);
+  assert.equal(chats.getChatsForDate('2026-05-25').length, 1);
+  assert.equal(chats.getChatsForDate('2026-05-25')[0].messages.length, 0);
+  assert.equal(chats.getChatsForDate('2026-05-26').length, 1);
+
+  chats.appendMessage('2026-05-25', fresh.id, { role: 'user', content: 'Start over' });
+  const aliasFresh = chats.startNewChat('2026-05-25');
+  assert.notEqual(aliasFresh.id, fresh.id);
+  assert.equal(chats.getChatsForDate('2026-05-25').length, 1);
+  assert.equal(chats.getChatsForDate('2026-05-25')[0].messages.length, 0);
+});
+
+test('AI chat payload only sends bounded recent messages', () => {
+  const context = loadAiSidebarContext();
+  const chats = context.createAiChatState({ maxPromptMessages: 3 });
+  const chat = chats.ensureChatForDate('2026-05-25');
+
+  ['one', 'two', 'three', 'four', 'five'].forEach(content => {
+    chats.appendMessage('2026-05-25', chat.id, { role: 'user', content });
+  });
+
+  assert.deepEqual(
+    Array.from(chats.getPromptMessages('2026-05-25', chat.id).map(message => message.content)),
+    ['three', 'four', 'five']
+  );
+  assert.equal(chats.getChatsForDate('2026-05-25')[0].messages.length, 5);
+});
+
+test('AI day context strips raw URLs, query strings, bundle IDs, and local paths', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.equal(dayContext.date, '2026-05-25');
+  assert.equal(dayContext.activities[0].domain, 'client.example.com');
+  assert.equal(dayContext.activities[0].title, 'Client Portal');
+  assert.equal(dayContext.loggedEntries[0].projectName, 'Client');
+  assert.equal(dayContext.loggedEntries[0].taskName, 'Build');
+
+  const serialized = JSON.stringify(dayContext);
+  assert.doesNotMatch(serialized, /token=abc123|\/projects\/secret|appPath|bundleId|Applications/);
+});
+
+test('AI day context totals use the full day even when detail arrays are bounded', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 0, 0).getTime();
+  context.state.timelineActivities = Array.from({ length: 70 }, (_, index) => ({
+    start: base + index * 2 * 60 * 1000,
+    end: base + index * 2 * 60 * 1000 + 60 * 1000,
+    app: 'Codex',
+    title: `Codex work ${index}`,
+    url: ''
+  }));
+  context.state.timeEntries = [];
+
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.equal(dayContext.totals.recordedMs, 70 * 60 * 1000);
+  assert.equal(dayContext.totals.unloggedMs, 70 * 60 * 1000);
+  assert.equal(dayContext.activities.length, 60);
+  assert.equal(dayContext.metadata.activityCount, 70);
+  assert.equal(dayContext.metadata.activitiesOmitted, 10);
+  assert.equal(dayContext.metadata.unloggedRangesOmitted, 10);
+});
+
+test('AI day context unlogged total includes short fragments excluded from detail ranges', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 0, 0).getTime();
+  context.state.timelineActivities = [
+    {
+      start: base,
+      end: base + 30 * 1000,
+      app: 'Codex',
+      title: 'Codex',
+      url: ''
+    },
+    {
+      start: base + 60 * 1000,
+      end: base + 105 * 1000,
+      app: 'Oriel',
+      title: 'Oriel',
+      url: ''
+    }
+  ];
+  context.state.timeEntries = [];
+
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.equal(dayContext.totals.recordedMs, 75 * 1000);
+  assert.equal(dayContext.totals.unloggedMs, 75 * 1000);
+  assert.equal(dayContext.totals.actionableUnloggedMs, 0);
+  assert.equal(dayContext.totals.shortUnloggedMs, 75 * 1000);
+  assert.equal(dayContext.unloggedRanges.length, 0);
+  assert.equal(dayContext.metadata.unloggedFragmentCount, 2);
+  assert.equal(dayContext.metadata.actionableUnloggedRangeCount, 0);
+  assert.equal(dayContext.metadata.unloggedRangeDetailMinimumMs, 60 * 1000);
+});
+
+test('AI day context includes short auto-rule entries for logged ranges', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 9, 0).getTime();
+  context.state.timelineActivities = [{
+    start: base,
+    end: base + 45 * 1000,
+    app: 'Codex',
+    title: 'Codex',
+    url: ''
+  }];
+  context.state.timeEntries = [{
+    id: 'entry-hidden-auto',
+    start: base,
+    end: base + 45 * 1000,
+    projectId: 'project-client',
+    createdBy: 'auto-rule',
+    autoRuleId: 'rule-1',
+    billable: false,
+    activities: [{ assignedDurationMs: 45 * 1000, autoAssigned: true }]
+  }];
+
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.equal(dayContext.totals.loggedMs, 45 * 1000);
+  assert.equal(dayContext.loggedEntries.length, 1);
+  assert.equal(dayContext.totals.unloggedMs, 0);
+});
+
+test('AI day context exposes sanitized local draft candidates', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 9, 0).getTime();
+  context.state.timelineActivities = [
+    {
+      start: base,
+      end: base + 10 * 60 * 1000,
+      app: 'Codex',
+      title: 'Codex',
+      url: '',
+      bundleId: 'com.openai.codex',
+      appPath: '/Applications/Codex.app'
+    },
+    {
+      start: base + 20 * 60 * 1000,
+      end: base + 24 * 60 * 1000,
+      app: 'Oriel',
+      title: 'Oriel',
+      url: ''
+    },
+    {
+      start: base + 30 * 60 * 1000,
+      end: base + 30 * 60 * 1000 + 30 * 1000,
+      app: 'Music',
+      title: 'Music',
+      url: ''
+    }
+  ];
+  context.state.timeEntries = [{
+    id: 'entry-1',
+    start: base + 3 * 60 * 1000,
+    end: base + 5 * 60 * 1000,
+    projectId: 'project-client',
+    description: 'Already logged',
+    billable: true
+  }];
+
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.equal(dayContext.totals.unloggedMs, (12 * 60 * 1000) + 30 * 1000);
+  assert.equal(dayContext.draftCandidates.length, 3);
+  assert.deepEqual(Array.from(dayContext.draftCandidates, candidate => candidate.durationMs), [
+    3 * 60 * 1000,
+    5 * 60 * 1000,
+    4 * 60 * 1000
+  ]);
+  assert.equal(dayContext.metadata.draftCandidateCount, 3);
+  assert.equal(dayContext.metadata.draftCandidatesIncluded, 3);
+  const serialized = JSON.stringify(dayContext.draftCandidates);
+  assert.doesNotMatch(serialized, /Applications|bundleId|appPath|com\.openai\.codex/);
+});
+
+test('AI local draft candidates exclude obvious media and social distractions', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 9, 0).getTime();
+  context.state.timelineActivities = [
+    {
+      start: base,
+      end: base + 5 * 60 * 1000,
+      app: 'Codex',
+      title: 'Codex',
+      url: ''
+    },
+    {
+      start: base + 6 * 60 * 1000,
+      end: base + 10 * 60 * 1000,
+      app: 'Brave Browser',
+      title: 'Client Portal - Brave Browser',
+      url: 'https://client.example.com/work'
+    },
+    {
+      start: base + 11 * 60 * 1000,
+      end: base + 14 * 60 * 1000,
+      app: 'Music',
+      title: 'Music',
+      url: ''
+    },
+    {
+      start: base + 15 * 60 * 1000,
+      end: base + 18 * 60 * 1000,
+      app: 'Brave Browser',
+      title: 'Maybe we were wrong - YouTube - Brave Browser',
+      url: 'https://www.youtube.com/watch?v=abc123'
+    },
+    {
+      start: base + 19 * 60 * 1000,
+      end: base + 21 * 60 * 1000,
+      app: 'Brave Browser',
+      title: 'Facebook - Brave - Base',
+      url: 'https://www.facebook.com/'
+    }
+  ];
+  context.state.timeEntries = [];
+
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const activitySet = context.buildAiDraftActivitySet('2026-05-25');
+
+  assert.equal(dayContext.totals.unloggedMs, 17 * 60 * 1000);
+  assert.deepEqual(Array.from(dayContext.draftCandidates, candidate => candidate.description), [
+    'Codex',
+    'Client Portal'
+  ]);
+  assert.deepEqual(Array.from(activitySet.activities, activity => context.cleanTitle(activity.title)), [
+    'Codex',
+    'Client Portal'
+  ]);
+});
+
+test('AI draft activity set keeps local snapshots for bulk modal review', () => {
+  const context = loadAiSidebarContext();
+  const base = new Date(2026, 4, 25, 9, 0).getTime();
+  context.state.timelineActivities = [
+    {
+      start: base,
+      end: base + 10 * 60 * 1000,
+      app: 'Codex',
+      title: 'Codex',
+      url: '',
+      bundleId: 'com.openai.codex',
+      appPath: '/Applications/Codex.app'
+    },
+    {
+      start: base + 20 * 60 * 1000,
+      end: base + 24 * 60 * 1000,
+      app: 'Oriel',
+      title: 'Oriel',
+      url: ''
+    }
+  ];
+  context.state.timeEntries = [{
+    id: 'entry-1',
+    start: base + 3 * 60 * 1000,
+    end: base + 5 * 60 * 1000,
+    projectId: 'project-client',
+    description: 'Already logged',
+    billable: true
+  }];
+
+  const activitySet = context.buildAiDraftActivitySet('2026-05-25');
+
+  assert.equal(activitySet.type, 'draftActivitySet');
+  assert.equal(activitySet.activityCount, 3);
+  assert.equal(activitySet.durationMs, 12 * 60 * 1000);
+  assert.deepEqual(Array.from(activitySet.activities, activity => [activity.app, activity.start, activity.end]), [
+    ['Codex', base, base + 3 * 60 * 1000],
+    ['Codex', base + 5 * 60 * 1000, base + 10 * 60 * 1000],
+    ['Oriel', base + 20 * 60 * 1000, base + 24 * 60 * 1000]
+  ]);
+  assert.equal(activitySet.activities[0].appPath, '/Applications/Codex.app');
+  assert.equal(activitySet.activities[0].assignmentSource, 'activity-stream');
+  assert.equal(activitySet.activities[0].assignmentModel, 'activity-stream-summary');
+  assert.equal(activitySet.activities[0].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(activitySet.activities[0].assignmentStart, base);
+  assert.equal(activitySet.activities[0].assignmentEnd, base + 3 * 60 * 1000);
+});
+
+test('AI prompt intent classification gates action suggestions', () => {
+  const context = loadAiSidebarContext();
+
+  const summary = context.classifyAiPromptIntent('What did I do today?');
+  assert.equal(summary.kind, 'summary');
+  assert.equal(summary.allowDraftSuggestions, false);
+  assert.equal(summary.allowUpdateAssignmentSuggestions, false);
+
+  const loggingReview = context.classifyAiPromptIntent('What still needs logging?');
+  assert.equal(loggingReview.kind, 'loggingReview');
+  assert.equal(loggingReview.allowDraftSuggestions, false);
+  assert.equal(loggingReview.allowUpdateAssignmentSuggestions, false);
+
+  const entryDraft = context.classifyAiPromptIntent('Suggest entries');
+  assert.equal(entryDraft.kind, 'entryDraft');
+  assert.equal(entryDraft.allowDraftSuggestions, true);
+  assert.equal(entryDraft.allowUpdateAssignmentSuggestions, false);
+  assert.equal(entryDraft.draftMode, 'activitySet');
+
+  const specificDraft = context.classifyAiPromptIntent('Draft an entry from 09:00 to 09:30');
+  assert.equal(specificDraft.kind, 'entryDraft');
+  assert.equal(specificDraft.allowDraftSuggestions, true);
+  assert.equal(specificDraft.draftMode, 'singleRange');
+});
+
+test('AI response validation keeps safe suggestions and rejects malformed ones', () => {
+  const context = loadAiSidebarContext();
+  const response = context.normalizeAiResponse({
+    text: 'You have unlogged browser work.',
+    suggestions: [
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 9, 0).getTime(),
+        end: new Date(2026, 4, 25, 9, 30).getTime(),
+        description: 'Client portal review',
+        projectId: 'project-client',
+        taskId: 'task-build',
+        billable: true
+      },
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 11, 0).getTime(),
+        end: new Date(2026, 4, 25, 10, 30).getTime(),
+        description: ''
+      },
+      {
+        type: 'updateAssignment',
+        entryId: 'entry-1',
+        projectId: 'project-admin'
+      }
+    ]
+  });
+
+  assert.equal(response.text, 'You have unlogged browser work.');
+  assert.deepEqual(response.suggestions.map(suggestion => suggestion.type), ['draftEntry', 'updateAssignment']);
+});
+
+test('AI response validation drops draft suggestions unless intent explicitly allows them', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const rawResponse = {
+    text: 'You recorded 30m today.',
+    suggestions: [
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 9, 0).getTime(),
+        end: new Date(2026, 4, 25, 9, 30).getTime(),
+        description: 'Work in Codex and Oriel for Oriel Time Tracker',
+        projectId: 'project-client',
+        taskId: 'task-build',
+        billable: true
+      }
+    ]
+  };
+
+  const summary = context.normalizeAiResponse(rawResponse, {
+    intent: context.classifyAiPromptIntent('What did I do today?'),
+    dayContext
+  });
+  assert.equal(summary.suggestions.length, 0);
+
+  const loggingReview = context.normalizeAiResponse(rawResponse, {
+    intent: context.classifyAiPromptIntent('What still needs logging?'),
+    dayContext
+  });
+  assert.equal(loggingReview.suggestions.length, 0);
+
+  const draft = context.normalizeAiResponse(rawResponse, {
+    intent: context.classifyAiPromptIntent('Draft an entry from 09:00 to 09:30'),
+    dayContext
+  });
+  assert.equal(draft.suggestions.length, 1);
+  assert.equal(draft.suggestions[0].description, 'Client Portal');
+});
+
+test('AI response validation uses local activity set for generic entry suggestions', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'You could log the captured unlogged activity.',
+    suggestions: [
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 9, 0).getTime(),
+        end: new Date(2026, 4, 25, 9, 30).getTime(),
+        description: 'Provider-picked single draft',
+        projectId: 'project-client'
+      }
+    ]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext,
+    draftActivitySet
+  });
+
+  assert.equal(response.suggestions.length, 1);
+  assert.equal(response.suggestions[0].type, 'draftActivitySet');
+  assert.equal(response.suggestions[0].activityCount, 2);
+  assert.equal(response.suggestions[0].activities[0].title, 'Client Portal - Brave Browser');
+});
+
+test('AI response validation rejects draft ranges outside selected unlogged time', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'Drafts',
+    suggestions: [
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 10, 0).getTime(),
+        end: new Date(2026, 4, 25, 10, 10).getTime(),
+        description: 'Provider text',
+        projectId: 'project-client',
+        taskId: 'task-build',
+        billable: true
+      },
+      {
+        type: 'draftEntry',
+        start: new Date(2026, 4, 25, 9, 0).getTime(),
+        end: new Date(2026, 4, 25, 9, 0, 30).getTime(),
+        description: 'Too short'
+      }
+    ]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext
+  });
+
+  assert.equal(response.suggestions.length, 0);
+});
+
+test('AI suggestion labels include draft purpose and fallback context', () => {
+  const context = loadAiSidebarContext();
+  const start = new Date(2026, 4, 25, 9, 0).getTime();
+  const end = new Date(2026, 4, 25, 9, 30).getTime();
+
+  const describedDraft = context.describeAiSuggestion({
+    type: 'draftEntry',
+    start,
+    end,
+    description: 'Client portal review',
+    projectId: 'project-client',
+    taskId: 'task-build'
+  });
+  assert.equal(describedDraft.title, 'Draft: Client portal review, 09:00-09:30');
+  assert.equal(describedDraft.detail, 'Client / Build');
+
+  const describedAppFallback = context.describeAiSuggestion({
+    type: 'draftEntry',
+    start,
+    end
+  });
+  assert.equal(describedAppFallback.title, 'Draft: Brave Browser, 09:00-09:30');
+  assert.equal(describedAppFallback.detail, '');
+
+  const describedPlainFallback = context.describeAiSuggestion({
+    type: 'draftEntry',
+    start: new Date(2026, 4, 25, 13, 0).getTime(),
+    end: new Date(2026, 4, 25, 13, 30).getTime()
+  });
+  assert.equal(describedPlainFallback.title, 'Draft entry, 13:00-13:30');
+  assert.equal(describedPlainFallback.detail, '');
+
+  const describedSet = context.describeAiSuggestion({
+    type: 'draftActivitySet',
+    activityCount: 3,
+    duration: '12m'
+  });
+  assert.equal(describedSet.title, 'Review 3 proposed activities');
+  assert.equal(describedSet.detail, '12m captured activity');
+});
+
+test('AI draft activity set opens the bulk review modal with proposed activities', () => {
+  const context = loadAiSidebarContext();
+  const start = new Date(2026, 4, 25, 9, 0).getTime();
+  const activities = [
+    {
+      start,
+      end: start + 5 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      app: 'Codex',
+      title: 'Codex',
+      assignmentSource: 'activity-stream'
+    },
+    {
+      start: start + 10 * 60 * 1000,
+      end: start + 15 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      app: 'Oriel',
+      title: 'Oriel',
+      assignmentSource: 'activity-stream'
+    }
+  ];
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  context.applyAiSuggestion({
+    type: 'draftActivitySet',
+    activities
+  });
+
+  assert.ok(modalArgs);
+  assert.equal(modalArgs[0], activities[0].start);
+  assert.equal(modalArgs[1], activities[1].end);
+  assert.equal(modalArgs[5], true);
+  assert.deepEqual(Array.from(modalArgs[6], activity => [activity.app, activity.start, activity.end]), [
+    ['Codex', activities[0].start, activities[0].end],
+    ['Oriel', activities[1].start, activities[1].end]
+  ]);
+});
+
+test('Ask AI markup uses a settings panel and explicit loading affordance', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
+  const aiPanelBlock = styles.match(/\.sidebar-panel--ai\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+  const settingsPanelBlock = styles.match(/\.ai-settings-panel\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+
+  assert.match(markup, /id="ai-settings-button"/);
+  assert.match(markup, /id="ai-settings-panel"/);
+  assert.match(markup, /id="ai-settings-close-button"/);
+  assert.match(markup, /id="ai-loading-spinner"/);
+  assert.match(markup, /aria-busy="false"/);
+  assert.match(styles, /\.ai-settings-panel/);
+  assert.match(aiPanelBlock, /position:\s*relative/);
+  assert.match(settingsPanelBlock, /position:\s*absolute/);
+  assert.match(settingsPanelBlock, /inset:\s*[^;]+;/);
+  assert.match(settingsPanelBlock, /overflow-y:\s*auto/);
+  assert.match(settingsPanelBlock, /background:\s*var\(--surface-panel\)/);
+  assert.match(settingsPanelBlock, /border-radius:\s*0/);
+  assert.match(settingsPanelBlock, /z-index:/);
+  assert.match(styles, /\.ai-chat-input[\s\S]*padding:/);
+  assert.match(styles, /@keyframes ai-spin/);
+  assert.match(script, /setAiLoadingState/);
+  assert.match(script, /ai-settings-close-button[\s\S]*setAiSettingsOpen\(false\)/);
+});
+
+test('Ask AI UI keeps provider status in settings and exposes prompt chips', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
+  const promptChipMatches = markup.match(/class="ai-prompt-chip"/g) || [];
+  const tabGroupBlock = styles.match(/\.sidebar-tab-group\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+  const composerBlock = styles.match(/\.ai-composer\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+
+  assert.doesNotMatch(markup, /id="ai-key-status"/);
+  assert.doesNotMatch(markup, /Google AI/);
+  assert.doesNotMatch(markup, /Model refresh only runs when you ask/);
+  assert.doesNotMatch(script, /Curated models are available offline/);
+  assert.doesNotMatch(script, /Google AI/);
+  assert.match(markup, /id="ai-settings-key-status"/);
+  assert.match(markup, /id="ai-settings-feedback"/);
+  assert.match(markup, /Keys stay in macOS Keychain\./);
+  assert.match(markup, /data-ai-provider="openai"[\s\S]*OpenAI/);
+  assert.match(markup, /data-ai-provider="google"[\s\S]*Gemini/);
+  assert.match(markup, /data-ai-provider="anthropic"[\s\S]*Claude/);
+  assert.match(markup, /id="ai-model-picker-button"/);
+  assert.match(markup, /id="ai-model-search-input"/);
+  assert.match(markup, /id="ai-model-refresh-button"/);
+  assert.match(markup, /id="ai-model-refresh-label"/);
+  assert.match(markup, /id="ai-model-refresh-confirm"/);
+  assert.match(markup, /id="ai-model-refresh-confirm-button"/);
+  assert.match(markup, /id="ai-key-edit-button"/);
+  assert.match(markup, /class="button-secondary ai-key-cancel-button hidden" id="ai-key-cancel-button"/);
+  assert.match(styles, /\.ai-model-picker-menu\.hidden\s*\{[\s\S]*display:\s*none/);
+  assert.match(styles, /\.ai-model-refresh-confirm\.hidden\s*\{[\s\S]*display:\s*none/);
+  assert.match(styles, /\.ai-model-refresh-button\.is-loading i[\s\S]*animation:\s*ai-spin/);
+  assert.match(markup, /class="ai-prompt-chip"[\s\S]*data-ai-prompt="What did I do today\?"/);
+  assert.match(markup, /class="ai-prompt-chip"[\s\S]*data-ai-prompt="Suggest entries"/);
+  assert.doesNotMatch(markup, /data-ai-prompt="What still needs logging\?"/);
+  assert.doesNotMatch(markup, /data-ai-prompt="Show project totals"/);
+  assert.equal(promptChipMatches.length, 2);
+  assert.doesNotMatch(markup, /id="ai-chat-select"/);
+  assert.doesNotMatch(markup, /id="ai-provider-select"/);
+  assert.doesNotMatch(markup, /ai-day-summary/);
+  assert.doesNotMatch(markup, /ai-day-label/);
+  assert.doesNotMatch(markup, /Selected day/);
+  assert.doesNotMatch(styles, /\.ai-day-summary/);
+  assert.doesNotMatch(styles, /\.ai-day-value/);
+  assert.match(markup, /id="ai-new-chat-button"[\s\S]*<span>New<\/span>/);
+  assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*justify-content:\s*space-between/);
+  assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*width:\s*100%/);
+  assert.doesNotMatch(tabGroupBlock, /border:/);
+  assert.doesNotMatch(tabGroupBlock, /background:/);
+  assert.doesNotMatch(tabGroupBlock, /padding:/);
+  assert.doesNotMatch(composerBlock, /border-top:/);
+  assert.match(markup, /id="ai-status"><\/span>/);
+  assert.match(markup, /class="ai-chat-input-shell"/);
+  assert.match(styles, /\.ai-chat-input[\s\S]*resize:\s*none/);
+  assert.match(styles, /\.ai-chat-input-shell:focus-within[\s\S]*box-shadow:/);
+  assert.match(styles, /\.ai-settings-button i[\s\S]*font-size:/);
+  assert.match(script, /addEventListener\('click', \(\) => sendAiMessage\(\)\)/);
+  assert.match(script, /sendAiMessage\(button\.dataset\.aiPrompt/);
+  assert.doesNotMatch(script, /renderChatPicker/);
+  assert.doesNotMatch(script, /ai-chat-select/);
+  assert.match(script, /const intent = classifyAiPromptIntent\(content\)/);
+  assert.match(script, /normalizeAiResponse\(response, \{ intent, dayContext, draftActivitySet \}\)/);
+});
+
+test('AI provider selection auto-selects exactly one configured provider', async () => {
+  const context = loadAiSidebarContext();
+  const updates = [];
+  context.OrielData = {
+    isNative: true,
+    async request(operation, payload) {
+      updates.push({ operation, payload });
+      if (operation === 'ai.settings.update') {
+        Object.assign(context.state.settings, payload);
+        return context.state.settings;
+      }
+      return {};
+    }
+  };
+  context.state.settings.aiProvider = '';
+
+  await context.resolveAiProviderSelection({ openai: false, google: true, anthropic: false });
+
+  assert.equal(context.state.settings.aiProvider, 'google');
+  assert.deepEqual(JSON.parse(JSON.stringify(updates)), [
+    { operation: 'ai.settings.update', payload: { aiProvider: 'google' } }
+  ]);
+
+  updates.length = 0;
+  context.state.settings.aiProvider = '';
+  await context.resolveAiProviderSelection({ openai: true, google: true, anthropic: false });
+
+  assert.equal(context.state.settings.aiProvider, '');
+  assert.deepEqual(JSON.parse(JSON.stringify(updates)), []);
+});
+
+test('AI model refresh is explicit and confirmation gated', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
+  const initBlock = script.match(/async function initAiSidebar\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
+  const refreshBlock = script.match(/async function refreshAiModelsForSelectedProvider\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
+
+  assert.doesNotMatch(initBlock, /ai\.models\.list/);
+  assert.match(markup, /id="ai-model-refresh-confirm-button"[\s\S]*Refresh now/);
+  assert.match(script, /requestAiModelRefreshConfirmation/);
+  assert.doesNotMatch(refreshBlock, /global\.confirm|window\.confirm/);
+  assert.match(refreshBlock, /ai\.models\.list/);
+});
+
+test('AI key controls lock saved keys and require explicit edit or confirmed removal', async () => {
+  const { context, elements, providerCards, requests } = createAiSettingsDom();
+
+  await context.initAiSidebar();
+
+  assert.equal(elements['ai-api-key-input'].disabled, true);
+  assert.equal(elements['ai-api-key-input'].value, '********');
+  assert.equal(elements['ai-key-edit-button'].classList.contains('hidden'), false);
+  assert.equal(elements['ai-key-save-button'].classList.contains('hidden'), true);
+  assert.equal(elements['ai-key-delete-button'].classList.contains('hidden'), false);
+
+  await elements['ai-key-edit-button'].click();
+
+  assert.equal(elements['ai-api-key-input'].disabled, false);
+  assert.equal(elements['ai-api-key-input'].value, '');
+  assert.equal(elements['ai-api-key-input'].focused, true);
+  assert.equal(elements['ai-key-save-label'].textContent, 'Save new key');
+  assert.equal(elements['ai-key-cancel-button'].classList.contains('hidden'), false);
+  assert.equal(elements['ai-key-delete-button'].classList.contains('hidden'), true);
+
+  await elements['ai-key-cancel-button'].click();
+
+  assert.equal(elements['ai-api-key-input'].disabled, true);
+  assert.equal(elements['ai-api-key-input'].value, '********');
+  assert.equal(elements['ai-key-cancel-button'].classList.contains('hidden'), true);
+
+  await providerCards.google.click();
+
+  assert.equal(context.state.settings.aiProvider, 'google');
+  assert.equal(elements['ai-api-key-input'].disabled, false);
+  assert.equal(elements['ai-api-key-input'].value, '');
+  assert.equal(elements['ai-key-save-label'].textContent, 'Save key');
+  assert.equal(elements['ai-key-edit-button'].classList.contains('hidden'), true);
+
+  const cancelled = createAiSettingsDom({ confirmResult: false });
+  await cancelled.context.initAiSidebar();
+  await cancelled.elements['ai-key-delete-button'].click();
+  assert.equal(cancelled.requests.filter(request => request.operation === 'ai.keys.delete').length, 0);
+});
+
+test('AI provider cards show saved keys with a check icon instead of text', async () => {
+  const { context, elements } = createAiSettingsDom();
+
+  await context.initAiSidebar();
+
+  assert.equal(elements['ai-provider-openai-key-state'].textContent, '');
+  assert.match(elements['ai-provider-openai-key-state'].innerHTML, /ph-check/);
+  assert.equal(elements['ai-provider-openai-key-state'].getAttribute('aria-label'), 'Key saved');
+  assert.doesNotMatch(elements['ai-provider-openai-key-state'].innerHTML, /Key saved/);
+
+  assert.equal(elements['ai-provider-google-key-state'].textContent, 'No key');
+  assert.equal(elements['ai-provider-google-key-state'].innerHTML, '');
+  assert.equal(elements['ai-provider-google-key-state'].getAttribute('aria-label'), null);
+});
+
+test('AI key removal calls Keychain delete only after confirmation', async () => {
+  const { context, elements, requests } = createAiSettingsDom({ confirmResult: true });
+
+  await context.initAiSidebar();
+  await elements['ai-key-delete-button'].click();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.keys.delete').map(request => request.payload))), [
+    { provider: 'openai' }
+  ]);
+  assert.equal(elements['ai-api-key-input'].disabled, false);
+  assert.equal(elements['ai-api-key-input'].value, '');
+  assert.equal(elements['ai-key-delete-button'].classList.contains('hidden'), true);
+});
+
+test('AI model refresh shows loading state and renders fetched models in the open picker', async () => {
+  let resolveModels;
+  const timers = [];
+  const { context, elements, requests } = createAiSettingsDom({
+    modelListResult: () => new Promise(resolve => {
+      resolveModels = resolve;
+    }),
+    setTimeoutImpl: (handler, delay) => {
+      timers.push({ handler, delay });
+      return timers.length;
+    },
+    clearTimeoutImpl: () => {}
+  });
+
+  await context.initAiSidebar();
+  elements['ai-model-picker-menu'].classList.remove('hidden');
+
+  await elements['ai-model-refresh-button'].click();
+
+  assert.equal(requests.filter(request => request.operation === 'ai.models.list').length, 0);
+  assert.equal(elements['ai-model-refresh-confirm'].classList.contains('hidden'), false);
+  assert.match(elements['ai-model-refresh-confirm-text'].textContent, /Refresh OpenAI models now/);
+
+  const refreshPromise = elements['ai-model-refresh-confirm-button'].click();
+  await Promise.resolve();
+
+  assert.equal(requests.filter(request => request.operation === 'ai.models.list').length, 1);
+  assert.equal(elements['ai-model-refresh-confirm'].classList.contains('hidden'), true);
+  assert.equal(elements['ai-model-refresh-button'].disabled, true);
+  assert.equal(elements['ai-model-refresh-button'].classList.contains('is-loading'), true);
+  assert.equal(elements['ai-model-refresh-button']._icon.classList.contains('is-loading'), true);
+  assert.equal(elements['ai-model-refresh-label'].textContent, 'Refreshing...');
+  assert.equal(elements['ai-model-refresh-meta'].textContent, 'Refreshing models...');
+
+  resolveModels({
+    provider: 'openai',
+    models: ['gpt-5.2', 'gpt-fetched-plan'],
+    refreshedAt: '2026-05-31T17:14:00.000Z'
+  });
+  await refreshPromise;
+
+  assert.equal(elements['ai-model-refresh-button'].disabled, false);
+  assert.equal(elements['ai-model-refresh-button'].classList.contains('is-loading'), false);
+  assert.equal(elements['ai-model-picker-menu'].classList.contains('hidden'), false);
+  assert.equal(elements['ai-model-refresh-meta'].textContent, '');
+  assert.equal(elements['ai-model-refresh-label'].textContent, 'Models refreshed');
+  assert.equal(elements['ai-model-refresh-button']._icon.className, 'ph ph-check');
+  assert.equal(timers.at(-1).delay, 2600);
+  assert.match(elements['ai-model-option-list'].innerHTML, /gpt-fetched-plan/);
+  assert.match(elements['ai-model-option-list'].innerHTML, /Fetched/);
+  assert.match(context.localStorage.getItem('oriel.aiModelCache.v1'), /gpt-fetched-plan/);
+
+  timers.at(-1).handler();
+
+  assert.equal(elements['ai-model-refresh-label'].textContent, 'Refresh from provider...');
+  assert.equal(elements['ai-model-refresh-button']._icon.className, 'ph ph-arrows-clockwise');
+  assert.equal(elements['ai-model-refresh-meta'].textContent, '');
+});
+
+test('AI model refresh reports empty and failed provider responses inline', async () => {
+  const empty = createAiSettingsDom({
+    modelListResult: { provider: 'openai', models: [], refreshedAt: '2026-05-31T17:14:00.000Z' }
+  });
+  await empty.context.initAiSidebar();
+  await empty.elements['ai-model-refresh-button'].click();
+  await empty.elements['ai-model-refresh-confirm-button'].click();
+  assert.equal(empty.elements['ai-model-refresh-meta'].textContent, 'No compatible models returned.');
+
+  const failed = createAiSettingsDom({
+    modelListResult: async () => {
+      throw new Error('Provider says no.');
+    }
+  });
+  failed.context.console.error = () => {};
+  await failed.context.initAiSidebar();
+  await failed.elements['ai-model-refresh-button'].click();
+  await failed.elements['ai-model-refresh-confirm-button'].click();
+  assert.equal(failed.elements['ai-model-refresh-meta'].textContent, 'Provider says no.');
+});
+
+test('AI loading state shows spinner and disables composer controls', () => {
+  const context = loadAiSidebarContext();
+  const composer = fakeElement();
+  const spinner = fakeElement();
+  const input = fakeElement();
+  const sendButton = fakeElement();
+  const sendLabel = fakeElement();
+  spinner.classList.add('hidden');
+  sendButton.querySelector = selector => (selector === 'span' ? sendLabel : null);
+  const elements = {
+    'ai-loading-spinner': spinner,
+    'ai-chat-input': input,
+    'ai-send-button': sendButton
+  };
+
+  context.document = {
+    getElementById(id) {
+      return elements[id] || null;
+    },
+    querySelector(selector) {
+      return selector === '.ai-composer' ? composer : null;
+    }
+  };
+
+  context.setAiLoadingState(true);
+  assert.equal(composer.getAttribute('aria-busy'), 'true');
+  assert.equal(spinner.classList.contains('hidden'), false);
+  assert.equal(input.disabled, true);
+  assert.equal(sendButton.disabled, true);
+  assert.equal(sendLabel.textContent, 'Asking');
+
+  context.setAiLoadingState(false);
+  assert.equal(composer.getAttribute('aria-busy'), 'false');
+  assert.equal(spinner.classList.contains('hidden'), true);
+  assert.equal(input.disabled, false);
+  assert.equal(sendButton.disabled, false);
+  assert.equal(sendLabel.textContent, 'Send');
+});
