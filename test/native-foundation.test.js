@@ -131,6 +131,8 @@ test('native icon handler gates Logo.dev behind saved opt-in and local cache', (
   assert.match(handler, /BrandIcons/);
   assert.match(handler, /clearBrandCache/);
   assert.match(handler, /resolvedApplicationPath/);
+  assert.match(handler, /appIconCacheFingerprint/);
+  assert.match(handler, /NSImage\(contentsOf:/);
   assert.match(handler, /query\["v"\]/);
   assert.match(handler, /urlForApplication\(withBundleIdentifier:/);
   assert.match(keychain, /saveLogoDevAPIKey/);
