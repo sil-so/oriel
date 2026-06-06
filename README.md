@@ -37,6 +37,8 @@ Logo.dev and AI provider calls are opt-in. Enabling branded website icons sends
 website domains to Logo.dev. Using Ask AI sends selected-day context to the
 configured provider.
 
+See [PRIVACY.md](./PRIVACY.md) for the detailed data-handling model.
+
 ## Requirements
 
 - macOS 14 or newer
