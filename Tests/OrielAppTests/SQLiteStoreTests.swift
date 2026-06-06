@@ -551,6 +551,7 @@ final class SQLiteStoreTests: XCTestCase {
                 operation: "settings.update",
                 payload: [
                     "logoDevIconsEnabled": true,
+                    "hideEmptyActivityRows": true,
                     "theme": "light",
                     "minActivityThreshold": 30,
                     "aiProvider": "openai",
@@ -562,6 +563,7 @@ final class SQLiteStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(updated["logoDevIconsEnabled"] as? Bool, true)
+        XCTAssertEqual(updated["hideEmptyActivityRows"] as? Bool, true)
         XCTAssertEqual(updated["theme"] as? String, "light")
         XCTAssertEqual(updated["minActivityThreshold"] as? Int, 30)
         XCTAssertEqual(updated["aiProvider"] as? String, "openai")
@@ -573,6 +575,7 @@ final class SQLiteStoreTests: XCTestCase {
         store = try SQLiteStore(databaseURL: directory.appendingPathComponent("Oriel.sqlite"))
         let persisted = try XCTUnwrap(try store.request(operation: "settings.get", payload: [:]) as? [String: Any])
         XCTAssertEqual(persisted["logoDevIconsEnabled"] as? Bool, true)
+        XCTAssertEqual(persisted["hideEmptyActivityRows"] as? Bool, true)
         XCTAssertEqual(persisted["theme"] as? String, "light")
         XCTAssertEqual(persisted["minActivityThreshold"] as? Int, 30)
         XCTAssertEqual(persisted["aiProvider"] as? String, "openai")
@@ -584,6 +587,7 @@ final class SQLiteStoreTests: XCTestCase {
     func testSettingsExposeDefaultAiPreferences() throws {
         let settings = try XCTUnwrap(try store.request(operation: "settings.get", payload: [:]) as? [String: Any])
 
+        XCTAssertEqual(settings["hideEmptyActivityRows"] as? Bool, false)
         XCTAssertEqual(settings["aiProvider"] as? String, "")
         XCTAssertEqual(settings["aiOpenAIModel"] as? String, "gpt-5.2")
         XCTAssertEqual(settings["aiGoogleModel"] as? String, "gemini-3.5-flash")

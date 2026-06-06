@@ -458,6 +458,12 @@ button:focus-visible {
     background: var(--surface-hover);
 }
 
+.icon-button.is-active {
+    color: var(--accent);
+    border-color: var(--accent-border);
+    background: var(--accent-wash);
+}
+
 .date-step-control {
     height: 32px;
     display: inline-flex;

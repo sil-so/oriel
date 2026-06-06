@@ -438,6 +438,60 @@ test('settings modal reopens with current theme and brand icon preference', asyn
   assert.equal(settingsModal.classList.contains('hidden'), false);
 });
 
+test('Activity Stream empty-row toggle persists and rerenders Day timelines', async () => {
+  const { element, context, nativeRequests, stored } = loadMainControlsContext({
+    nativeResponses: {
+      'settings.update': payload => payload
+    }
+  });
+  const renderCalls = [];
+  const centerCalls = [];
+  const preservedCenterMs = new Date(2026, 4, 21, 9, 45).getTime();
+  const memoryScroll = element('memory-aid-container');
+  const timeEntriesScroll = element('time-entries-container');
+  context.state.settings.hideEmptyActivityRows = false;
+  context.DOM.elMemAidScroll = memoryScroll;
+  context.DOM.elTimeEntriesScroll = timeEntriesScroll;
+  memoryScroll.scrollTop = 80;
+  memoryScroll.clientHeight = 40;
+  timeEntriesScroll.scrollTop = 0;
+  timeEntriesScroll.clientHeight = 40;
+  context.renderTimelineGrids = () => renderCalls.push('grid');
+  context.renderMemoryAidActivities = () => renderCalls.push('activity');
+  context.renderLoggedTimeEntries = () => renderCalls.push('entries');
+  context.window.renderTimelineGrids = context.renderTimelineGrids;
+  context.window.renderMemoryAidActivities = context.renderMemoryAidActivities;
+  context.window.renderLoggedTimeEntries = context.renderLoggedTimeEntries;
+  context.window.getTimelineTimeForDisplayTop = displayTop => {
+    centerCalls.push({ phase: 'read', hidden: context.state.settings.hideEmptyActivityRows, displayTop });
+    return preservedCenterMs;
+  };
+  context.window.getTimelineDisplayTopForTime = timeMs => {
+    centerCalls.push({ phase: 'write', hidden: context.state.settings.hideEmptyActivityRows, timeMs });
+    return 240;
+  };
+
+  await element('btn-toggle-empty-activity-rows').click();
+
+  assert.equal(context.state.settings.hideEmptyActivityRows, true);
+  assert.equal(stored.get('hideEmptyActivityRows'), 'true');
+  assert.equal(element('btn-toggle-empty-activity-rows').attributes['aria-pressed'], 'true');
+  assert.equal(element('btn-toggle-empty-activity-rows').classList.contains('is-active'), true);
+  assert.deepEqual(renderCalls, ['grid', 'activity', 'entries']);
+  assert.deepEqual(centerCalls, [
+    { phase: 'read', hidden: false, displayTop: 100 },
+    { phase: 'write', hidden: true, timeMs: preservedCenterMs }
+  ]);
+  assert.equal(memoryScroll.scrollTop, 220);
+  assert.equal(timeEntriesScroll.scrollTop, 220);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(nativeRequests
+      .filter(request => request.operation === 'settings.update')
+      .map(request => request.payload))),
+    [{ hideEmptyActivityRows: true }]
+  );
+});
+
 test('settings title cleanup rules add valid regex rules and block invalid regex', async () => {
   const { element, nativeRequests, stored } = loadMainControlsContext({
     nativeResponses: {

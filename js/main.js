@@ -32,7 +32,10 @@ function setupZoomDropdown() {
                 // Centering calculation
                 const scrollTopBefore = scrollPane?.scrollTop || 0;
                 const viewportHeight = scrollPane?.clientHeight || DOM.elMemAidScroll?.clientHeight || 0;
-                const viewportCenterMinutes = ((scrollTopBefore + viewportHeight / 2) / 40) * oldZoom;
+                const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+                const viewportCenterMs = isWeekMode
+                    ? dateStartOfDay + (((scrollTopBefore + viewportHeight / 2) / 40) * oldZoom * 60 * 1000)
+                    : getDayTimelineViewportCenterMs(scrollPane, viewportHeight, oldZoom);
 
                 state.zoom = newZoom;
                 
@@ -71,7 +74,14 @@ function setupZoomDropdown() {
                     renderLoggedTimeEntries();
                 }
 
-                const newScrollTop = ((viewportCenterMinutes * 40) / state.zoom) - (viewportHeight / 2);
+                const newScrollTop = isWeekMode
+                    ? ((((viewportCenterMs - dateStartOfDay) / (60 * 1000)) * 40) / state.zoom) - (viewportHeight / 2)
+                    : (typeof window.getTimelineDisplayTopForTime === 'function'
+                        ? window.getTimelineDisplayTopForTime(viewportCenterMs, {
+                            dateStartOfDay,
+                            zoom: state.zoom
+                        }) - (viewportHeight / 2)
+                        : ((((viewportCenterMs - dateStartOfDay) / (60 * 1000)) * 40) / state.zoom) - (viewportHeight / 2));
                 if (isWeekMode) {
                     if (scrollPane) scrollPane.scrollTop = newScrollTop;
                 } else {
@@ -664,6 +674,93 @@ function setupWorkTimesToggle() {
     });
 }
 
+function syncEmptyActivityRowsToggle() {
+    const toggle = document.getElementById('btn-toggle-empty-activity-rows');
+    if (!toggle) return;
+
+    const enabled = Boolean(state.settings.hideEmptyActivityRows);
+    toggle.classList.toggle('is-active', enabled);
+    toggle.setAttribute('aria-pressed', String(enabled));
+    toggle.setAttribute('aria-label', enabled ? 'Show Empty Rows' : 'Hide Empty Rows');
+    toggle.setAttribute('title', enabled ? 'Show Empty Rows' : 'Hide Empty Rows');
+}
+
+function getDayTimelineViewportCenterMs(scrollPane, viewportHeight, zoom) {
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    const centerTop = (scrollPane?.scrollTop || 0) + (viewportHeight / 2);
+    if (typeof window.getTimelineTimeForDisplayTop === 'function') {
+        return window.getTimelineTimeForDisplayTop(centerTop, {
+            dateStartOfDay,
+            zoom
+        });
+    }
+
+    const centerMinutes = (centerTop / 40) * zoom;
+    return dateStartOfDay + centerMinutes * 60 * 1000;
+}
+
+function renderDayTimelinesPreservingCenter(centerMs = null) {
+    const scrollPane = DOM.elMemAidScroll || DOM.elTimeEntriesScroll;
+    const viewportHeight = scrollPane?.clientHeight || DOM.elTimeEntriesScroll?.clientHeight || 0;
+    const preservedCenterMs = Number.isFinite(centerMs)
+        ? centerMs
+        : getDayTimelineViewportCenterMs(scrollPane, viewportHeight, state.zoom);
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+
+    if (typeof renderTimelineGrids === 'function') renderTimelineGrids();
+    if (typeof renderMemoryAidActivities === 'function') renderMemoryAidActivities();
+    if (typeof renderLoggedTimeEntries === 'function') renderLoggedTimeEntries();
+
+    const targetTop = typeof window.getTimelineDisplayTopForTime === 'function'
+        ? window.getTimelineDisplayTopForTime(preservedCenterMs, { dateStartOfDay, zoom: state.zoom })
+        : ((preservedCenterMs - dateStartOfDay) / (60 * 1000)) * (40 / state.zoom);
+    const nextScrollTop = Math.max(0, targetTop - (viewportHeight / 2));
+
+    for (const el of [DOM.elMemAidScroll, DOM.elTimeEntriesScroll]) {
+        if (!el) continue;
+        el.scrollTop = nextScrollTop;
+    }
+}
+
+async function setHideEmptyActivityRows(enabled, { persist = true } = {}) {
+    const shouldRenderDayTimelines = state.timelineMode !== 'week';
+    const scrollPane = shouldRenderDayTimelines ? (DOM.elMemAidScroll || DOM.elTimeEntriesScroll) : null;
+    const viewportHeight = scrollPane?.clientHeight || DOM.elTimeEntriesScroll?.clientHeight || 0;
+    const preservedCenterMs = shouldRenderDayTimelines
+        ? getDayTimelineViewportCenterMs(scrollPane, viewportHeight, state.zoom)
+        : null;
+
+    state.settings.hideEmptyActivityRows = Boolean(enabled);
+    localStorage.setItem('hideEmptyActivityRows', String(state.settings.hideEmptyActivityRows));
+    syncEmptyActivityRowsToggle();
+
+    if (persist && window.OrielData && window.OrielData.isNative) {
+        try {
+            const nativeSettings = await window.OrielData.request('settings.update', {
+                hideEmptyActivityRows: state.settings.hideEmptyActivityRows
+            });
+            Object.assign(state.settings, nativeSettings);
+            syncEmptyActivityRowsToggle();
+        } catch (error) {
+            console.error('Error saving empty row preference:', error);
+        }
+    }
+
+    if (shouldRenderDayTimelines) {
+        renderDayTimelinesPreservingCenter(preservedCenterMs);
+    }
+}
+
+function setupEmptyActivityRowsToggle() {
+    const toggle = document.getElementById('btn-toggle-empty-activity-rows');
+    if (!toggle) return;
+
+    syncEmptyActivityRowsToggle();
+    toggle.addEventListener('click', () => {
+        return setHideEmptyActivityRows(!state.settings.hideEmptyActivityRows);
+    });
+}
+
 function closeModalById(modalId) {
     const modal = document.getElementById(modalId);
     if (!modal || modal.classList.contains('hidden')) return false;
@@ -744,6 +841,7 @@ function setupMainEventListeners() {
     setupCustomSelects();
     setupProjectRatesToggles();
     setupWorkTimesToggle();
+    setupEmptyActivityRowsToggle();
     setupModalDismissalHandlers();
 
     // Auto-Assignment Rules Modal triggers
@@ -1219,6 +1317,7 @@ function setupMainEventListeners() {
                     if (typeof window.applyTheme === 'function') {
                         window.applyTheme(state.settings.theme);
                     }
+                    syncEmptyActivityRowsToggle();
                 } catch (error) {
                     console.error('Error fetching native settings:', error);
                 }
@@ -1728,20 +1827,46 @@ function setupMainEventListeners() {
         return Math.floor(y / 40);
     }
 
+    function getCurrentTimeEntryRowLayout() {
+        if (typeof window.buildDayTimelineRowLayout !== 'function') return null;
+        const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+        return window.buildDayTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
+    }
+
+    function getSourceCellIndexFromDisplayY(y) {
+        const displayCellIndex = getCellIndexFromY(y);
+        const rowLayout = getCurrentTimeEntryRowLayout();
+        if (!rowLayout || !rowLayout.hideEmptyRows) {
+            const maxCellIndex = Math.floor(1440 / state.zoom) - 1;
+            return Math.max(0, Math.min(maxCellIndex, displayCellIndex));
+        }
+
+        if (rowLayout.displayRowCount <= 0) return 0;
+        const boundedDisplayIndex = Math.max(0, Math.min(rowLayout.displayRowCount - 1, displayCellIndex));
+        return window.getSourceRowForDisplayRow(rowLayout, boundedDisplayIndex);
+    }
+
     function getBoundedTimeEntryCellIndex(clientY) {
         const rect = DOM.elItemsTimeEntries.getBoundingClientRect();
-        const cellIndex = getCellIndexFromY(clientY - rect.top);
-        const maxCellIndex = Math.floor(1440 / state.zoom) - 1;
-        return Math.max(0, Math.min(maxCellIndex, cellIndex));
+        return getSourceCellIndexFromDisplayY(clientY - rect.top);
     }
 
     function setDragBoxGeometry(startCell, endCell) {
         if (!dragBoxVisual) return;
 
         const firstCell = Math.min(startCell, endCell);
-        const selectedCells = Math.abs(endCell - startCell) + 1;
-        dragBoxVisual.style.top = `${firstCell * 40 + 2}px`;
-        dragBoxVisual.style.height = `${selectedCells * 40 - 3}px`;
+        const lastCell = Math.max(startCell, endCell);
+        const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+        const startMs = dateStartOfDay + firstCell * state.zoom * 60 * 1000;
+        const endMs = dateStartOfDay + (lastCell + 1) * state.zoom * 60 * 1000;
+        const geometry = typeof window.getTimelineDisplayRangeGeometry === 'function'
+            ? window.getTimelineDisplayRangeGeometry(startMs, endMs, dateStartOfDay, state.zoom)
+            : {
+                top: firstCell * 40 + 2,
+                height: (lastCell - firstCell + 1) * 40 - 3
+            };
+        dragBoxVisual.style.top = `${geometry.top}px`;
+        dragBoxVisual.style.height = `${Math.max(37, geometry.height)}px`;
     }
 
     function renderActiveDragFeedback() {
@@ -1764,7 +1889,7 @@ function setupMainEventListeners() {
         const rect = DOM.elItemsTimeEntries.getBoundingClientRect();
         const y = clientY - rect.top;
 
-        state.dragStartCell = getCellIndexFromY(y);
+        state.dragStartCell = getSourceCellIndexFromDisplayY(y);
         state.dragEndCell = state.dragStartCell;
 
         dragBoxVisual = document.createElement('div');
@@ -1794,9 +1919,7 @@ function setupMainEventListeners() {
         }
 
         const rect = DOM.elItemsTimeEntries.getBoundingClientRect();
-        const cellIndex = getCellIndexFromY(e.clientY - rect.top);
-        const maxCellIndex = Math.floor(1440 / state.zoom) - 1;
-        const boundedCellIndex = Math.max(0, Math.min(maxCellIndex, cellIndex));
+        const boundedCellIndex = getSourceCellIndexFromDisplayY(e.clientY - rect.top);
         if (typeof window.showTimeEntryHoverPreview === 'function') {
             window.showTimeEntryHoverPreview(boundedCellIndex);
         }
@@ -1935,11 +2058,18 @@ function setupMainEventListeners() {
             const heightPx = parseInt(entryEl.style.height || '0', 10) + 1;
             
             const rowHeight = 40;
-            const startCell = Math.round(topPx / rowHeight);
-            const span = Math.round(heightPx / rowHeight);
+            const displayStartCell = Math.max(0, Math.round(topPx / rowHeight));
+            const displaySpan = Math.max(1, Math.round(heightPx / rowHeight));
+            const rowLayout = getCurrentTimeEntryRowLayout();
+            const startCell = rowLayout?.hideEmptyRows
+                ? window.getSourceRowForDisplayRow(rowLayout, displayStartCell)
+                : displayStartCell;
+            const endSourceCell = rowLayout?.hideEmptyRows
+                ? window.getSourceRowForDisplayRow(rowLayout, displayStartCell + displaySpan - 1) + 1
+                : startCell + displaySpan;
             
             const startMs = resizeState.dateStartOfDay + startCell * state.zoom * 60 * 1000;
-            const endMs = startMs + span * state.zoom * 60 * 1000;
+            const endMs = resizeState.dateStartOfDay + endSourceCell * state.zoom * 60 * 1000;
             
             const entry = state.timeEntries.find(ent => ent.id === entryId);
             if (entry) {
@@ -2305,6 +2435,7 @@ async function init() {
             if (typeof window.applyTheme === 'function') {
                 window.applyTheme(state.settings.theme);
             }
+            syncEmptyActivityRowsToggle();
         } catch (error) {
             console.error('Error loading native settings:', error);
         }

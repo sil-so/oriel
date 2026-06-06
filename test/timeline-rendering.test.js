@@ -289,12 +289,15 @@ function loadModalsContext() {
   return { context, elements };
 }
 
-function renderMemoryAidHtml({ activities, timelineActivities, zoom }) {
+function renderMemoryAidHtml({ activities, timelineActivities, zoom, hideEmptyActivityRows = false, timeEntries = [], projects = [] }) {
   const context = loadTimelineContext();
   let renderedHtml = '';
 
   context.state.zoom = zoom;
   context.state.activities = activities;
+  context.state.timeEntries = timeEntries;
+  context.state.projects = projects;
+  context.state.settings.hideEmptyActivityRows = hideEmptyActivityRows;
   if (timelineActivities) {
     context.state.timelineActivities = timelineActivities;
   }
@@ -312,6 +315,24 @@ function renderMemoryAidHtml({ activities, timelineActivities, zoom }) {
 
   context.renderMemoryAidActivities();
   return renderedHtml;
+}
+
+function extractActivityStyles(html) {
+  return [...html.matchAll(/class="([^"]*activity-block[^"]*)"[\s\S]*?style="([^"]+)"[\s\S]*?data-start-cell="([^"]+)"[\s\S]*?data-span="([^"]+)"/g)]
+    .map(match => {
+      const topPxMatch = match[2].match(/top:\s*([0-9.]+)px/);
+      const heightPxMatch = match[2].match(/height:\s*([0-9.]+)px/);
+      const topCalcMatch = match[2].match(/top:\s*calc\(var\(--row-height\) \* ([0-9.]+) \+ 2px\)/);
+      const heightCalcMatch = match[2].match(/height:\s*calc\(var\(--row-height\) \* ([0-9.]+) - 3px\)/);
+      return {
+        className: match[1],
+        style: match[2],
+        top: topPxMatch ? Number(topPxMatch[1]) : (topCalcMatch ? Number(topCalcMatch[1]) * 40 + 2 : null),
+        height: heightPxMatch ? Number(heightPxMatch[1]) : (heightCalcMatch ? Number(heightCalcMatch[1]) * 40 - 3 : null),
+        startCell: Number(match[3]),
+        span: Number(match[4])
+      };
+    });
 }
 
 async function refreshActivities({ rawActivities, thresholdSeconds }) {
@@ -343,7 +364,7 @@ async function refreshActivities({ rawActivities, thresholdSeconds }) {
   return context.state;
 }
 
-function renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom, activities = [], timelineActivities }) {
+function renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom, activities = [], timelineActivities, hideEmptyActivityRows = false }) {
   const context = loadTimelineContext();
   let renderedHtml = '';
 
@@ -351,6 +372,7 @@ function renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom, activities =
   context.state.projects = projects;
   context.state.timeEntries = timeEntries;
   context.state.activities = activities;
+  context.state.settings.hideEmptyActivityRows = hideEmptyActivityRows;
   if (timelineActivities) {
     context.state.timelineActivities = timelineActivities;
   }
@@ -523,6 +545,149 @@ function makeActivityStreamTimeEntry({
     }]
   };
 }
+
+test('compressed day row layout keeps visible activity and logged time rows at every zoom level', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const context = loadTimelineContext();
+    const atRow = row => dateStart + row * zoom * 60 * 1000;
+    const activityRows = [
+      codexActivity(atRow(2), atRow(3)),
+      {
+        app: 'Brave Browser',
+        title: 'Reference',
+        url: 'https://example.com/reference',
+        start: atRow(8),
+        end: atRow(9),
+        duration: atRow(9) - atRow(8)
+      }
+    ];
+    const manualEntry = {
+      id: `manual-${zoom}`,
+      start: atRow(12),
+      end: atRow(13),
+      projectId: 'project-1',
+      taskId: '',
+      description: 'Manual row',
+      billable: false,
+      activities: []
+    };
+
+    context.state.zoom = zoom;
+    context.state.settings.hideEmptyActivityRows = true;
+    context.state.activities = activityRows;
+    context.state.timelineActivities = activityRows;
+    context.state.timeEntries = [manualEntry];
+
+    const activityCells = context.buildVisibleActivityCells({
+      dateStartOfDay: dateStart,
+      zoom,
+      ownershipActivities: activityRows,
+      visibleActivities: activityRows
+    });
+    const timeEntryRenderItems = context.buildLoggedTimeEntryRenderItems([manualEntry], zoom, dateStart);
+    const layout = context.buildDayTimelineRowLayout({
+      dateStartOfDay: dateStart,
+      zoom,
+      activityCells,
+      timeEntryRenderItems
+    });
+
+    assert.deepEqual(Array.from(layout.sourceRows), [2, 8, 12], `source rows at zoom ${zoom}`);
+    assert.equal(context.getDisplayRowForSourceRow(layout, 8), 1, `source-to-display at zoom ${zoom}`);
+    assert.equal(context.getSourceRowForDisplayRow(layout, 2), 12, `display-to-source at zoom ${zoom}`);
+    assert.equal(context.getTimelineDisplayTopForTime(atRow(8), layout), 40, `display top at zoom ${zoom}`);
+  }
+});
+
+test('compressed Activity Stream skips empty gaps without merging repeated activity blocks', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atRow = row => dateStart + row * 5 * 60 * 1000;
+  const first = codexActivity(atRow(2), atRow(3));
+  const second = codexActivity(atRow(8), atRow(9));
+  const html = renderMemoryAidHtml({
+    zoom: 5,
+    activities: [first, second],
+    timelineActivities: [first, second],
+    hideEmptyActivityRows: true
+  });
+  const styles = extractActivityStyles(html);
+
+  assert.equal(styles.length, 2);
+  assert.deepEqual(styles.map(style => style.startCell), [2, 8]);
+  assert.deepEqual(styles.map(style => style.span), [1, 1]);
+  assert.deepEqual(styles.map(style => style.top), [2, 42]);
+  assert.deepEqual(styles.map(style => style.height), [37, 37]);
+});
+
+test('compressed timeline grid keeps unassigned activity rows and manual time entry rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atRow = row => dateStart + row * 5 * 60 * 1000;
+  const context = loadTimelineContext();
+  let timeGridHtml = '';
+  let timeItemsHeight = '';
+
+  context.state.zoom = 5;
+  context.state.settings.hideEmptyActivityRows = true;
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.projects = [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }];
+  context.state.activities = [
+    codexActivity(atRow(2), atRow(3)),
+    {
+      app: 'Brave Browser',
+      title: 'Unassigned Reference',
+      url: 'https://example.com/reference',
+      start: atRow(8),
+      end: atRow(9),
+      duration: atRow(9) - atRow(8)
+    }
+  ];
+  context.state.timelineActivities = context.state.activities;
+  context.state.timeEntries = [{
+    id: 'manual-row',
+    start: atRow(12),
+    end: atRow(13),
+    projectId: 'project-1',
+    taskId: '',
+    description: 'Manual row',
+    billable: false,
+    activities: []
+  }];
+  context.DOM.elGridMemoryAid = { set innerHTML(_value) {} };
+  context.DOM.elGridTimeEntries = {
+    set innerHTML(value) {
+      timeGridHtml = value;
+    }
+  };
+  context.DOM.elItemsMemoryAid = { style: {} };
+  context.DOM.elItemsTimeEntries = {
+    style: {
+      set height(value) {
+        timeItemsHeight = value;
+      }
+    }
+  };
+
+  context.renderTimelineGrids();
+  const loggedHtml = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: context.state.projects,
+    activities: context.state.activities,
+    timelineActivities: context.state.timelineActivities,
+    timeEntries: context.state.timeEntries,
+    hideEmptyActivityRows: true
+  });
+  const [manualStyle] = extractEntryStyles(loggedHtml);
+
+  assert.match(timeGridHtml, />00:10</);
+  assert.match(timeGridHtml, />00:40</);
+  assert.match(timeGridHtml, />01:00</);
+  assert.doesNotMatch(timeGridHtml, />00:15</);
+  assert.equal(timeItemsHeight, '120px');
+  assert.equal(manualStyle.top, 82);
+  assert.equal(manualStyle.height, 37);
+});
 
 test('jump to current time scrolls both timeline panes to the same current-time position', () => {
   const { context, memScroll, timeScroll } = loadScrollContext();
