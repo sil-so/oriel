@@ -138,6 +138,13 @@ function parseStoredTitleCleanupRules() {
     }
 }
 
+function parseStoredBooleanSetting(key, defaultValue = false) {
+    const stored = localStorage.getItem(key);
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+    return defaultValue;
+}
+
 const state = {
     currentDate: new Date(),
     zoom: 5, // zoom interval in minutes
@@ -160,6 +167,7 @@ const state = {
         minActivityThreshold: normalizeMinActivityThreshold(localStorage.getItem('minActivityThreshold')),
         theme: initialTheme,
         logoDevIconsEnabled: localStorage.getItem('logoDevIconsEnabled') === 'true',
+        hideEmptyActivityRows: parseStoredBooleanSetting('hideEmptyActivityRows', false),
         aiProvider: localStorage.getItem('aiProvider') || '',
         aiOpenAIModel: localStorage.getItem('aiOpenAIModel') || DEFAULT_AI_OPENAI_MODEL,
         aiGoogleModel: localStorage.getItem('aiGoogleModel') || DEFAULT_AI_GOOGLE_MODEL,

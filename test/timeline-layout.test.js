@@ -238,9 +238,9 @@ test('timeline scroll panes suppress boundary overscroll bounce', () => {
 test('Activity Stream blocks fit inside timeline row borders', () => {
   const timeline = fs.readFileSync('js/timeline.js', 'utf8');
 
-  assert.match(timeline, /top:\s*calc\(var\(--row-height\) \* \$\{block\.startCell\} \+ 2px\)/);
-  assert.match(timeline, /height:\s*calc\(var\(--row-height\) \* \$\{block\.span\} - 3px\)/);
-  assert.doesNotMatch(timeline, /var\(--row-height\) \* \$\{block\.span\} - 1px/);
+  assert.match(timeline, /top:\s*calc\(var\(--row-height\) \* \$\{displayStartRow\} \+ 2px\)/);
+  assert.match(timeline, /height:\s*calc\(var\(--row-height\) \* \$\{displayRowSpan\} - 3px\)/);
+  assert.doesNotMatch(timeline, /var\(--row-height\) \* \$\{displayRowSpan\} - 1px/);
 });
 
 test('Time Entries hover and drag hit area includes the time label gutter', () => {
@@ -257,6 +257,23 @@ test('Time Entries hover and drag hit area includes the time label gutter', () =
   assert.match(blockRule[1], /left:\s*64px/);
   assert.match(createCueRule[1], /left:\s*0/);
   assert.match(createCueRule[1], /padding-left:\s*72px/);
+});
+
+test('Activity Stream header exposes a compact hide-empty-rows toggle', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  const activityHeader = html.slice(
+    html.indexOf('<h2>Activity Stream</h2>'),
+    html.indexOf('id="btn-jump-current"') + 140
+  );
+
+  assert.match(activityHeader, /id="btn-toggle-empty-activity-rows"/);
+  assert.match(activityHeader, /aria-pressed="false"/);
+  assert.match(activityHeader, /title="Hide Empty Rows"/);
+  assert.match(activityHeader, /class="[^"]*\bicon-button\b[^"]*"/);
+  assert.match(activityHeader, /class="[^"]*\bph-rows\b/);
+  assert.match(css, /\.icon-button\.is-active\s*\{/);
 });
 
 test('settings and Work Times panels keep controls aligned and collapsible', () => {

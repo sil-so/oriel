@@ -1,16 +1,25 @@
 // Render background timeline grid lines
 function renderTimelineGrids() {
-    const totalCells = Math.floor(1440 / state.zoom);
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    const activityCells = getCurrentDayTimelineActivityCells(dateStartOfDay, state.zoom);
+    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(state.timeEntries || [], state.zoom, dateStartOfDay);
+    const rowLayout = buildDayTimelineRowLayout({
+        dateStartOfDay,
+        zoom: state.zoom,
+        activityCells,
+        timeEntryRenderItems
+    });
     let html = '';
     
-    for (let i = 0; i < totalCells; i++) {
-        const totalMinutes = i * state.zoom;
+    for (let displayRow = 0; displayRow < rowLayout.displayRowCount; displayRow++) {
+        const sourceRow = getSourceRowForDisplayRow(rowLayout, displayRow);
+        const totalMinutes = sourceRow * state.zoom;
         const hours = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
         const timeStr = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
         
         html += `
-            <div class="timeline-row" data-cell-index="${i}">
+            <div class="timeline-row" data-cell-index="${sourceRow}" data-display-row-index="${displayRow}">
                 <div class="time-label">${timeStr}</div>
                 <div class="timeline-line"></div>
             </div>
@@ -25,7 +34,7 @@ function renderTimelineGrids() {
     if (gridMem) gridMem.innerHTML = html;
     if (gridTime) gridTime.innerHTML = html;
 
-    const gridHeight = totalCells * 40;
+    const gridHeight = rowLayout.displayRowCount * 40;
     if (itemsMem) itemsMem.style.height = `${gridHeight}px`;
     if (itemsTime) itemsTime.style.height = `${gridHeight}px`;
 }
@@ -42,6 +51,219 @@ const ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS = 60 * 1000;
 const LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS = 60 * 1000;
 const POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS = 60 * 1000;
 let visibleActivityCellsCache = null;
+
+function isHideEmptyActivityRowsEnabled() {
+    return Boolean(state?.settings?.hideEmptyActivityRows);
+}
+
+function isCompressedDayTimelineDirectManipulationDisabled() {
+    return state?.timelineMode !== 'week' && isHideEmptyActivityRowsEnabled();
+}
+
+function getTimelineRowDurationMs(zoom) {
+    return Math.max(1, Number(zoom) || 1) * 60 * 1000;
+}
+
+function getTimelineTotalRows(zoom) {
+    return Math.floor(1440 / Math.max(1, Number(zoom) || 1));
+}
+
+function buildFullDayTimelineRowLayout(dateStartOfDay, zoom) {
+    const totalRows = getTimelineTotalRows(zoom);
+    const sourceRows = Array.from({ length: totalRows }, (_value, index) => index);
+    return {
+        dateStartOfDay,
+        zoom: Math.max(1, Number(zoom) || 1),
+        rowDurationMs: getTimelineRowDurationMs(zoom),
+        totalSourceRows: totalRows,
+        displayRowCount: totalRows,
+        sourceRows,
+        sourceRowByDisplayRow: sourceRows,
+        displayRowBySourceRow: sourceRows,
+        hideEmptyRows: false
+    };
+}
+
+function getCurrentDayTimelineActivityCells(dateStartOfDay, zoom) {
+    const ownershipActivities = Array.isArray(state.timelineActivities)
+        ? state.timelineActivities
+        : state.activities;
+    const visibleActivities = Array.isArray(state.activities)
+        ? state.activities
+        : ownershipActivities;
+    return buildVisibleActivityCells({
+        dateStartOfDay,
+        zoom,
+        ownershipActivities,
+        visibleActivities
+    });
+}
+
+function addSourceRowsForRange(keepRows, range, totalRows) {
+    if (!range) return;
+    const startRow = Math.max(0, Number(range.startRow) || 0);
+    const endRow = Math.min(totalRows, Math.max(startRow + 1, Number(range.endRow) || startRow + 1));
+    for (let row = startRow; row < endRow; row++) {
+        keepRows.add(row);
+    }
+}
+
+function buildDayTimelineRowLayout({
+    dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0),
+    zoom = state.zoom,
+    activityCells = null,
+    timeEntryRenderItems = null,
+    hideEmptyRows = isHideEmptyActivityRowsEnabled()
+} = {}) {
+    const renderZoom = Math.max(1, Number(zoom) || 1);
+    const totalRows = getTimelineTotalRows(renderZoom);
+    if (!hideEmptyRows) {
+        return buildFullDayTimelineRowLayout(dateStartOfDay, renderZoom);
+    }
+
+    const cells = Array.isArray(activityCells)
+        ? activityCells
+        : getCurrentDayTimelineActivityCells(dateStartOfDay, renderZoom);
+    const renderItems = Array.isArray(timeEntryRenderItems)
+        ? timeEntryRenderItems
+        : buildLoggedTimeEntryRenderItems(state.timeEntries || [], renderZoom, dateStartOfDay);
+    const keepRows = new Set();
+
+    cells.forEach((cell, index) => {
+        if (cell) keepRows.add(index);
+    });
+
+    renderItems.forEach(item => {
+        const range = Number.isFinite(item?.displayStart) && Number.isFinite(item?.displayEnd) && item.displayEnd > item.displayStart
+            ? getTimelineDisplayRowRange(item.displayStart, item.displayEnd, dateStartOfDay, renderZoom)
+            : getTimelineDisplayRowRange(item.start, item.end, dateStartOfDay, renderZoom);
+        addSourceRowsForRange(keepRows, range, totalRows);
+    });
+
+    const sourceRows = [...keepRows]
+        .filter(row => row >= 0 && row < totalRows)
+        .sort((left, right) => left - right);
+    const displayRowBySourceRow = new Array(totalRows).fill(-1);
+    sourceRows.forEach((sourceRow, displayRow) => {
+        displayRowBySourceRow[sourceRow] = displayRow;
+    });
+
+    return {
+        dateStartOfDay,
+        zoom: renderZoom,
+        rowDurationMs: getTimelineRowDurationMs(renderZoom),
+        totalSourceRows: totalRows,
+        displayRowCount: sourceRows.length,
+        sourceRows,
+        sourceRowByDisplayRow: sourceRows,
+        displayRowBySourceRow,
+        hideEmptyRows: true
+    };
+}
+
+function getDisplayRowInsertionForSourceRow(layout, sourceRow) {
+    const rows = Array.isArray(layout?.sourceRows) ? layout.sourceRows : [];
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (rows[mid] < sourceRow) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
+
+function getDisplayRowForSourceRow(layout, sourceRow) {
+    const row = Math.max(0, Math.floor(Number(sourceRow) || 0));
+    if (!layout?.hideEmptyRows) return row;
+    return layout.displayRowBySourceRow?.[row] ?? -1;
+}
+
+function getSourceRowForDisplayRow(layout, displayRow) {
+    const row = Math.max(0, Math.floor(Number(displayRow) || 0));
+    if (!layout?.hideEmptyRows) return Math.min(row, Math.max(0, (layout?.totalSourceRows || 1) - 1));
+    const rows = Array.isArray(layout.sourceRowByDisplayRow) ? layout.sourceRowByDisplayRow : [];
+    if (rows.length === 0) return 0;
+    return rows[Math.min(row, rows.length - 1)];
+}
+
+function getDisplayRowRangeForSourceRange(layout, startRow, endRow) {
+    const normalizedStart = Math.max(0, Math.floor(Number(startRow) || 0));
+    const normalizedEnd = Math.max(normalizedStart + 1, Math.ceil(Number(endRow) || normalizedStart + 1));
+    if (!layout?.hideEmptyRows) {
+        return {
+            startRow: normalizedStart,
+            endRow: normalizedEnd,
+            rowSpan: normalizedEnd - normalizedStart
+        };
+    }
+
+    const mappedStart = getDisplayRowForSourceRow(layout, normalizedStart);
+    const mappedLast = getDisplayRowForSourceRow(layout, normalizedEnd - 1);
+    const startDisplayRow = mappedStart >= 0
+        ? mappedStart
+        : getDisplayRowInsertionForSourceRow(layout, normalizedStart);
+    let endDisplayRow = mappedLast >= 0
+        ? mappedLast + 1
+        : getDisplayRowInsertionForSourceRow(layout, normalizedEnd);
+
+    if (endDisplayRow <= startDisplayRow && layout.displayRowCount > 0) {
+        endDisplayRow = Math.min(layout.displayRowCount, startDisplayRow + 1);
+    }
+
+    return {
+        startRow: startDisplayRow,
+        endRow: endDisplayRow,
+        rowSpan: Math.max(0, endDisplayRow - startDisplayRow)
+    };
+}
+
+function getTimelineDisplayRangeGeometry(start, end, dateStartOfDay, zoom, layout = null) {
+    const sourceRange = getTimelineDisplayRowRange(start, end, dateStartOfDay, zoom);
+    const rowLayout = layout || buildDayTimelineRowLayout({ dateStartOfDay, zoom });
+    const displayRange = getDisplayRowRangeForSourceRange(rowLayout, sourceRange.startRow, sourceRange.endRow);
+    return {
+        ...sourceRange,
+        displayStartRow: displayRange.startRow,
+        displayEndRow: displayRange.endRow,
+        displayRowSpan: displayRange.rowSpan,
+        top: displayRange.startRow * 40 + 2,
+        height: Math.max(0, displayRange.rowSpan * 40 - 3)
+    };
+}
+
+function getTimelineDisplayTopForTime(timeMs, options = {}) {
+    const layout = options?.sourceRows
+        ? options
+        : buildDayTimelineRowLayout(options);
+    const rowDurationMs = layout.rowDurationMs || getTimelineRowDurationMs(layout.zoom);
+    const sourceRowFloat = Math.max(0, (Number(timeMs) - layout.dateStartOfDay) / rowDurationMs);
+    const sourceRow = Math.min(layout.totalSourceRows - 1, Math.floor(sourceRowFloat));
+    const rowFraction = Math.max(0, sourceRowFloat - Math.floor(sourceRowFloat));
+
+    if (!layout.hideEmptyRows) return sourceRowFloat * 40;
+
+    const mappedRow = getDisplayRowForSourceRow(layout, sourceRow);
+    if (mappedRow >= 0) {
+        return (mappedRow + rowFraction) * 40;
+    }
+
+    return getDisplayRowInsertionForSourceRow(layout, sourceRow) * 40;
+}
+
+function getTimelineTimeForDisplayTop(displayTop, options = {}) {
+    const layout = options?.sourceRows
+        ? options
+        : buildDayTimelineRowLayout(options);
+    const displayRowFloat = Math.max(0, Number(displayTop) / 40);
+    const displayRow = Math.floor(displayRowFloat);
+    const rowFraction = displayRowFloat - displayRow;
+    const sourceRow = getSourceRowForDisplayRow(layout, displayRow);
+    return layout.dateStartOfDay + (sourceRow + rowFraction) * layout.rowDurationMs;
+}
 
 function normalizeTimelineInteractionState(activity) {
     return activity?.interactionState === 'handsOff' ? 'handsOff' : 'handsOn';
@@ -651,6 +873,13 @@ function renderMemoryAidActivities() {
         ownershipActivities,
         visibleActivities: state.activities
     });
+    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(state.timeEntries || [], state.zoom, dateStartOfDay);
+    const rowLayout = buildDayTimelineRowLayout({
+        dateStartOfDay,
+        zoom: state.zoom,
+        activityCells: cellActivities,
+        timeEntryRenderItems
+    });
     const totalCells = cellActivities.length;
 
     // Step 2: Merge adjacent similar cells to make beautiful unified activity blocks
@@ -668,7 +897,7 @@ function renderMemoryAidActivities() {
                 }
             } else {
                 if (currentBlock) {
-                    html += createActivityBlockHTML(currentBlock);
+                    html += createActivityBlockHTML(currentBlock, rowLayout);
                 }
                 currentBlock = {
                     startCell: i,
@@ -684,14 +913,14 @@ function renderMemoryAidActivities() {
             }
         } else {
             if (currentBlock) {
-                html += createActivityBlockHTML(currentBlock);
+                html += createActivityBlockHTML(currentBlock, rowLayout);
                 currentBlock = null;
             }
         }
     }
 
     if (currentBlock) {
-        html += createActivityBlockHTML(currentBlock);
+        html += createActivityBlockHTML(currentBlock, rowLayout);
     }
 
     const itemsMem = DOM.elItemsMemoryAid;
@@ -2304,7 +2533,7 @@ function summarizeSimilarActivityOverlaps(overlaps, rangeStart, rangeEnd) {
 }
 
 // Generate the HTML for an individual activity block in Activity Stream
-function createActivityBlockHTML(block) {
+function createActivityBlockHTML(block, rowLayout = null) {
     const app = normalizeActivityText(block.app);
     const title = normalizeActivityText(block.title);
     const url = normalizeActivityText(block.url);
@@ -2321,6 +2550,10 @@ function createActivityBlockHTML(block) {
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
     const blockStart = dateStartOfDay + block.startCell * state.zoom * 60 * 1000;
     const blockEnd = blockStart + block.span * state.zoom * 60 * 1000;
+    const layout = rowLayout || buildFullDayTimelineRowLayout(dateStartOfDay, state.zoom);
+    const displayRange = getDisplayRowRangeForSourceRange(layout, block.startCell, block.startCell + block.span);
+    const displayStartRow = displayRange.startRow;
+    const displayRowSpan = Math.max(1, displayRange.rowSpan);
     const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
     const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
     const visibleBreakdownOverlaps = getVisibleMultiActivityBreakdownOverlaps(uniqueOverlaps, blockStart, blockEnd);
@@ -2351,7 +2584,7 @@ function createActivityBlockHTML(block) {
 
     return `
         <div class="activity-block ${selectedClass}"
-             style="top: calc(var(--row-height) * ${block.startCell} + 2px); height: calc(var(--row-height) * ${block.span} - 3px);"
+             style="top: calc(var(--row-height) * ${displayStartRow} + 2px); height: calc(var(--row-height) * ${displayRowSpan} - 3px);"
              data-start-cell="${block.startCell}"
              data-span="${block.span}"
              data-app="${escapeAttribute(app)}"
@@ -2716,17 +2949,25 @@ function renderLoggedTimeEntries() {
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
     let html = '';
     const renderItems = buildLoggedTimeEntryRenderItems(state.timeEntries, state.zoom, dateStartOfDay);
+    const activityCells = getCurrentDayTimelineActivityCells(dateStartOfDay, state.zoom);
+    const rowLayout = buildDayTimelineRowLayout({
+        dateStartOfDay,
+        zoom: state.zoom,
+        activityCells,
+        timeEntryRenderItems: renderItems
+    });
 
     for (const item of renderItems) {
         const entry = item.firstEntry;
-        const renderRange = Number.isFinite(item.displayStart) && Number.isFinite(item.displayEnd) && item.displayEnd > item.displayStart
-            ? { start: item.displayStart, end: item.displayEnd }
-            : getTimelineDisplayRowRange(item.start, item.end, dateStartOfDay, state.zoom);
-        const startMins = (renderRange.start - dateStartOfDay) / (60 * 1000);
-        const endMins = (renderRange.end - dateStartOfDay) / (60 * 1000);
-        const pixelsPerMinute = 40 / state.zoom;
-        const topPx = Math.max(0, startMins * pixelsPerMinute) + 2;
-        const naturalHeightPx = ((endMins - startMins) * pixelsPerMinute) - 3;
+        const rangeStart = Number.isFinite(item.displayStart) && Number.isFinite(item.displayEnd) && item.displayEnd > item.displayStart
+            ? item.displayStart
+            : item.start;
+        const rangeEnd = Number.isFinite(item.displayStart) && Number.isFinite(item.displayEnd) && item.displayEnd > item.displayStart
+            ? item.displayEnd
+            : item.end;
+        const geometry = getTimelineDisplayRangeGeometry(rangeStart, rangeEnd, dateStartOfDay, state.zoom, rowLayout);
+        const topPx = Math.max(0, geometry.top);
+        const naturalHeightPx = geometry.height;
         const heightPx = Math.max(37, naturalHeightPx);
 
         const project = state.projects.find(p => p.id === entry.projectId) || { name: 'Unknown Project', color: '#4b5563' };
@@ -2771,17 +3012,24 @@ function renderLoggedTimeEntries() {
             : '';
         const laneStyle = getLoggedTimeEntryLaneStyle(item);
 
+        const resizeTopHandleHtml = isCompressedDayTimelineDirectManipulationDisabled()
+            ? ''
+            : '<div class="resize-handle-top"></div>';
+        const resizeBottomHandleHtml = isCompressedDayTimelineDirectManipulationDisabled()
+            ? ''
+            : '<div class="resize-handle-bottom"></div>';
+
         html += `
             <div class="${className}"
                  style="top: ${topPx}px; height: ${heightPx}px; --entry-project-color: ${project.color};${laneStyle}"
                  data-id="${entry.id}"${groupDataHtml}>
-                <div class="resize-handle-top"></div>
+                ${resizeTopHandleHtml}
                 <div class="time-entry-main flex justify-between items-start text-white text-[12px] font-semibold leading-tight pointer-events-none">
                     ${mainContentHtml}
                     <span class="duration-pill time-entry-duration shrink-0">${duration} min</span>
                 </div>
                 ${projectRowHtml}
-                <div class="resize-handle-bottom"></div>
+                ${resizeBottomHandleHtml}
             </div>
         `;
     }
@@ -2796,6 +3044,10 @@ function renderLoggedTimeEntries() {
 function showTimeEntryHoverPreview(cellIndex) {
     const itemsTime = DOM.elItemsTimeEntries;
     if (!itemsTime) return;
+    if (isCompressedDayTimelineDirectManipulationDisabled()) {
+        hideTimeEntryHoverPreview();
+        return;
+    }
 
     let preview = itemsTime.querySelector('.time-entry-hover-preview');
     if (!preview) {
@@ -2804,7 +3056,15 @@ function showTimeEntryHoverPreview(cellIndex) {
         itemsTime.appendChild(preview);
     }
 
-    preview.style.top = `${cellIndex * 40 + 2}px`;
+    const sourceCell = Math.max(0, Math.floor(Number(cellIndex) || 0));
+    const top = `${sourceCell * 40 + 2}px`;
+    const previewDataset = preview.dataset || (preview.dataset = {});
+    if (previewDataset.sourceCell === String(sourceCell) && preview.style.top === top) {
+        return;
+    }
+
+    previewDataset.sourceCell = String(sourceCell);
+    preview.style.top = top;
     preview.style.height = '37px';
     preview.innerHTML = `
         <span class="time-entry-hover-label">Click &amp; drag to log</span>
@@ -2927,6 +3187,8 @@ function attachTimeEntriesInteractions() {
 
 // Initialize drag resize handlers over a time entry block
 function startResizingEntry(entryEl, side, clientY) {
+    if (isCompressedDayTimelineDirectManipulationDisabled()) return;
+
     const entryId = entryEl.dataset.id;
     const rect = entryEl.getBoundingClientRect();
     const parentRect = DOM.elItemsTimeEntries.getBoundingClientRect();
@@ -3102,7 +3364,11 @@ function showActivityDetailsPopup(b) {
         };
     }
 
-    const blockTop = startCell * 40;
+    const rowLayout = buildDayTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
+    const displayRow = rowLayout.hideEmptyRows
+        ? Math.max(0, getDisplayRowForSourceRow(rowLayout, startCell))
+        : startCell;
+    const blockTop = displayRow * 40;
     DOM.elActivityDetailsPopup.style.top = `${blockTop + 6}px`;
     DOM.elActivityDetailsPopup.classList.remove('hidden');
 }
@@ -3117,6 +3383,13 @@ function dismissActivityDetailsPopup() {
 // Bind to window namespace
 window.renderTimelineGrids = renderTimelineGrids;
 window.buildVisibleActivityCells = buildVisibleActivityCells;
+window.isCompressedDayTimelineDirectManipulationDisabled = isCompressedDayTimelineDirectManipulationDisabled;
+window.buildDayTimelineRowLayout = buildDayTimelineRowLayout;
+window.getDisplayRowForSourceRow = getDisplayRowForSourceRow;
+window.getSourceRowForDisplayRow = getSourceRowForDisplayRow;
+window.getTimelineDisplayTopForTime = getTimelineDisplayTopForTime;
+window.getTimelineTimeForDisplayTop = getTimelineTimeForDisplayTop;
+window.getTimelineDisplayRangeGeometry = getTimelineDisplayRangeGeometry;
 window.buildVisibleActivityRunsForSummary = buildVisibleActivityRunsForSummary;
 window.buildActivityStreamAssignmentActivities = buildActivityStreamAssignmentActivities;
 window.buildActivityStreamSummaryAssignmentActivity = buildActivityStreamSummaryAssignmentActivity;
