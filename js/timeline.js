@@ -1040,6 +1040,7 @@ function isActivityStreamSummaryAssignment(activity) {
 
 function isAutoAssignedActivityStreamAssignment(activity) {
     return activity?.assignmentSource === 'activity-stream'
+        && activity.assignmentModel !== ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL
         && (activity.autoAssigned === true
             || activity.assignmentModel === ACTIVITY_STREAM_AUTO_ASSIGNMENT_MODEL);
 }
@@ -1119,9 +1120,83 @@ function activityMatchesAssignmentIdentity(candidate, activity, summaryKey) {
         && getActivitySimilarityKey(candidate) === activitySimilarityKey;
 }
 
+function getNativeActivityIdentity(activity) {
+    return normalizeActivityText(activity?.bundleId || activity?.appPath)
+        .trim()
+        .toLowerCase();
+}
+
+function getDominantNonWeakNativeAssignmentSummary(summaries, activity) {
+    if (!isWeakNativeActivity(activity)) return null;
+
+    const activitySimilarityKey = getActivitySimilarityKey(activity);
+    const activityNativeIdentity = getNativeActivityIdentity(activity);
+    let dominant = null;
+
+    for (const summary of summaries || []) {
+        if (!activitySimilarityKey || getActivitySimilarityKey(summary) !== activitySimilarityKey) continue;
+
+        const summaryNativeIdentity = getNativeActivityIdentity(summary);
+        if (activityNativeIdentity && summaryNativeIdentity && activityNativeIdentity !== summaryNativeIdentity) continue;
+        if (isWeakPopupActivityTitle(getActivityDisplayTitle(summary), summary)) continue;
+
+        if (!dominant || Number(summary.duration || 0) > Number(dominant.duration || 0)) {
+            dominant = summary;
+        }
+    }
+
+    return dominant;
+}
+
+function getExactActivitySummaryForAssignment(summaries, summaryKey) {
+    if (!summaryKey) return null;
+    return (summaries || []).find(summary => getActivitySummaryKey(summary) === summaryKey) || null;
+}
+
+function getSameNativeActivitySummaryDuration(summaries, activity) {
+    if (!isNativeActivity(activity)) return 0;
+
+    const activitySimilarityKey = getActivitySimilarityKey(activity);
+    const activityNativeIdentity = getNativeActivityIdentity(activity);
+    return (summaries || []).reduce((total, summary) => {
+        if (activitySimilarityKey && getActivitySimilarityKey(summary) !== activitySimilarityKey) return total;
+
+        const summaryNativeIdentity = getNativeActivityIdentity(summary);
+        if (activityNativeIdentity && summaryNativeIdentity && activityNativeIdentity !== summaryNativeIdentity) return total;
+
+        const duration = Number(summary?.duration);
+        return total + (Number.isFinite(duration) && duration > 0 ? duration : 0);
+    }, 0);
+}
+
+function applySameNativePopupAssignmentDuration(summary, summaries, activity) {
+    if (!summary || !isActivityStreamSummaryAssignment(activity) || !isNativeActivity(activity)) return summary;
+
+    const assignedDuration = Number(activity?.assignedDurationMs);
+    const summaryDuration = Number(summary?.duration);
+    if (!Number.isFinite(assignedDuration)
+        || !Number.isFinite(summaryDuration)
+        || assignedDuration <= summaryDuration) {
+        return summary;
+    }
+
+    const sameNativeDuration = getSameNativeActivitySummaryDuration(summaries, activity);
+    if (sameNativeDuration <= summaryDuration) return summary;
+
+    const durationMatchesSavedPopupRow = Math.abs(sameNativeDuration - assignedDuration) <= 1000;
+    return durationMatchesSavedPopupRow
+        ? { ...summary, duration: sameNativeDuration }
+        : summary;
+}
+
 function getActivitySummaryForAssignmentWithinRange(activities, activity, summaryKey, rangeStart, rangeEnd) {
-    return summarizeActivityOverlaps(activities, rangeStart, rangeEnd)
-        .find(summary => activityMatchesAssignmentIdentity(summary, activity, summaryKey)) || null;
+    const summaries = summarizeActivityOverlaps(activities, rangeStart, rangeEnd);
+    const isStrongNativeAssignment = isNativeActivity(activity) && !isWeakNativeActivity(activity);
+    const summary = getDominantNonWeakNativeAssignmentSummary(summaries, activity)
+        || (isStrongNativeAssignment ? getExactActivitySummaryForAssignment(summaries, summaryKey) : null)
+        || summaries.find(summary => activityMatchesAssignmentIdentity(summary, activity, summaryKey))
+        || null;
+    return applySameNativePopupAssignmentDuration(summary, summaries, activity);
 }
 
 function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
@@ -2452,70 +2527,96 @@ function getPopupActivitySelectionKey(activity) {
     return getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
 }
 
-function syncPopupActivitySelectionRows(blockEl) {
+function isNativeActivity(activity) {
+    return !getActivitySummaryHostname(activity)
+        && Boolean(normalizeActivityText(activity?.bundleId || activity?.appPath || activity?.app).trim());
+}
+
+function isWeakNativeActivity(activity) {
+    return isNativeActivity(activity)
+        && isWeakPopupActivityTitle(getActivityDisplayTitle(activity), activity);
+}
+
+function getDominantNonWeakNativeActivitySource(activity) {
+    if (!isWeakNativeActivity(activity)) return null;
+
+    const dominantSource = getDominantPopupActivitySource(activity);
+    if (!dominantSource?.source || !dominantSource.title) return null;
+
+    return dominantSource;
+}
+
+function getPopupAssignmentActivity(activity) {
+    const dominantSource = getDominantNonWeakNativeActivitySource(activity);
+    if (!dominantSource) return activity;
+
+    const source = dominantSource.source;
+    return {
+        ...activity,
+        app: source.app || activity.app,
+        title: dominantSource.title,
+        url: source.url || activity.url || '',
+        appPath: source.appPath || activity.appPath || '',
+        bundleId: source.bundleId || activity.bundleId || ''
+    };
+}
+
+function buildPopupAssignmentActivities(activities, startMs, endMs) {
+    const assignmentInputs = (Array.isArray(activities) ? activities : [])
+        .map(getPopupAssignmentActivity);
+    const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(assignmentInputs, startMs, endMs);
+    return assignmentActivities.length > 0 ? assignmentActivities : assignmentInputs;
+}
+
+function setPopupActivityRowSelected(row, selected) {
+    const selectButton = row?.querySelector?.('.popup-activity-select');
+    const iconEl = selectButton?.querySelector?.('i');
+
+    row?.classList?.toggle?.('is-selected', selected);
+    if (selected) {
+        row?.classList?.add?.('is-selected');
+        selectButton?.classList?.add?.('is-selected');
+        if (iconEl) iconEl.className = 'ph-fill ph-check-square text-base';
+    } else {
+        row?.classList?.remove?.('is-selected');
+        selectButton?.classList?.remove?.('is-selected');
+        if (iconEl) iconEl.className = 'ph ph-square text-base';
+    }
+    selectButton?.setAttribute?.('aria-pressed', String(Boolean(selected)));
+}
+
+function syncPopupActivitySelectionRows() {
     const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
     if (!rows) return;
 
-    const startCell = parseInt(blockEl.dataset.startCell, 10);
-    const selectedKeys = Number.isFinite(startCell) && state.selectedActivities.has(startCell)
-        ? new Set(getActivityBlockSelectionKeys(blockEl))
-        : new Set();
-
     rows.forEach(row => {
-        const key = row.dataset?.popupSimilarityKey || '';
-        const isSelected = Boolean(key && selectedKeys.has(key));
-        const selectButton = row.querySelector?.('.popup-activity-select');
-        const iconEl = selectButton?.querySelector?.('i');
-
-        if (isSelected) {
-            row.classList?.add?.('is-selected');
-            selectButton?.classList?.add?.('is-selected');
-            if (iconEl) iconEl.className = 'ph-fill ph-check-square text-base';
-        } else {
-            row.classList?.remove?.('is-selected');
-            selectButton?.classList?.remove?.('is-selected');
-            if (iconEl) iconEl.className = 'ph ph-square text-base';
-        }
-        selectButton?.setAttribute?.('aria-pressed', String(isSelected));
+        setPopupActivityRowSelected(row, row?.classList?.contains?.('is-selected'));
     });
 }
 
-function togglePopupActivitySelection(blockEl, activity) {
-    const startCell = parseInt(blockEl.dataset.startCell, 10);
-    const key = getPopupActivitySelectionKey(activity);
+function togglePopupActivitySelection(row) {
+    setPopupActivityRowSelected(row, !row?.classList?.contains?.('is-selected'));
+}
 
-    if (!Number.isFinite(startCell)) return;
-    if (!key) {
-        toggleActivitySelection(blockEl);
-        syncPopupActivitySelectionRows(blockEl);
-        return;
-    }
+function getSelectedPopupAssignmentActivities(displayOverlaps) {
+    const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
+    if (!rows) return displayOverlaps;
 
-    const currentKeys = state.selectedActivities.has(startCell)
-        ? getActivityBlockSelectionKeys(blockEl)
-        : [];
-    const nextKeys = new Set(currentKeys);
+    const selectedActivities = [];
+    rows.forEach(row => {
+        if (!row?.classList?.contains?.('is-selected')) return;
 
-    if (nextKeys.has(key)) {
-        nextKeys.delete(key);
-    } else {
-        nextKeys.add(key);
-    }
+        const index = parseInt(row.dataset?.popupOverlapIndex, 10);
+        const activity = Number.isFinite(index) ? displayOverlaps[index] : null;
+        if (activity) selectedActivities.push(activity);
+    });
 
-    if (nextKeys.size > 0) {
-        setActivityBlockSelected(blockEl, true, Array.from(nextKeys));
-    } else {
-        setActivityBlockSelected(blockEl, false);
-    }
-
-    syncPopupActivitySelectionRows(blockEl);
-    updateMultiSelectBar();
+    return selectedActivities.length > 0 ? selectedActivities : displayOverlaps;
 }
 
 function assignPopupActivity(activity, startMs, endMs) {
     dismissActivityDetailsPopup();
-    const assignmentActivities = buildActivityStreamSummaryAssignmentActivities([activity], startMs, endMs);
-    openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities.length > 0 ? assignmentActivities : [activity]);
+    openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([activity], startMs, endMs));
 }
 
 function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, endMs) {
@@ -2532,7 +2633,7 @@ function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, e
 
         row.querySelector?.('.popup-activity-select')?.addEventListener('click', event => {
             event.stopPropagation();
-            togglePopupActivitySelection(blockEl, activity);
+            togglePopupActivitySelection(row);
         });
 
         row.querySelector?.('.popup-activity-quick-add')?.addEventListener('click', event => {
@@ -2541,7 +2642,7 @@ function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, e
         });
     });
 
-    syncPopupActivitySelectionRows(blockEl);
+    syncPopupActivitySelectionRows();
 }
 
 // Selects or deselects an activity block for bulk actions
@@ -2967,8 +3068,8 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(displayOverlaps, startMs, endMs);
-            openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities.length > 0 ? assignmentActivities : displayOverlaps);
+            const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps);
+            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs));
         };
     } else {
         const singleActivity = displayOverlaps[0] || { app, title, url, appPath, bundleId };
@@ -2997,8 +3098,7 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(displayOverlaps, startMs, endMs);
-            openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities.length > 0 ? assignmentActivities : displayOverlaps);
+            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(displayOverlaps, startMs, endMs));
         };
     }
 

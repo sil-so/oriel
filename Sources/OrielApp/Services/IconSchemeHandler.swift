@@ -60,14 +60,15 @@ final class IconSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         let key = safeFilename([
             query["v"] ?? "native-icons",
-            query["bundleId"] ?? query["appName"] ?? appPath
+            query["bundleId"] ?? query["appName"] ?? appPath,
+            appIconCacheFingerprint(appPath: appPath)
         ].joined(separator: "-"))
         let cached = appCacheDirectory.appendingPathComponent("\(key).png")
         if let data = try? Data(contentsOf: cached) {
             respond(data: data, task: task)
             return
         }
-        let icon = NSWorkspace.shared.icon(forFile: appPath)
+        let icon = applicationIcon(appPath: appPath)
         guard let tiff = icon.tiffRepresentation,
               let representation = NSBitmapImageRep(data: tiff),
               let data = representation.representation(using: .png, properties: [:]) else {
@@ -111,6 +112,45 @@ final class IconSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         return nil
+    }
+
+    private func applicationIcon(appPath: String) -> NSImage {
+        if let iconURL = appIconFileURL(appPath: appPath),
+           let image = NSImage(contentsOf: iconURL) {
+            return image
+        }
+        return NSWorkspace.shared.icon(forFile: appPath)
+    }
+
+    private func appIconCacheFingerprint(appPath: String) -> String {
+        let candidates = [
+            appIconFileURL(appPath: appPath),
+            URL(fileURLWithPath: appPath).appendingPathComponent("Contents/Info.plist"),
+            URL(fileURLWithPath: appPath)
+        ].compactMap { $0 }
+
+        for url in candidates {
+            if let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+               let date = values.contentModificationDate {
+                return "\(Int(date.timeIntervalSince1970))-\(values.fileSize ?? 0)"
+            }
+        }
+
+        return "unknown"
+    }
+
+    private func appIconFileURL(appPath: String) -> URL? {
+        let appURL = URL(fileURLWithPath: appPath)
+        let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: infoURL),
+              let rawIconName = info["CFBundleIconFile"] as? String,
+              !rawIconName.isEmpty else {
+            return nil
+        }
+
+        let iconName = rawIconName.lowercased().hasSuffix(".icns") ? rawIconName : "\(rawIconName).icns"
+        let iconURL = appURL.appendingPathComponent("Contents/Resources").appendingPathComponent(iconName)
+        return FileManager.default.fileExists(atPath: iconURL.path) ? iconURL : nil
     }
 
     private func isOrielApplication(query: [String: String]) -> Bool {

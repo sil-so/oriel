@@ -2338,6 +2338,328 @@ test('summary assignment projection hides standalone short matching activity row
   assert.doesNotMatch(html, />0 min</);
 });
 
+test('strong native summary assignments prefer exact document titles over weak same-app buckets', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const rangeStart = dateStart + (21 * 60 + 40) * 60 * 1000;
+  const rangeEnd = dateStart + (22 * 60 + 10) * 60 * 1000;
+  const assignment = {
+    app: 'Figma',
+    title: 'macOS Big Sur icon template (Community)',
+    appPath: '/Applications/Figma.app',
+    bundleId: 'com.figma.Desktop',
+    start: rangeStart,
+    end: rangeEnd,
+    duration: 15 * 60 * 1000,
+    assignedDurationMs: 15 * 60 * 1000,
+    assignmentStart: rangeStart,
+    assignmentEnd: rangeEnd,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 10
+  };
+  const overlaps = [
+    {
+      app: 'Figma',
+      title: 'Figma',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: rangeStart + 5 * 60 * 1000,
+      end: rangeStart + 5 * 60 * 1000 + 16 * 1000,
+      duration: 16 * 1000
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: rangeStart + 7 * 60 * 1000,
+      end: rangeStart + 21 * 60 * 1000,
+      duration: 14 * 60 * 1000
+    }
+  ];
+
+  const summary = context.getActivitySummaryForAssignmentWithinRange(
+    overlaps,
+    assignment,
+    context.getActivitySummaryKey(assignment),
+    rangeStart,
+    rangeEnd
+  );
+
+  assert.equal(summary.title, 'macOS Big Sur icon template (Community)');
+  assert.equal(summary.duration, 14 * 60 * 1000);
+});
+
+test('weak native summary assignments project to dominant same-app document rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const rangeStart = dateStart + (21 * 60 + 40) * 60 * 1000;
+  const rangeEnd = dateStart + (22 * 60 + 10) * 60 * 1000;
+  const weakFigmaStart = rangeStart + 5 * 60 * 1000;
+  const weakFigmaEnd = weakFigmaStart + 16 * 1000;
+  const documentStart = rangeStart + 7 * 60 * 1000;
+  const documentEnd = documentStart + 14 * 60 * 1000;
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 10,
+    projects: [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }],
+    activities: [
+      {
+        app: 'Figma',
+        title: 'Figma',
+        appPath: '/Applications/Figma.app',
+        bundleId: 'com.figma.Desktop',
+        start: weakFigmaStart,
+        end: weakFigmaEnd,
+        duration: weakFigmaEnd - weakFigmaStart
+      },
+      {
+        app: 'Figma',
+        title: 'macOS Big Sur icon template (Community)',
+        appPath: '/Applications/Figma.app',
+        bundleId: 'com.figma.Desktop',
+        start: documentStart,
+        end: documentEnd,
+        duration: documentEnd - documentStart
+      }
+    ],
+    timeEntries: [{
+      id: 'entry-figma',
+      start: rangeStart,
+      end: rangeEnd,
+      projectId: 'project-1',
+      description: '',
+      activities: [{
+        app: 'Figma',
+        title: 'Figma',
+        appPath: '/Applications/Figma.app',
+        bundleId: 'com.figma.Desktop',
+        start: rangeStart,
+        end: rangeEnd,
+        duration: documentEnd - documentStart,
+        assignedDurationMs: documentEnd - documentStart,
+        assignmentStart: rangeStart,
+        assignmentEnd: rangeEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: 10
+      }]
+    }]
+  });
+
+  const styles = extractEntryStyles(html);
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: rangeStart,
+    end: rangeEnd,
+    zoom: 10
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
+});
+
+test('native popup summary assignments render same-app selected duration from real Figma-shaped rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atMs = (hours, minutes, seconds = 0, ms = 0) => (
+    dateStart + (((hours * 60 + minutes) * 60 + seconds) * 1000) + ms
+  );
+  const rangeStart = atMs(21, 40);
+  const rangeEnd = atMs(22, 10);
+  const activities = [
+    {
+      app: 'Figma',
+      title: 'Figma',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 45, 53, 688),
+      end: atMs(21, 45, 55, 972),
+      duration: 2284
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 46, 27, 186),
+      end: atMs(21, 46, 28, 431),
+      duration: 1245
+    },
+    {
+      app: 'Figma',
+      title: '',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 46, 28, 427),
+      end: atMs(21, 46, 30, 428),
+      duration: 2001
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 46, 30, 427),
+      end: atMs(21, 46, 38, 49),
+      duration: 7622
+    },
+    {
+      app: 'Finder',
+      title: 'Downloads',
+      appPath: '/System/Library/CoreServices/Finder.app',
+      bundleId: 'com.apple.finder',
+      start: atMs(21, 46, 40, 427),
+      end: atMs(21, 46, 47, 730),
+      duration: 7303
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 46, 47, 727),
+      end: atMs(21, 47, 43, 616),
+      duration: 55889
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 47, 44, 207),
+      end: atMs(21, 50, 37, 671),
+      duration: 173464
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 52, 33, 671),
+      end: atMs(21, 52, 35, 322),
+      duration: 1651
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 52, 35, 766),
+      end: atMs(21, 58, 48, 425),
+      duration: 372659
+    },
+    {
+      app: 'Figma',
+      title: 'Home',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 58, 48, 424),
+      end: atMs(21, 58, 50, 516),
+      duration: 2092
+    },
+    {
+      app: 'Figma',
+      title: 'Stars, Icon, Shapes, Symbols, v2 (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 58, 50, 516),
+      end: atMs(21, 59, 28, 424),
+      duration: 37908
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(21, 59, 28, 423),
+      end: atMs(22, 2, 59, 37),
+      duration: 210614
+    },
+    {
+      app: 'Figma',
+      title: 'Figma',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(22, 2, 58, 422),
+      end: atMs(22, 3, 8, 422),
+      duration: 10000
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(22, 3, 8, 421),
+      end: atMs(22, 3, 9, 787),
+      duration: 1366
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(22, 3, 23, 198),
+      end: atMs(22, 3, 36, 425),
+      duration: 13227
+    },
+    {
+      app: 'Figma',
+      title: 'Figma',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(22, 3, 36, 422),
+      end: atMs(22, 3, 40, 612),
+      duration: 4190
+    },
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template (Community)',
+      appPath: '/Applications/Figma.app',
+      bundleId: 'com.figma.Desktop',
+      start: atMs(22, 3, 40, 422),
+      end: atMs(22, 3, 41, 884),
+      duration: 1462
+    }
+  ];
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 10,
+    projects: [{ id: 'project-1', name: 'Oriel Demo Project', color: '#3b82f6' }],
+    activities,
+    timeEntries: [{
+      id: 'entry-figma',
+      start: rangeStart,
+      end: rangeEnd,
+      projectId: 'project-1',
+      description: '',
+      createdBy: 'manual',
+      activities: [{
+        app: 'Figma',
+        title: 'macOS Big Sur icon template (Community)',
+        appPath: '/Applications/Figma.app',
+        bundleId: 'com.figma.Desktop',
+        url: '',
+        start: rangeStart,
+        end: rangeEnd,
+        duration: 897674,
+        assignedDurationMs: 897674,
+        assignmentStart: rangeStart,
+        assignmentEnd: rangeEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: 10
+      }]
+    }]
+  });
+
+  const styles = extractEntryStyles(html);
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: rangeStart,
+    end: rangeEnd,
+    zoom: 10
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+});
+
 test('cross-zoom assignment blocks use standard styling and never overlap at any zoom level', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }];
@@ -3334,6 +3656,81 @@ test('legacy activity-stream assignment envelopes render on display rows at ever
       }), `grouped runs at zoom ${zoom}`);
     }
   }
+});
+
+test('manual summary assignments with stale auto-rule flags render selected assigned duration', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
+  const rangeStart = at(21, 40);
+  const rangeEnd = at(22, 10);
+  const projects = [{ id: 'project-1', name: 'Oriel Demo Project', color: '#3b82f6' }];
+  const activities = [
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template',
+      bundleId: 'com.figma.Desktop',
+      appPath: '/Applications/Figma.app',
+      start: at(21, 50),
+      end: at(22, 4),
+      duration: 14 * 60 * 1000
+    },
+    {
+      app: 'Codex',
+      title: 'Codex',
+      bundleId: 'com.openai.codex',
+      appPath: '/Applications/Codex.app',
+      start: at(22, 4),
+      end: at(22, 5),
+      duration: 60 * 1000
+    }
+  ];
+  const timeEntries = [{
+    id: 'entry-1',
+    start: rangeStart,
+    end: rangeEnd,
+    projectId: 'project-1',
+    taskId: '',
+    description: '',
+    createdBy: 'manual',
+    activities: [
+      {
+        app: 'Figma',
+        title: 'macOS Big Sur icon template',
+        bundleId: 'com.figma.Desktop',
+        appPath: '/Applications/Figma.app',
+        start: rangeStart,
+        end: rangeEnd,
+        duration: 14 * 60 * 1000,
+        assignedDurationMs: 14 * 60 * 1000,
+        assignmentStart: rangeStart,
+        assignmentEnd: rangeEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        autoAssigned: true,
+        autoAssignmentRuleId: 'rule-1'
+      },
+      {
+        app: 'Codex',
+        title: 'Codex',
+        bundleId: 'com.openai.codex',
+        appPath: '/Applications/Codex.app',
+        start: rangeStart,
+        end: rangeEnd,
+        duration: 60 * 1000,
+        assignedDurationMs: 60 * 1000,
+        assignmentStart: rangeStart,
+        assignmentEnd: rangeEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        autoAssigned: true,
+        autoAssignmentRuleId: 'rule-1'
+      }
+    ]
+  }];
+
+  const html = renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom: 10, activities });
+
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
 });
 
 test('activity-stream assignment block without description renders project on the primary row', () => {
@@ -4758,6 +5155,34 @@ test('drag-created time entry modal duration follows deselected visible activiti
   assert.equal(elements.get('modal-duration-lbl').innerText, '0 min');
 });
 
+test('edited time entry modal with explicit activity candidates sums selected activity durations', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 21, 40).getTime();
+  const endMs = new Date(2026, 4, 21, 22, 10).getTime();
+  const rangeActivities = [
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template',
+      bundleId: 'com.figma.Desktop',
+      duration: 14 * 60 * 1000
+    },
+    {
+      app: 'Codex',
+      title: 'Codex',
+      bundleId: 'com.openai.codex',
+      duration: 60 * 1000
+    }
+  ];
+
+  context.editingTimeEntryId = 'entry-1';
+  context.openTimeEntryModal(startMs, endMs, '', 'project-1', true, false, rangeActivities);
+
+  assert.equal(elements.get('modal-duration-lbl').innerText, '15 min');
+
+  context.setModalActivityIncluded(1, false);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '14 min');
+});
+
 test('drag-created time entry modal falls back to manual range when no visible activities remain', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 11, 30).getTime();
@@ -5317,11 +5742,12 @@ test('activity details popup shows Activity Mix footer for one-state activity', 
   assert.match(mixContainerAttributes['aria-label'], /Activity Mix\. Hands-on 10 min · Hands-off 0s\./);
 });
 
-test('multiple activity popover selection opens the floating assignment toolbar', () => {
+test('multiple activity popover selection stays local and assigns selected rows', () => {
   const context = loadTimelineContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 118 * 5 * 60 * 1000;
   let renderedMultiList = '';
+  let modalArgs = null;
   const popupRows = [];
 
   function createClassList(initialClasses = []) {
@@ -5424,12 +5850,16 @@ test('multiple activity popover selection opens the floating assignment toolbar'
   context.DOM.elPopupAssignBtn = {};
   context.DOM.elActivityDetailsPopup = {
     style: {},
-    classList: { remove() {} }
+    classList: { add() {}, remove() {} }
   };
   context.DOM.elMultiSelectBar = {
     classList: createClassList(['hidden'])
   };
   context.DOM.elSelectedCount = { innerText: '' };
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
 
   context.showActivityDetailsPopup(block);
 
@@ -5439,11 +5869,16 @@ test('multiple activity popover selection opens the floating assignment toolbar'
 
   popupRows[1].querySelector('.popup-activity-select').click();
 
-  assert.equal(context.state.selectedActivities.has(118), true);
-  assert.equal(block.classList.contains('selected'), true);
-  assert.equal(context.DOM.elMultiSelectBar.classList.contains('hidden'), false);
-  assert.equal(context.DOM.elSelectedCount.innerText, 1);
-  assert.deepEqual(Array.from(context.getActivityBlockSelectionKeys(block)), ['codex']);
+  assert.equal(context.state.selectedActivities.size, 0);
+  assert.equal(block.classList.contains('selected'), false);
+  assert.equal(context.DOM.elMultiSelectBar.classList.contains('hidden'), true);
+  assert.equal(context.DOM.elSelectedCount.innerText, '');
+
+  context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(modalArgs[5], false);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].app, 'Codex');
 });
 
 test('activity details assignment uses selected block bounds and summary durations', () => {

@@ -1,0 +1,37 @@
+# AGENTS.md
+
+## Project Guidance
+
+Oriel is a local-first macOS time tracker. Keep changes simple,
+maintainable, and easy to review.
+
+## Build And Test
+
+- Run `npm test` for frontend, bridge, and Node compatibility tests.
+- Run `swift test` for native services and persistence tests.
+- Run `npm run build:assets` after changing Tailwind input, vendored
+  frontend assets, or package dependencies.
+- Run `./script/build_and_run.sh --verify` after native app packaging or
+  launch-path changes.
+- Run `./script/build_and_run.sh` when a running app check is needed.
+
+## Privacy And Security
+
+- Do not commit runtime activity data, local SQLite files, logs, screenshots,
+  API keys, signing material, extension secrets, private local paths, or
+  user-identifying fixtures.
+- Treat app/window titles, browser URLs, project names, screenshots, and
+  portable archives as potentially private.
+- For changes touching capture, exclusions, storage, exports, Keychain,
+  Native Messaging, AI calls, Logo.dev calls, or logging, explicitly describe
+  the privacy/security impact in the PR.
+- Keep Logo.dev and AI provider behavior opt-in. Do not add background network
+  calls for captured activity.
+
+## Implementation
+
+- Prefer existing helpers and patterns over new abstractions.
+- Keep public interfaces small and behavior explicit.
+- Update docs when setup, public behavior, privacy behavior, or contribution
+  workflow changes.
+- Keep generated build products and scratch artifacts out of commits.

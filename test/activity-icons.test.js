@@ -34,9 +34,9 @@ function loadNativeUtils() {
 test('uses native macOS app icons when an activity has no URL', () => {
   const utils = loadUtils();
 
-  const html = utils.getActivityIconHTML('Figma', '', 'Silvan 2026 - Relume Figma Kit', '/Applications/Figma.app', 'com.figma.Desktop');
+  const html = utils.getActivityIconHTML('Figma', '', 'Design System Figma Kit', '/Applications/Figma.app', 'com.figma.Desktop');
 
-  assert.match(html, /src="\/api\/icons\/Figma\?v=native-icons-v5/);
+  assert.match(html, /src="\/api\/icons\/Figma\?v=native-icons-v6/);
   assert.match(html, /appPath=%2FApplications%2FFigma\.app/);
   assert.match(html, /bundleId=com\.figma\.Desktop/);
   assert.doesNotMatch(html, /google\.com\/s2\/favicons/);

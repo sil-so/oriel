@@ -278,6 +278,8 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
     const isDragCreatedActivityModal = hasExplicitRangeActivities
         && !isBulk
         && !window.editingTimeEntryId;
+    const isExplicitCandidateActivityModal = hasExplicitRangeActivities
+        && !isBulk;
 
     // Handle assignment layout copy.
     if (isBulk) {
@@ -329,7 +331,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
     }
     const shouldUseSelectedDuration = isBulk
         || finalActivities.some(isAssignedModalActivity)
-        || (isDragCreatedActivityModal && finalActivities.length > 0);
+        || (isExplicitCandidateActivityModal && finalActivities.length > 0);
     state.currentModalDurationMode = shouldUseSelectedDuration
         ? MODAL_DURATION_MODE_SELECTED_ACTIVITIES
         : MODAL_DURATION_MODE_RANGE;

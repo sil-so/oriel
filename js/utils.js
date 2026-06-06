@@ -48,7 +48,7 @@ function formatSelectedWeekLabel(date = state.currentDate) {
     return `${start.toLocaleDateString('en-GB', options)} - ${end.toLocaleDateString('en-GB', options)}`;
 }
 
-const NATIVE_ICON_CACHE_VERSION = 'native-icons-v5';
+const NATIVE_ICON_CACHE_VERSION = 'native-icons-v6';
 
 function buildNativeIconUrl(appName, appPath = '', bundleId = '') {
     const encodedName = encodeURIComponent(appName);
