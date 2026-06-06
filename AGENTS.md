@@ -15,6 +15,18 @@ maintainable, and easy to review.
   launch-path changes.
 - Run `./script/build_and_run.sh` when a running app check is needed.
 
+## Pull Requests
+
+- Use `.github/PULL_REQUEST_TEMPLATE.md` as the source of truth for every PR
+  description.
+- Keep the template's Markdown section headings exactly: `## Summary`,
+  `## Why`, `## User-facing behavior`, `## Verification`, and
+  `## Risk / privacy / security`.
+- Do not replace those headings with colon-prefixed inline labels such as
+  `Summary:` or compress the description into one paragraph.
+- In `## Verification`, list exact commands, tests, builds, or manual checks
+  run. If something was not run, say `Not run` and explain why.
+
 ## Privacy And Security
 
 - Do not commit runtime activity data, local SQLite files, logs, screenshots,
