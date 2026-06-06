@@ -56,6 +56,10 @@ function isHideEmptyActivityRowsEnabled() {
     return Boolean(state?.settings?.hideEmptyActivityRows);
 }
 
+function isCompressedDayTimelineDirectManipulationDisabled() {
+    return state?.timelineMode !== 'week' && isHideEmptyActivityRowsEnabled();
+}
+
 function getTimelineRowDurationMs(zoom) {
     return Math.max(1, Number(zoom) || 1) * 60 * 1000;
 }
@@ -3008,17 +3012,24 @@ function renderLoggedTimeEntries() {
             : '';
         const laneStyle = getLoggedTimeEntryLaneStyle(item);
 
+        const resizeTopHandleHtml = isCompressedDayTimelineDirectManipulationDisabled()
+            ? ''
+            : '<div class="resize-handle-top"></div>';
+        const resizeBottomHandleHtml = isCompressedDayTimelineDirectManipulationDisabled()
+            ? ''
+            : '<div class="resize-handle-bottom"></div>';
+
         html += `
             <div class="${className}"
                  style="top: ${topPx}px; height: ${heightPx}px; --entry-project-color: ${project.color};${laneStyle}"
                  data-id="${entry.id}"${groupDataHtml}>
-                <div class="resize-handle-top"></div>
+                ${resizeTopHandleHtml}
                 <div class="time-entry-main flex justify-between items-start text-white text-[12px] font-semibold leading-tight pointer-events-none">
                     ${mainContentHtml}
                     <span class="duration-pill time-entry-duration shrink-0">${duration} min</span>
                 </div>
                 ${projectRowHtml}
-                <div class="resize-handle-bottom"></div>
+                ${resizeBottomHandleHtml}
             </div>
         `;
     }
@@ -3033,6 +3044,10 @@ function renderLoggedTimeEntries() {
 function showTimeEntryHoverPreview(cellIndex) {
     const itemsTime = DOM.elItemsTimeEntries;
     if (!itemsTime) return;
+    if (isCompressedDayTimelineDirectManipulationDisabled()) {
+        hideTimeEntryHoverPreview();
+        return;
+    }
 
     let preview = itemsTime.querySelector('.time-entry-hover-preview');
     if (!preview) {
@@ -3041,12 +3056,15 @@ function showTimeEntryHoverPreview(cellIndex) {
         itemsTime.appendChild(preview);
     }
 
-    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-    const rowLayout = buildDayTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
-    const displayRow = rowLayout.hideEmptyRows
-        ? Math.max(0, getDisplayRowForSourceRow(rowLayout, cellIndex))
-        : cellIndex;
-    preview.style.top = `${displayRow * 40 + 2}px`;
+    const sourceCell = Math.max(0, Math.floor(Number(cellIndex) || 0));
+    const top = `${sourceCell * 40 + 2}px`;
+    const previewDataset = preview.dataset || (preview.dataset = {});
+    if (previewDataset.sourceCell === String(sourceCell) && preview.style.top === top) {
+        return;
+    }
+
+    previewDataset.sourceCell = String(sourceCell);
+    preview.style.top = top;
     preview.style.height = '37px';
     preview.innerHTML = `
         <span class="time-entry-hover-label">Click &amp; drag to log</span>
@@ -3169,6 +3187,8 @@ function attachTimeEntriesInteractions() {
 
 // Initialize drag resize handlers over a time entry block
 function startResizingEntry(entryEl, side, clientY) {
+    if (isCompressedDayTimelineDirectManipulationDisabled()) return;
+
     const entryId = entryEl.dataset.id;
     const rect = entryEl.getBoundingClientRect();
     const parentRect = DOM.elItemsTimeEntries.getBoundingClientRect();
@@ -3363,6 +3383,7 @@ function dismissActivityDetailsPopup() {
 // Bind to window namespace
 window.renderTimelineGrids = renderTimelineGrids;
 window.buildVisibleActivityCells = buildVisibleActivityCells;
+window.isCompressedDayTimelineDirectManipulationDisabled = isCompressedDayTimelineDirectManipulationDisabled;
 window.buildDayTimelineRowLayout = buildDayTimelineRowLayout;
 window.getDisplayRowForSourceRow = getDisplayRowForSourceRow;
 window.getSourceRowForDisplayRow = getSourceRowForDisplayRow;

@@ -728,6 +728,40 @@ test('time entry pointer hover previews empty rows and active drag retains label
   assert.match(dom.elItemsTimeEntries.child.innerHTML, /Click & drag to log/);
 });
 
+test('compressed Time Entries mousemove skips hover preview and row-layout work', () => {
+  const { context, dom, hoverCalls } = loadMainControlsContext();
+  let layoutCalls = 0;
+
+  context.state.settings.hideEmptyActivityRows = true;
+  context.window.buildDayTimelineRowLayout = () => {
+    layoutCalls += 1;
+    return { hideEmptyRows: true, displayRowCount: 0 };
+  };
+
+  dom.elItemsTimeEntries.dispatch('mousemove', { clientY: 85 });
+
+  assert.equal(layoutCalls, 0);
+  assert.deepEqual(hoverCalls, []);
+});
+
+test('compressed Time Entries disables drag-created entries from empty space', async () => {
+  const { context, dom, dispatchWindow } = loadMainControlsContext();
+  let modalArgs = null;
+
+  context.state.settings.hideEmptyActivityRows = true;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  dom.elItemsTimeEntries.dispatch('mousedown', { button: 0, clientY: 85 });
+  await dispatchWindow('mousemove', { clientY: 165 });
+  await dispatchWindow('mouseup');
+
+  assert.equal(dom.elItemsTimeEntries.child, undefined);
+  assert.equal(modalArgs, null);
+});
+
 test('time entry create cue can run over an existing logged entry row', () => {
   const { dom, hoverCalls, dispatchWindow } = loadMainControlsContext();
   const entryTarget = {

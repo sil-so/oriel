@@ -689,6 +689,31 @@ test('compressed timeline grid keeps unassigned activity rows and manual time en
   assert.equal(manualStyle.height, 37);
 });
 
+test('compressed Time Entries keep entry clicks but omit resize handles', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    hideEmptyActivityRows: true,
+    projects: [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }],
+    activities: [],
+    timeEntries: [{
+      id: 'manual-row',
+      start: dateStart + 9 * 60 * 60 * 1000,
+      end: dateStart + 9 * 60 * 60 * 1000 + 30 * 60 * 1000,
+      projectId: 'project-1',
+      taskId: '',
+      description: 'Manual row',
+      billable: false,
+      activities: []
+    }]
+  });
+
+  assert.match(html, /class="time-entry-block/);
+  assert.match(html, /data-id="manual-row"/);
+  assert.doesNotMatch(html, /resize-handle-top/);
+  assert.doesNotMatch(html, /resize-handle-bottom/);
+});
+
 test('jump to current time scrolls both timeline panes to the same current-time position', () => {
   const { context, memScroll, timeScroll } = loadScrollContext();
 

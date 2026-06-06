@@ -1827,6 +1827,13 @@ function setupMainEventListeners() {
         return Math.floor(y / 40);
     }
 
+    function areCompressedTimeEntryRangeEditsDisabled() {
+        if (typeof window.isCompressedDayTimelineDirectManipulationDisabled === 'function') {
+            return window.isCompressedDayTimelineDirectManipulationDisabled();
+        }
+        return state.timelineMode !== 'week' && Boolean(state.settings?.hideEmptyActivityRows);
+    }
+
     function getCurrentTimeEntryRowLayout() {
         if (typeof window.buildDayTimelineRowLayout !== 'function') return null;
         const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
@@ -1917,6 +1924,9 @@ function setupMainEventListeners() {
             hideTimeEntryHoverPreview();
             return;
         }
+        if (areCompressedTimeEntryRangeEditsDisabled()) {
+            return;
+        }
 
         const rect = DOM.elItemsTimeEntries.getBoundingClientRect();
         const boundedCellIndex = getSourceCellIndexFromDisplayY(e.clientY - rect.top);
@@ -1934,8 +1944,13 @@ function setupMainEventListeners() {
         // Only left click triggers drag log
         if (e.button !== 0) return;
 
-        isMouseDown = true;
         const entryBlock = e.target.closest('.time-entry-block');
+        if (areCompressedTimeEntryRangeEditsDisabled()) {
+            pendingEntryCreateDrag = null;
+            return;
+        }
+
+        isMouseDown = true;
         if (entryBlock) {
             pendingEntryCreateDrag = {
                 startY: e.clientY,
