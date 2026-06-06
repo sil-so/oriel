@@ -16,7 +16,7 @@ final class PreferencesWindowController: NSWindowController {
         self.store = store
         self.browserCompanion = browserCompanion
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 570, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 465),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -41,55 +41,124 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     private func buildContent() {
-        let heading = NSTextField(labelWithString: "Oriel Preferences")
-        heading.font = .systemFont(ofSize: 17, weight: .semibold)
-        let note = NSTextField(wrappingLabelWithString: "Recorded activity remains on this Mac. Browser brand icons are disabled unless explicitly enabled in the Oriel interface.")
-        note.textColor = .secondaryLabelColor
-        note.maximumNumberOfLines = 3
-
         trackingCheckbox.target = self
         trackingCheckbox.action = #selector(toggleTracking)
         loginCheckbox.target = self
         loginCheckbox.action = #selector(toggleLoginItem)
 
-        let dataHeading = NSTextField(labelWithString: "Data Backup")
-        dataHeading.font = .systemFont(ofSize: 13, weight: .semibold)
-        let dataNote = NSTextField(wrappingLabelWithString: "Export a portable archive or restore one you previously exported. Restoring replaces the current local database after confirmation.")
-        dataNote.textColor = .secondaryLabelColor
         let exportButton = NSButton(title: "Export Archive...", target: self, action: #selector(exportArchive))
+        exportButton.bezelStyle = .rounded
         let restoreButton = NSButton(title: "Restore Archive...", target: self, action: #selector(restoreArchive))
+        restoreButton.bezelStyle = .rounded
         let dataActions = NSStackView(views: [exportButton, restoreButton])
         dataActions.orientation = .horizontal
-        dataActions.spacing = 8
+        dataActions.alignment = .centerY
+        dataActions.spacing = 10
 
-        let browserHeading = NSTextField(labelWithString: "Developer Browser Companion")
-        browserHeading.font = .systemFont(ofSize: 13, weight: .semibold)
-        let browserNote = NSTextField(wrappingLabelWithString: "For unpacked Chrome/Brave extension testing, enter the extension identifier. Registration restricts the native host to that extension origin.")
-        browserNote.textColor = .secondaryLabelColor
+        browserStatusLabel.font = .systemFont(ofSize: 12)
         browserStatusLabel.textColor = .secondaryLabelColor
         extensionIdentifierField.placeholderString = "Unpacked extension identifier"
-        extensionIdentifierField.widthAnchor.constraint(equalToConstant: 310).isActive = true
+        extensionIdentifierField.font = .systemFont(ofSize: 13)
+        extensionIdentifierField.widthAnchor.constraint(equalToConstant: 380).isActive = true
         let browserButton = NSButton(title: "Enable Browser Tracking", target: self, action: #selector(enableBrowserTracking))
+        browserButton.bezelStyle = .rounded
+        browserButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 172).isActive = true
         let browserActions = NSStackView(views: [extensionIdentifierField, browserButton])
         browserActions.orientation = .horizontal
-        browserActions.spacing = 8
+        browserActions.alignment = .centerY
+        browserActions.spacing = 12
+
+        let captureSection = makeSection(
+            title: "Capture",
+            views: [
+                makeBodyLabel("Recorded activity remains on this Mac. Browser brand icons stay disabled unless you enable them in Oriel."),
+                makeControlStack([trackingCheckbox, loginCheckbox])
+            ]
+        )
+        let browserSection = makeSection(
+            title: "Developer Browser Companion",
+            views: [
+                makeBodyLabel("For unpacked Chrome or Brave extension testing, enter the extension identifier. Registration restricts the native host to that extension origin."),
+                browserStatusLabel,
+                browserActions
+            ]
+        )
+        let dataSection = makeSection(
+            title: "Data Backup",
+            views: [
+                makeBodyLabel("Export a portable archive or restore one you previously exported. Restoring replaces the current local database after confirmation."),
+                dataActions
+            ]
+        )
+        let firstDivider = makeSeparator()
+        let secondDivider = makeSeparator()
 
         let stack = NSStackView(views: [
-            heading, note, trackingCheckbox, loginCheckbox,
-            browserHeading, browserNote, browserStatusLabel, browserActions,
-            dataHeading, dataNote, dataActions
+            captureSection,
+            firstDivider,
+            browserSection,
+            secondDivider,
+            dataSection
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 15
+        stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
         guard let contentView = window?.contentView else { return }
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24)
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 28),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -28),
+            captureSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            browserSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            dataSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            firstDivider.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            secondDivider.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+    }
+
+    private func makeSection(title: String, views: [NSView]) -> NSStackView {
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        heading.textColor = .labelColor
+
+        let arrangedViews: [NSView] = [heading] + views
+        let stack = NSStackView(views: arrangedViews)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setCustomSpacing(8, after: heading)
+        for view in arrangedViews where view is NSTextField {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return stack
+    }
+
+    private func makeBodyLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 3
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    private func makeControlStack(_ controls: [NSView]) -> NSStackView {
+        let stack = NSStackView(views: controls)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        return stack
+    }
+
+    private func makeSeparator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        return separator
     }
 
     @objc private func toggleTracking() {
