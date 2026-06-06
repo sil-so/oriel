@@ -127,6 +127,11 @@ function timeEntryActivitySnapshot(activity) {
     return snapshot;
 }
 
+function manualTimeEntryActivitySnapshot(activity) {
+    const { autoAssigned, autoAssignmentRuleId, ...snapshot } = timeEntryActivitySnapshot(activity);
+    return snapshot;
+}
+
 function isActivityStreamAssignment(activity) {
     return activity?.assignmentSource === 'activity-stream';
 }
@@ -145,7 +150,7 @@ function normalizeActivityStreamAssignmentForSave(activity) {
     }
 
     return {
-        ...timeEntryActivitySnapshot(activity),
+        ...manualTimeEntryActivitySnapshot(activity),
         start,
         end,
         duration,
@@ -212,6 +217,35 @@ function getActivityDurationMs(activity) {
         return activity.end - activity.start;
     }
     return 0;
+}
+
+function collectSummarizedActivityOverlaps(startMs, endMs) {
+    const blockOverlaps = [];
+    for (const act of state.activities || []) {
+        const overlapStart = Math.max(startMs, act.start);
+        const overlapEnd = Math.min(endMs, act.end);
+        if (overlapEnd > overlapStart) {
+            blockOverlaps.push({ ...act, duration: (overlapEnd - overlapStart) });
+        }
+    }
+
+    return typeof window.summarizeActivityOverlaps === 'function'
+        ? summarizeActivityOverlaps(blockOverlaps)
+        : blockOverlaps;
+}
+
+function buildManualTimeEntryUpdatePayload(entry, startMs, endMs, activities) {
+    return {
+        start: startMs,
+        end: endMs,
+        description: entry?.description || '',
+        projectId: entry?.projectId || '',
+        taskId: entry?.taskId || '',
+        billable: Boolean(entry?.billable),
+        createdBy: 'manual',
+        autoRuleId: '',
+        activities: (activities || []).map(normalizeSelectedModalActivityForTimeEntrySave)
+    };
 }
 
 function getBulkTimeEntryActivities(activity) {
@@ -1596,6 +1630,10 @@ function setupMainEventListeners() {
                     billable,
                     activities: normalizeModalActivitiesForTimeEntrySave(selectedModalActivities)
                 };
+                if (window.editingTimeEntryId) {
+                    payload.createdBy = 'manual';
+                    payload.autoRuleId = '';
+                }
 
                 let res;
                 const editingGroupIds = Array.isArray(window.editingTimeEntryGroupIds)
@@ -1876,19 +1914,7 @@ function setupMainEventListeners() {
                 const startMs = dateStartOfDay + cellStart * state.zoom * 60 * 1000;
                 const endMs = dateStartOfDay + cellEnd * state.zoom * 60 * 1000;
 
-                // Collect overlapping recorded activity segments.
-                const blockOverlaps = [];
-                for (const act of state.activities) {
-                    const overlapStart = Math.max(startMs, act.start);
-                    const overlapEnd = Math.min(endMs, act.end);
-                    if (overlapEnd > overlapStart) {
-                        blockOverlaps.push({ ...act, duration: (overlapEnd - overlapStart) });
-                    }
-                }
-                
-                const mergedOverlaps = typeof window.summarizeActivityOverlaps === 'function'
-                    ? summarizeActivityOverlaps(blockOverlaps)
-                    : blockOverlaps;
+                const mergedOverlaps = collectSummarizedActivityOverlaps(startMs, endMs);
 
                 openTimeEntryModal(startMs, endMs, '', null, null, false, mergedOverlaps);
                 dragBoxVisual?.remove?.();
@@ -1917,26 +1943,24 @@ function setupMainEventListeners() {
             
             const entry = state.timeEntries.find(ent => ent.id === entryId);
             if (entry) {
-                // When drag-to-resize releases, also fetch overlapping recorded activities,
-                // exactly like normal assigning logs, to associate relevant records!
-                const blockOverlaps = [];
-                for (const act of state.activities) {
-                    const overlapStart = Math.max(startMs, act.start);
-                    const overlapEnd = Math.min(endMs, act.end);
-                    if (overlapEnd > overlapStart) {
-                        blockOverlaps.push({ ...act, duration: (overlapEnd - overlapStart) });
-                    }
+                const blockActivities = collectSummarizedActivityOverlaps(startMs, endMs);
+                if (blockActivities.length > 1) {
+                    window.editingTimeEntryId = entry.id;
+                    window.editingTimeEntryGroupIds = null;
+                    openTimeEntryModal(
+                        startMs,
+                        endMs,
+                        entry.description,
+                        entry.projectId,
+                        entry.billable,
+                        false,
+                        blockActivities,
+                        entry.taskId || ''
+                    );
+                    return;
                 }
-                const blockActivities = typeof window.summarizeActivityOverlaps === 'function'
-                    ? summarizeActivityOverlaps(blockOverlaps)
-                    : blockOverlaps;
 
-                const payload = {
-                    ...entry,
-                    start: startMs,
-                    end: endMs,
-                    activities: blockActivities
-                };
+                const payload = buildManualTimeEntryUpdatePayload(entry, startMs, endMs, blockActivities);
                 
                 try {
                     const res = await fetch(`${API_BASE}/time-entries/${entryId}`, {

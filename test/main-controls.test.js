@@ -357,9 +357,9 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     fetchCalls,
     nativeRequests,
     stored,
-    dispatchWindow(type, event = {}) {
+    async dispatchWindow(type, event = {}) {
       for (const listener of windowListeners[type] || []) {
-        listener(event);
+        await listener(event);
       }
     }
   };
@@ -720,6 +720,89 @@ test('column splitter drag prevents text selection until release', () => {
   assert.equal(element('body').style.cursor, 'default');
 });
 
+test('resizing auto-rule entry over multiple recorded activities opens edit modal for selection', async () => {
+  const { context, dispatchWindow, fetchCalls } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
+  const rangeStart = at(21, 40);
+  const rangeEnd = at(22, 10);
+  const figma = {
+    app: 'Figma',
+    title: 'macOS Big Sur icon template',
+    bundleId: 'com.figma.Desktop',
+    appPath: '/Applications/Figma.app',
+    start: at(21, 50),
+    end: at(22, 4),
+    duration: 14 * 60 * 1000
+  };
+  const codex = {
+    app: 'Codex',
+    title: 'Codex',
+    bundleId: 'com.openai.codex',
+    appPath: '/Applications/Codex.app',
+    start: at(22, 4),
+    end: at(22, 5),
+    duration: 60 * 1000
+  };
+  const entryEl = {
+    dataset: { id: 'entry-1' },
+    style: {
+      top: `${((21 * 60 + 40) / 10) * 40}px`,
+      height: `${3 * 40 - 1}px`
+    },
+    getBoundingClientRect() {
+      return { top: (22 * 60 / 10) * 40, height: 40 };
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 10;
+  context.state.activities = [figma, codex];
+  context.state.timeEntries = [{
+    id: 'entry-1',
+    start: at(22, 0),
+    end: rangeEnd,
+    projectId: 'project-1',
+    taskId: '',
+    description: '',
+    billable: false,
+    createdBy: 'auto-rule',
+    autoRuleId: 'rule-1',
+    activities: [{
+      app: 'Codex',
+      title: 'Codex',
+      bundleId: 'com.openai.codex',
+      appPath: '/Applications/Codex.app',
+      start: at(22, 0),
+      end: rangeEnd,
+      duration: 10 * 60 * 1000,
+      assignedDurationMs: 10 * 60 * 1000,
+      assignmentStart: at(22, 0),
+      assignmentEnd: rangeEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-1'
+    }]
+  }];
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  context.startResizingEntry(entryEl, 'top', 0);
+  await dispatchWindow('mouseup');
+
+  assert.equal(fetchCalls.length, 0);
+  assert.equal(context.window.editingTimeEntryId, 'entry-1');
+  assert.equal(modalArgs[0], rangeStart);
+  assert.equal(modalArgs[1], rangeEnd);
+  assert.equal(modalArgs[3], 'project-1');
+  assert.equal(modalArgs[5], false);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.app), ['Figma', 'Codex']);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.duration), [14 * 60 * 1000, 60 * 1000]);
+});
+
 test('bulk activity assignment saves separate entries at each selected activity time', async () => {
   const { dom, context, fetchCalls } = loadMainControlsContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -912,6 +995,72 @@ test('standard activity assignment modal saves selected summary rows without re-
     'activity-stream-summary',
     'activity-stream-summary'
   ]);
+});
+
+test('saving edited auto-assigned activity candidates strips auto-rule metadata', async () => {
+  const { dom, context, fetchCalls } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const rangeStart = dateStart + (21 * 60 + 40) * 60 * 1000;
+  const rangeEnd = dateStart + (22 * 60 + 10) * 60 * 1000;
+
+  context.window.isBulkAllocation = false;
+  context.window.editingTimeEntryId = 'entry-1';
+  context.state.currentModalDurationMode = 'selected-activities';
+  dom.elModalStart.value = '21:40';
+  dom.elModalEnd.value = '22:10';
+  dom.elModalDescription.value = '';
+  dom.elModalProjectSelect.value = 'project-1';
+  dom.elModalTaskSelect.value = '';
+  dom.elModalBillable.checked = false;
+  context.state.currentModalActivities = [
+    {
+      app: 'Figma',
+      title: 'macOS Big Sur icon template',
+      bundleId: 'com.figma.Desktop',
+      appPath: '/Applications/Figma.app',
+      start: rangeStart,
+      end: rangeEnd,
+      duration: 14 * 60 * 1000,
+      assignedDurationMs: 14 * 60 * 1000,
+      assignmentStart: rangeStart,
+      assignmentEnd: rangeEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-1'
+    },
+    {
+      app: 'Codex',
+      title: 'Codex',
+      bundleId: 'com.openai.codex',
+      appPath: '/Applications/Codex.app',
+      start: rangeStart,
+      end: rangeEnd,
+      duration: 60 * 1000,
+      assignedDurationMs: 60 * 1000,
+      assignmentStart: rangeStart,
+      assignmentEnd: rangeEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-1'
+    }
+  ];
+
+  await dom.elModalBtnSave.click();
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, 'http://localhost:3000/api/time-entries/entry-1');
+  assert.deepEqual(fetchCalls[0].body.activities.map(activity => activity.assignedDurationMs), [
+    14 * 60 * 1000,
+    60 * 1000
+  ]);
+  assert.deepEqual(fetchCalls[0].body.activities.map(activity => activity.assignmentModel), [
+    'activity-stream-summary',
+    'activity-stream-summary'
+  ]);
+  assert.deepEqual(fetchCalls[0].body.activities.map(activity => activity.autoAssigned), [undefined, undefined]);
+  assert.deepEqual(fetchCalls[0].body.activities.map(activity => activity.autoAssignmentRuleId), [undefined, undefined]);
 });
 
 test('activity-backed drag-created entry saves selected normal activity durations', async () => {
