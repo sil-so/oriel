@@ -54,7 +54,14 @@ function loadAiSidebarContext() {
         aiProvider: '',
         aiOpenAIModel: 'gpt-5.2',
         aiGoogleModel: 'gemini-3.5-flash',
-        aiAnthropicModel: 'claude-sonnet-4-20250514'
+        aiAnthropicModel: 'claude-sonnet-4-20250514',
+        aiOpenRouterModel: 'google/gemini-3.1-flash-lite',
+        aiScreenshotProvider: '',
+        aiScreenshotSummariesEnabled: false,
+        aiScreenshotFrequencyPreset: 'balanced',
+        aiScreenshotDailyCap: 100,
+        aiScreenshotTimeoutSeconds: 20,
+        aiScreenshotModelMode: 'askAI'
       }
     },
     localStorage: {
@@ -86,6 +93,7 @@ function loadAiSidebarContext() {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/ai-settings.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/ai-sidebar.js', 'utf8'), context);
   return context;
 }
@@ -136,6 +144,14 @@ function fakeElement(options = {}) {
         ...event
       });
     },
+    dispatch(type, event = {}) {
+      return listeners.get(type)?.({
+        target: element,
+        stopPropagation() {},
+        preventDefault() {},
+        ...event
+      });
+    },
     focus() {
       element.focused = true;
     },
@@ -173,9 +189,10 @@ function fakeElement(options = {}) {
 }
 
 function createAiSettingsDom({
-  keyStatus = { openai: true, google: false, anthropic: false },
+  keyStatus = { openai: true, google: false, anthropic: false, openrouter: false },
   modelListResult = null,
   confirmResult = true,
+  customConfirm = null,
   setTimeoutImpl = setTimeout,
   clearTimeoutImpl = clearTimeout
 } = {}) {
@@ -195,73 +212,130 @@ function createAiSettingsDom({
     'sidebar-tab-ai',
     'work-times-panel',
     'ai-sidebar-panel',
-    'ai-settings-panel',
     'ai-settings-button',
-    'ai-settings-close-button',
+    'ai-unconfigured-status',
     'ai-new-chat-button',
-    'ai-day-label',
     'ai-chat-messages',
-    'ai-settings-key-status',
-    'ai-settings-feedback',
-    'ai-api-key-input',
-    'ai-key-edit-button',
-    'ai-key-save-button',
-    'ai-key-save-label',
-    'ai-key-cancel-button',
-    'ai-key-delete-button',
-    'ai-model-picker-button',
-    'ai-model-picker-label',
-    'ai-model-picker-menu',
-    'ai-model-search-input',
-    'ai-model-option-list',
-    'ai-model-refresh-button',
-    'ai-model-refresh-label',
-    'ai-model-refresh-confirm',
-    'ai-model-refresh-confirm-text',
-    'ai-model-refresh-confirm-button',
-    'ai-model-refresh-cancel-button',
-    'ai-model-refresh-meta',
+    'settings-ai-key-status',
+    'settings-ai-feedback',
+    'settings-ai-api-key-input',
+    'settings-ai-key-edit-button',
+    'settings-ai-key-save-button',
+    'settings-ai-key-save-label',
+    'settings-ai-key-cancel-button',
+    'settings-ai-key-delete-button',
+    'settings-ai-ask-provider',
+    'settings-ai-model-picker-button',
+    'settings-ai-model-picker-label',
+    'settings-ai-model-picker-menu',
+    'settings-ai-model-search-input',
+    'settings-ai-model-option-list',
+    'settings-ai-model-refresh-button',
+    'settings-ai-model-refresh-label',
+    'settings-ai-model-refresh-confirm',
+    'settings-ai-model-refresh-confirm-text',
+    'settings-ai-model-refresh-confirm-button',
+    'settings-ai-model-refresh-cancel-button',
+    'settings-ai-model-refresh-meta',
+    'settings-ai-screenshot-enabled',
+    'settings-ai-screenshot-provider',
+    'settings-ai-screenshot-frequency',
+    'settings-ai-screenshot-daily-cap',
+    'settings-ai-screenshot-timeout',
+    'settings-ai-screenshot-model-mode',
+    'settings-ai-screenshot-model-override',
+    'settings-ai-screenshot-model-input',
+    'settings-ai-screenshot-model-picker-button',
+    'settings-ai-screenshot-model-picker-label',
+    'settings-ai-screenshot-model-picker-menu',
+    'settings-ai-screenshot-model-search-input',
+    'settings-ai-screenshot-model-option-list',
+    'settings-ai-screenshot-model-refresh-button',
+    'settings-ai-screenshot-model-refresh-label',
+    'settings-ai-screenshot-model-refresh-confirm',
+    'settings-ai-screenshot-model-refresh-confirm-text',
+    'settings-ai-screenshot-model-refresh-confirm-button',
+    'settings-ai-screenshot-model-refresh-cancel-button',
+    'settings-ai-screenshot-model-refresh-meta',
+    'settings-ai-screenshot-test-button',
     'ai-loading-spinner',
     'ai-chat-input',
     'ai-send-button',
     'ai-status'
   ].forEach(id => make(id));
 
-  elements['ai-model-picker-menu'].classList.add('hidden');
-  elements['ai-model-refresh-confirm'].classList.add('hidden');
+  const aliases = {
+    'ai-settings-key-status': 'settings-ai-key-status',
+    'ai-settings-feedback': 'settings-ai-feedback',
+    'ai-api-key-input': 'settings-ai-api-key-input',
+    'ai-key-edit-button': 'settings-ai-key-edit-button',
+    'ai-key-save-button': 'settings-ai-key-save-button',
+    'ai-key-save-label': 'settings-ai-key-save-label',
+    'ai-key-cancel-button': 'settings-ai-key-cancel-button',
+    'ai-key-delete-button': 'settings-ai-key-delete-button',
+    'ai-model-picker-button': 'settings-ai-model-picker-button',
+    'ai-model-picker-label': 'settings-ai-model-picker-label',
+    'ai-model-picker-menu': 'settings-ai-model-picker-menu',
+    'ai-model-search-input': 'settings-ai-model-search-input',
+    'ai-model-option-list': 'settings-ai-model-option-list',
+    'ai-model-refresh-button': 'settings-ai-model-refresh-button',
+    'ai-model-refresh-label': 'settings-ai-model-refresh-label',
+    'ai-model-refresh-confirm': 'settings-ai-model-refresh-confirm',
+    'ai-model-refresh-confirm-text': 'settings-ai-model-refresh-confirm-text',
+    'ai-model-refresh-confirm-button': 'settings-ai-model-refresh-confirm-button',
+    'ai-model-refresh-cancel-button': 'settings-ai-model-refresh-cancel-button',
+    'ai-model-refresh-meta': 'settings-ai-model-refresh-meta'
+  };
+  Object.entries(aliases).forEach(([oldId, newId]) => {
+    elements[oldId] = elements[newId];
+  });
+
+  elements['settings-ai-model-picker-menu'].classList.add('hidden');
+  elements['settings-ai-model-refresh-confirm'].classList.add('hidden');
+  elements['settings-ai-screenshot-model-picker-menu'].classList.add('hidden');
+  elements['settings-ai-screenshot-model-refresh-confirm'].classList.add('hidden');
   elements['ai-loading-spinner'].classList.add('hidden');
-  const saveLabel = elements['ai-key-save-label'];
-  elements['ai-key-save-button'].querySelector = selector => (selector === 'span' ? saveLabel : null);
+  const saveLabel = elements['settings-ai-key-save-label'];
+  elements['settings-ai-key-save-button'].querySelector = selector => (selector === 'span' ? saveLabel : null);
   const refreshIcon = fakeElement();
-  elements['ai-model-refresh-button'].querySelector = selector => {
+  elements['settings-ai-model-refresh-button'].querySelector = selector => {
     if (selector === 'i') return refreshIcon;
-    if (selector === 'span') return elements['ai-model-refresh-label'];
+    if (selector === 'span') return elements['settings-ai-model-refresh-label'];
     return null;
   };
-  elements['ai-model-refresh-button']._icon = refreshIcon;
+  elements['settings-ai-model-refresh-button']._icon = refreshIcon;
+  const screenshotRefreshIcon = fakeElement();
+  elements['settings-ai-screenshot-model-refresh-button'].querySelector = selector => {
+    if (selector === 'i') return screenshotRefreshIcon;
+    if (selector === 'span') return elements['settings-ai-screenshot-model-refresh-label'];
+    return null;
+  };
+  elements['settings-ai-screenshot-model-refresh-button']._icon = screenshotRefreshIcon;
   const sendLabel = fakeElement();
   elements['ai-send-button'].querySelector = selector => (selector === 'span' ? sendLabel : null);
 
   const providerCards = {};
-  ['openai', 'google', 'anthropic'].forEach(provider => {
-    providerCards[provider] = fakeElement({ dataset: { aiProvider: provider } });
-    make(`ai-provider-${provider}-key-state`);
+  ['openai', 'google', 'anthropic', 'openrouter'].forEach(provider => {
+    providerCards[provider] = fakeElement({ dataset: { settingsAiProvider: provider } });
+    const keyState = make(`settings-ai-provider-${provider}-key-state`);
+    elements[`ai-provider-${provider}-key-state`] = keyState;
   });
 
   const requests = [];
   context.confirm = () => confirmResult;
+  if (customConfirm) context.showCustomConfirm = customConfirm;
   context.document = {
     getElementById(id) {
       return elements[id] || null;
     },
     querySelector(selector) {
-      const providerMatch = selector.match(/^\[data-ai-provider="([^"]+)"\]$/);
+      const providerMatch = selector.match(/^\[data-settings-ai-provider="([^"]+)"\]$/);
       if (providerMatch) return providerCards[providerMatch[1]] || null;
       if (selector === '.ai-composer') return fakeElement();
       return null;
     },
     querySelectorAll(selector) {
-      if (selector === '[data-ai-provider]') return Object.values(providerCards);
+      if (selector === '[data-settings-ai-provider]') return Object.values(providerCards);
       if (selector === '[data-ai-prompt]') return [];
       return [];
     },
@@ -824,59 +898,74 @@ test('AI draft activity set opens the bulk review modal with proposed activities
   ]);
 });
 
-test('Ask AI markup uses a settings panel and explicit loading affordance', () => {
+test('Ask AI markup uses Preferences configuration and explicit loading affordance', () => {
   const markup = fs.readFileSync('index.html', 'utf8');
   const styles = fs.readFileSync('css/index.css', 'utf8');
   const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
   const aiPanelBlock = styles.match(/\.sidebar-panel--ai\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
-  const settingsPanelBlock = styles.match(/\.ai-settings-panel\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
 
   assert.match(markup, /id="ai-settings-button"/);
-  assert.match(markup, /id="ai-settings-panel"/);
-  assert.match(markup, /id="ai-settings-close-button"/);
+  assert.doesNotMatch(markup, /id="ai-configure-button"/);
+  assert.match(markup, /id="ai-unconfigured-status"[\s\S]*No AI provider configured/);
+  assert.doesNotMatch(markup, /id="ai-provider-status"/);
+  assert.doesNotMatch(markup, /id="ai-model-status"/);
+  assert.doesNotMatch(markup, /id="ai-settings-panel"/);
   assert.match(markup, /id="ai-loading-spinner"/);
   assert.match(markup, /aria-busy="false"/);
-  assert.match(styles, /\.ai-settings-panel/);
+  assert.match(styles, /\.ai-unconfigured-status/);
+  assert.doesNotMatch(styles, /\.ai-status-card/);
   assert.match(aiPanelBlock, /position:\s*relative/);
-  assert.match(settingsPanelBlock, /position:\s*absolute/);
-  assert.match(settingsPanelBlock, /inset:\s*[^;]+;/);
-  assert.match(settingsPanelBlock, /overflow-y:\s*auto/);
-  assert.match(settingsPanelBlock, /background:\s*var\(--surface-panel\)/);
-  assert.match(settingsPanelBlock, /border-radius:\s*0/);
-  assert.match(settingsPanelBlock, /z-index:/);
   assert.match(styles, /\.ai-chat-input[\s\S]*padding:/);
   assert.match(styles, /@keyframes ai-spin/);
   assert.match(script, /setAiLoadingState/);
-  assert.match(script, /ai-settings-close-button[\s\S]*setAiSettingsOpen\(false\)/);
+  assert.match(script, /openSettingsModal\(\{ section: 'ai' \}\)/);
 });
 
 test('Ask AI UI keeps provider status in settings and exposes prompt chips', () => {
   const markup = fs.readFileSync('index.html', 'utf8');
   const styles = fs.readFileSync('css/index.css', 'utf8');
   const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
   const promptChipMatches = markup.match(/class="ai-prompt-chip"/g) || [];
   const tabGroupBlock = styles.match(/\.sidebar-tab-group\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
   const composerBlock = styles.match(/\.ai-composer\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
 
   assert.doesNotMatch(markup, /id="ai-key-status"/);
+  assert.doesNotMatch(markup, /id="ai-settings-panel"/);
+  assert.doesNotMatch(markup, /aria-controls="ai-settings-panel"/);
+  assert.doesNotMatch(script, /function saveAiKey/);
+  assert.match(aiSettingsScript, /function saveAiKey/);
   assert.doesNotMatch(markup, /Google AI/);
   assert.doesNotMatch(markup, /Model refresh only runs when you ask/);
   assert.doesNotMatch(script, /Curated models are available offline/);
   assert.doesNotMatch(script, /Google AI/);
-  assert.match(markup, /id="ai-settings-key-status"/);
-  assert.match(markup, /id="ai-settings-feedback"/);
+  assert.match(markup, /data-settings-section-button="ai"/);
+  assert.doesNotMatch(markup, /id="settings-ai-key-status"/);
+  assert.match(markup, /id="settings-ai-feedback"/);
   assert.match(markup, /Keys stay in macOS Keychain\./);
-  assert.match(markup, /data-ai-provider="openai"[\s\S]*OpenAI/);
-  assert.match(markup, /data-ai-provider="google"[\s\S]*Gemini/);
-  assert.match(markup, /data-ai-provider="anthropic"[\s\S]*Claude/);
-  assert.match(markup, /id="ai-model-picker-button"/);
-  assert.match(markup, /id="ai-model-search-input"/);
-  assert.match(markup, /id="ai-model-refresh-button"/);
-  assert.match(markup, /id="ai-model-refresh-label"/);
-  assert.match(markup, /id="ai-model-refresh-confirm"/);
-  assert.match(markup, /id="ai-model-refresh-confirm-button"/);
-  assert.match(markup, /id="ai-key-edit-button"/);
-  assert.match(markup, /class="button-secondary ai-key-cancel-button hidden" id="ai-key-cancel-button"/);
+  assert.match(markup, /data-settings-ai-provider="openai"[\s\S]*OpenAI/);
+  assert.match(markup, /data-settings-ai-provider="google"[\s\S]*Gemini/);
+  assert.match(markup, /data-settings-ai-provider="anthropic"[\s\S]*Claude/);
+  assert.match(markup, /data-settings-ai-provider="openrouter"[\s\S]*OpenRouter/);
+  assert.match(markup, /id="settings-ai-ask-provider"/);
+  assert.match(markup, /id="settings-ai-model-picker-button"/);
+  assert.match(markup, /id="settings-ai-model-search-input"/);
+  assert.match(markup, /id="settings-ai-model-refresh-button"/);
+  assert.match(markup, /id="settings-ai-model-refresh-label"/);
+  assert.match(markup, /id="settings-ai-model-refresh-confirm"/);
+  assert.match(markup, /id="settings-ai-model-refresh-confirm-button"/);
+  assert.match(markup, /id="settings-ai-key-edit-button"/);
+  assert.match(markup, /class="button-secondary ai-key-cancel-button hidden" id="settings-ai-key-cancel-button"/);
+  assert.match(markup, /id="settings-ai-screenshot-enabled"/);
+  assert.match(markup, /id="settings-ai-screenshot-provider"/);
+  assert.doesNotMatch(markup, /Use Ask AI provider/);
+  assert.match(markup, /id="settings-ai-screenshot-frequency"/);
+  assert.match(markup, /id="settings-ai-screenshot-daily-cap"/);
+  assert.match(markup, /id="settings-ai-screenshot-model-picker-button"/);
+  assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-mode"/);
+  assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-input"/);
+  assert.match(markup, /id="settings-ai-screenshot-test-button"/);
+  assert.match(markup, /compressed screenshots and activity metadata/);
   assert.match(styles, /\.ai-model-picker-menu\.hidden\s*\{[\s\S]*display:\s*none/);
   assert.match(styles, /\.ai-model-refresh-confirm\.hidden\s*\{[\s\S]*display:\s*none/);
   assert.match(styles, /\.ai-model-refresh-button\.is-loading i[\s\S]*animation:\s*ai-spin/);
@@ -893,8 +982,9 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   assert.doesNotMatch(styles, /\.ai-day-summary/);
   assert.doesNotMatch(styles, /\.ai-day-value/);
   assert.match(markup, /id="ai-new-chat-button"[\s\S]*<span>New<\/span>/);
-  assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*justify-content:\s*space-between/);
-  assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*width:\s*100%/);
+  assert.doesNotMatch(markup, /id="ai-configure-button"/);
+  assert.match(markup, /id="ai-unconfigured-status"[\s\S]*No AI provider configured/);
+  assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/);
   assert.doesNotMatch(tabGroupBlock, /border:/);
   assert.doesNotMatch(tabGroupBlock, /background:/);
   assert.doesNotMatch(tabGroupBlock, /padding:/);
@@ -904,6 +994,7 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   assert.match(styles, /\.ai-chat-input[\s\S]*resize:\s*none/);
   assert.match(styles, /\.ai-chat-input-shell:focus-within[\s\S]*box-shadow:/);
   assert.match(styles, /\.ai-settings-button i[\s\S]*font-size:/);
+  assert.match(script, /openSettingsModal\(\{ section: 'ai' \}\)/);
   assert.match(script, /addEventListener\('click', \(\) => sendAiMessage\(\)\)/);
   assert.match(script, /sendAiMessage\(button\.dataset\.aiPrompt/);
   assert.doesNotMatch(script, /renderChatPicker/);
@@ -943,14 +1034,41 @@ test('AI provider selection auto-selects exactly one configured provider', async
   assert.deepEqual(JSON.parse(JSON.stringify(updates)), []);
 });
 
+test('AI key provider cards do not change the Ask AI provider setting', async () => {
+  const { context, providerCards, elements } = createAiSettingsDom({
+    keyStatus: { openai: true, google: false, anthropic: false, openrouter: false }
+  });
+
+  await context.initAiSidebar();
+  await providerCards.google.click();
+
+  assert.equal(context.state.settings.aiProvider, 'openai');
+  assert.equal(elements['ai-api-key-input'].disabled, false);
+  assert.equal(elements['ai-api-key-input'].value, '');
+});
+
+test('Ask AI provider dropdown persists the chat provider', async () => {
+  const { context, elements, requests } = createAiSettingsDom();
+
+  await context.initAiSidebar();
+  elements['settings-ai-ask-provider'].value = 'openrouter';
+  await elements['settings-ai-ask-provider'].dispatch('change', { target: elements['settings-ai-ask-provider'] });
+
+  assert.equal(context.state.settings.aiProvider, 'openrouter');
+  assert.equal(context.localStorage.getItem('aiProvider'), 'openrouter');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.settings.update').at(-1).payload)), {
+    aiProvider: 'openrouter'
+  });
+});
+
 test('AI model refresh is explicit and confirmation gated', () => {
   const markup = fs.readFileSync('index.html', 'utf8');
-  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
-  const initBlock = script.match(/async function initAiSidebar\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
-  const refreshBlock = script.match(/async function refreshAiModelsForSelectedProvider\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
+  const script = fs.readFileSync('js/ai-settings.js', 'utf8');
+  const initBlock = script.match(/function initAiSettings\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
+  const refreshBlock = script.match(/async function refreshAiModelsForPicker\(picker = 'ask'\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
 
   assert.doesNotMatch(initBlock, /ai\.models\.list/);
-  assert.match(markup, /id="ai-model-refresh-confirm-button"[\s\S]*Refresh now/);
+  assert.match(markup, /id="settings-ai-model-refresh-confirm-button"[\s\S]*Refresh now/);
   assert.match(script, /requestAiModelRefreshConfirmation/);
   assert.doesNotMatch(refreshBlock, /global\.confirm|window\.confirm/);
   assert.match(refreshBlock, /ai\.models\.list/);
@@ -984,7 +1102,7 @@ test('AI key controls lock saved keys and require explicit edit or confirmed rem
 
   await providerCards.google.click();
 
-  assert.equal(context.state.settings.aiProvider, 'google');
+  assert.equal(context.state.settings.aiProvider, 'openai');
   assert.equal(elements['ai-api-key-input'].disabled, false);
   assert.equal(elements['ai-api-key-input'].value, '');
   assert.equal(elements['ai-key-save-label'].textContent, 'Save key');
@@ -994,6 +1112,23 @@ test('AI key controls lock saved keys and require explicit edit or confirmed rem
   await cancelled.context.initAiSidebar();
   await cancelled.elements['ai-key-delete-button'].click();
   assert.equal(cancelled.requests.filter(request => request.operation === 'ai.keys.delete').length, 0);
+});
+
+test('AI provider key block relies on provider row key states without duplicate status pill', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const keyActionsBlock = styles.match(/\.ai-key-actions\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+  const keyActionButtonBlock = styles.match(/\.ai-key-actions \.button-primary,\n\.ai-key-actions \.button-secondary\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+  const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
+
+  assert.doesNotMatch(markup, /id="settings-ai-key-status"/);
+  assert.match(markup, /id="settings-ai-provider-openai-key-state"/);
+  assert.match(markup, /id="settings-ai-provider-openrouter-key-state"/);
+  assert.match(markup, /id="settings-ai-feedback"/);
+  assert.ok(aiPanel.indexOf('id="settings-ai-key-delete-button"') < aiPanel.indexOf('id="settings-ai-feedback"'));
+  assert.match(styles, /\.ai-settings-feedback:empty\s*\{[\s\S]*display:\s*none/);
+  assert.match(keyActionsBlock, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(keyActionButtonBlock, /width:\s*100%/);
 });
 
 test('AI provider cards show saved keys with a check icon instead of text', async () => {
@@ -1012,11 +1147,19 @@ test('AI provider cards show saved keys with a check icon instead of text', asyn
 });
 
 test('AI key removal calls Keychain delete only after confirmation', async () => {
-  const { context, elements, requests } = createAiSettingsDom({ confirmResult: true });
+  let confirmOptions;
+  const { context, elements, requests } = createAiSettingsDom({
+    customConfirm: options => {
+      confirmOptions = options;
+      return options.onConfirm();
+    }
+  });
 
   await context.initAiSidebar();
   await elements['ai-key-delete-button'].click();
 
+  assert.match(confirmOptions.title, /Remove OpenAI API key/);
+  assert.match(confirmOptions.message, /Keychain/);
   assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.keys.delete').map(request => request.payload))), [
     { provider: 'openai' }
   ]);
@@ -1103,6 +1246,79 @@ test('AI model refresh reports empty and failed provider responses inline', asyn
   await failed.elements['ai-model-refresh-button'].click();
   await failed.elements['ai-model-refresh-confirm-button'].click();
   assert.equal(failed.elements['ai-model-refresh-meta'].textContent, 'Provider says no.');
+});
+
+test('AI model refresh missing-key error stays inside the open picker and clears after saving key', async () => {
+  const { context, elements, requests } = createAiSettingsDom({
+    keyStatus: { openai: false, google: false, anthropic: false, openrouter: false }
+  });
+
+  await context.initAiSidebar();
+  await elements['ai-model-picker-button'].click();
+  await elements['ai-model-refresh-button'].click();
+
+  assert.equal(elements['ai-model-picker-menu'].classList.contains('hidden'), false);
+  assert.equal(elements['ai-model-refresh-meta'].textContent, 'Save a key for this provider first.');
+  assert.equal(elements['ai-model-refresh-meta'].dataset.tone, 'error');
+  assert.equal(requests.filter(request => request.operation === 'ai.models.list').length, 0);
+
+  elements['ai-api-key-input'].value = 'sk-test';
+  await elements['ai-key-save-button'].click();
+
+  assert.equal(elements['ai-model-refresh-meta'].textContent, '');
+  assert.equal(elements['ai-model-refresh-meta'].dataset.tone, 'muted');
+});
+
+test('AI screenshot provider is concrete and can be configured separately from Ask AI provider', async () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const { context, elements, requests } = createAiSettingsDom();
+
+  assert.doesNotMatch(markup, /<option value="">Use Ask AI provider<\/option>/);
+
+  await context.initAiSidebar();
+  elements['settings-ai-screenshot-provider'].value = 'openrouter';
+  await elements['settings-ai-screenshot-provider'].dispatch('change', { target: elements['settings-ai-screenshot-provider'] });
+
+  assert.equal(context.state.settings.aiProvider, 'openai');
+  assert.equal(context.state.settings.aiScreenshotProvider, 'openrouter');
+  assert.equal(context.localStorage.getItem('aiScreenshotProvider'), 'openrouter');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.settings.update').at(-1).payload)), {
+    aiScreenshotProvider: 'openrouter'
+  });
+});
+
+test('AI fetched models are shared by Ask AI and Screenshot model pickers for the same provider', async () => {
+  const { context, elements } = createAiSettingsDom({
+    modelListResult: { provider: 'openai', models: ['gpt-fetched-shared'], refreshedAt: '2026-05-31T17:14:00.000Z' }
+  });
+
+  await context.initAiSidebar();
+  await elements['ai-model-picker-button'].click();
+  await elements['ai-model-refresh-button'].click();
+  await elements['ai-model-refresh-confirm-button'].click();
+  await elements['settings-ai-screenshot-model-picker-button'].click();
+
+  assert.match(elements['settings-ai-screenshot-model-option-list'].innerHTML, /gpt-fetched-shared/);
+  assert.match(elements['settings-ai-screenshot-model-option-list'].innerHTML, /Fetched/);
+});
+
+test('AI screenshot model picker saves screenshot-specific model for its provider', async () => {
+  const { context, elements, requests } = createAiSettingsDom();
+
+  await context.initAiSidebar();
+  elements['settings-ai-screenshot-provider'].value = 'openrouter';
+  await elements['settings-ai-screenshot-provider'].dispatch('change', { target: elements['settings-ai-screenshot-provider'] });
+  await elements['settings-ai-screenshot-model-picker-button'].click();
+  elements['settings-ai-screenshot-model-search-input'].value = 'openrouter/custom-vision';
+  await elements['settings-ai-screenshot-model-search-input'].dispatch('keydown', {
+    target: elements['settings-ai-screenshot-model-search-input'],
+    key: 'Enter'
+  });
+
+  assert.equal(context.state.settings.aiScreenshotOpenRouterModel, 'openrouter/custom-vision');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.settings.update').at(-1).payload)), {
+    aiScreenshotOpenRouterModel: 'openrouter/custom-vision'
+  });
 });
 
 test('AI loading state shows spinner and disables composer controls', () => {

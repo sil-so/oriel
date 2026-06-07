@@ -4,6 +4,7 @@ const SUPPORTED_MIN_ACTIVITY_THRESHOLDS = new Set([10, 30, 60]);
 const DEFAULT_AI_OPENAI_MODEL = 'gpt-5.2';
 const DEFAULT_AI_GOOGLE_MODEL = 'gemini-3.5-flash';
 const DEFAULT_AI_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_AI_OPENROUTER_MODEL = 'google/gemini-3.1-flash-lite';
 const TITLE_CLEANUP_RULE_STRING_LIMIT = 500;
 
 const DEFAULT_TITLE_CLEANUP_RULES = [
@@ -172,6 +173,17 @@ const state = {
         aiOpenAIModel: localStorage.getItem('aiOpenAIModel') || DEFAULT_AI_OPENAI_MODEL,
         aiGoogleModel: localStorage.getItem('aiGoogleModel') || DEFAULT_AI_GOOGLE_MODEL,
         aiAnthropicModel: localStorage.getItem('aiAnthropicModel') || DEFAULT_AI_ANTHROPIC_MODEL,
+        aiOpenRouterModel: localStorage.getItem('aiOpenRouterModel') || DEFAULT_AI_OPENROUTER_MODEL,
+        aiScreenshotProvider: localStorage.getItem('aiScreenshotProvider') || '',
+        aiScreenshotSummariesEnabled: parseStoredBooleanSetting('aiScreenshotSummariesEnabled', false),
+        aiScreenshotFrequencyPreset: localStorage.getItem('aiScreenshotFrequencyPreset') || 'balanced',
+        aiScreenshotDailyCap: Number.parseInt(localStorage.getItem('aiScreenshotDailyCap') || '100', 10),
+        aiScreenshotTimeoutSeconds: Number.parseInt(localStorage.getItem('aiScreenshotTimeoutSeconds') || '20', 10),
+        aiScreenshotModelMode: localStorage.getItem('aiScreenshotModelMode') || 'askAI',
+        aiScreenshotOpenAIModel: localStorage.getItem('aiScreenshotOpenAIModel') || DEFAULT_AI_OPENAI_MODEL,
+        aiScreenshotGoogleModel: localStorage.getItem('aiScreenshotGoogleModel') || DEFAULT_AI_GOOGLE_MODEL,
+        aiScreenshotAnthropicModel: localStorage.getItem('aiScreenshotAnthropicModel') || DEFAULT_AI_ANTHROPIC_MODEL,
+        aiScreenshotOpenRouterModel: localStorage.getItem('aiScreenshotOpenRouterModel') || DEFAULT_AI_OPENROUTER_MODEL,
         titleCleanupRules: parseStoredTitleCleanupRules()
     },
     

@@ -943,6 +943,47 @@ function setupMainEventListeners() {
         url: 'URL'
     };
 
+    function setSettingsSection(section = 'general') {
+        const nextSection = ['general', 'capture', 'ai', 'data'].includes(section) ? section : 'general';
+        document.querySelectorAll?.('[data-settings-section-button]')?.forEach(button => {
+            const isActive = button.dataset.settingsSectionButton === nextSection;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-selected', String(isActive));
+        });
+        document.querySelectorAll?.('[data-settings-section-panel]')?.forEach(panel => {
+            panel.classList.toggle('hidden', panel.dataset.settingsSectionPanel !== nextSection);
+        });
+    }
+
+    async function openSettingsModal({ section = 'general' } = {}) {
+        if (window.OrielData && window.OrielData.isNative) {
+            try {
+                const nativeSettings = await window.OrielData.request('settings.get', {});
+                Object.assign(state.settings, nativeSettings);
+                if (typeof window.applyTheme === 'function') {
+                    window.applyTheme(state.settings.theme);
+                }
+                syncEmptyActivityRowsToggle();
+            } catch (error) {
+                console.error('Error fetching native settings:', error);
+            }
+        }
+        await refreshLogoDevKeyStatus();
+        if (typeof window.refreshAiSettingsStatus === 'function') {
+            await window.refreshAiSettingsStatus();
+        }
+        syncSettingsControls();
+        setSettingsSection(section);
+        if (settingsModal) {
+            settingsModal.classList.remove('hidden');
+        }
+        if (typeof window.fetchTrackingExclusions === 'function') {
+            await window.fetchTrackingExclusions();
+            renderTrackingExclusions();
+        }
+    }
+    window.openSettingsModal = openSettingsModal;
+
     function renderTrackingExclusions() {
         if (!settingsExclusionsList) return;
         settingsExclusionsList.replaceChildren();
@@ -1308,30 +1349,12 @@ function setupMainEventListeners() {
         }
     }
 
+    document.querySelectorAll?.('[data-settings-section-button]')?.forEach(button => {
+        button.addEventListener('click', () => setSettingsSection(button.dataset.settingsSectionButton));
+    });
+
     if (btnSettings) {
-        btnSettings.addEventListener('click', async () => {
-            if (window.OrielData && window.OrielData.isNative) {
-                try {
-                    const nativeSettings = await window.OrielData.request('settings.get', {});
-                    Object.assign(state.settings, nativeSettings);
-                    if (typeof window.applyTheme === 'function') {
-                        window.applyTheme(state.settings.theme);
-                    }
-                    syncEmptyActivityRowsToggle();
-                } catch (error) {
-                    console.error('Error fetching native settings:', error);
-                }
-            }
-            await refreshLogoDevKeyStatus();
-            syncSettingsControls();
-            if (settingsModal) {
-                settingsModal.classList.remove('hidden');
-            }
-            if (typeof window.fetchTrackingExclusions === 'function') {
-                await window.fetchTrackingExclusions();
-                renderTrackingExclusions();
-            }
-        });
+        btnSettings.addEventListener('click', () => openSettingsModal({ section: 'general' }));
     }
 
     if (settingsModalBtnClose) {

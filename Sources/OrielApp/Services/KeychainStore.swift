@@ -153,10 +153,9 @@ final class KeychainStore: APIKeyStore, LogoDevAPIKeyStore {
     }
 
     private func normalizedProvider(_ provider: String) throws -> String {
-        let value = provider.lowercased()
-        guard ["openai", "google", "anthropic"].contains(value) else {
+        guard let provider = AIProvider.normalize(provider) else {
             throw KeychainStoreError.invalidProvider
         }
-        return value
+        return provider.rawValue
     }
 }

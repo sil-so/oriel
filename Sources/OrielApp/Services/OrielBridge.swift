@@ -5,6 +5,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let store: SQLiteStore
     private let aiService: AIService
     private let logoDevKeyService: LogoDevKeyService
+    private let activitySummaryClient: ActivitySummaryClient
+    private let screenshotCapture: ActivityScreenshotCapturing
     private let statusProvider: () -> [String: Any]
     private let currentActivityProvider: ([String: Any]) -> [String: Any]?
     private let passiveReviewResolver: ([String: Any]) throws -> [String: Any]
@@ -15,6 +17,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         store: SQLiteStore,
         aiService: AIService = AIService(),
         logoDevKeyService: LogoDevKeyService = LogoDevKeyService(),
+        activitySummaryClient: ActivitySummaryClient = ProviderActivitySummaryClient(),
+        screenshotCapture: ActivityScreenshotCapturing = ActivityScreenshotCapture(),
         statusProvider: @escaping () -> [String: Any],
         currentActivityProvider: @escaping ([String: Any]) -> [String: Any]? = { _ in nil },
         passiveReviewResolver: @escaping ([String: Any]) throws -> [String: Any] = { _ in ["resolved": false] },
@@ -24,6 +28,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         self.store = store
         self.aiService = aiService
         self.logoDevKeyService = logoDevKeyService
+        self.activitySummaryClient = activitySummaryClient
+        self.screenshotCapture = screenshotCapture
         self.statusProvider = statusProvider
         self.currentActivityProvider = currentActivityProvider
         self.passiveReviewResolver = passiveReviewResolver
@@ -44,12 +50,17 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
 
-        if operation == "ai.chat" || operation == "ai.models.list" {
+        if operation == "ai.chat" || operation == "ai.models.list" || operation == "ai.screenshotSummary.test" {
             Task {
                 do {
-                    let value = operation == "ai.chat"
-                        ? try await aiService.chat(payload: payload)
-                        : try await aiService.listModels(payload: payload)
+                    let value: Any
+                    if operation == "ai.chat" {
+                        value = try await aiService.chat(payload: payload)
+                    } else if operation == "ai.models.list" {
+                        value = try await aiService.listModels(payload: payload)
+                    } else {
+                        value = try await testScreenshotSummary(payload: payload)
+                    }
                     replyHandler(["ok": true, "value": value], nil)
                 } catch {
                     replyHandler(errorReply(code: "ai_failure", message: error.localizedDescription), nil)
@@ -118,8 +129,132 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             "aiProvider": settings["aiProvider"] as? String ?? "",
             "aiOpenAIModel": settings["aiOpenAIModel"] as? String ?? "gpt-5.2",
             "aiGoogleModel": settings["aiGoogleModel"] as? String ?? "gemini-3.5-flash",
-            "aiAnthropicModel": settings["aiAnthropicModel"] as? String ?? "claude-sonnet-4-20250514"
+            "aiAnthropicModel": settings["aiAnthropicModel"] as? String ?? "claude-sonnet-4-20250514",
+            "aiOpenRouterModel": settings["aiOpenRouterModel"] as? String ?? "google/gemini-3.1-flash-lite",
+            "aiScreenshotProvider": settings["aiScreenshotProvider"] as? String ?? "",
+            "aiScreenshotSummariesEnabled": settings["aiScreenshotSummariesEnabled"] as? Bool ?? false,
+            "aiScreenshotFrequencyPreset": settings["aiScreenshotFrequencyPreset"] as? String ?? "balanced",
+            "aiScreenshotDailyCap": settings["aiScreenshotDailyCap"] as? Int ?? 100,
+            "aiScreenshotTimeoutSeconds": settings["aiScreenshotTimeoutSeconds"] as? Int ?? 20,
+            "aiScreenshotModelMode": settings["aiScreenshotModelMode"] as? String ?? "askAI",
+            "aiScreenshotOpenAIModel": settings["aiScreenshotOpenAIModel"] as? String ?? "gpt-5.2",
+            "aiScreenshotGoogleModel": settings["aiScreenshotGoogleModel"] as? String ?? "gemini-3.5-flash",
+            "aiScreenshotAnthropicModel": settings["aiScreenshotAnthropicModel"] as? String ?? "claude-sonnet-4-20250514",
+            "aiScreenshotOpenRouterModel": settings["aiScreenshotOpenRouterModel"] as? String ?? "google/gemini-3.1-flash-lite"
         ]
+    }
+
+    private func testScreenshotSummary(payload: [String: Any]) async throws -> [String: Any] {
+        guard let provider = AIProvider.normalize(stringValue(payload["provider"]) ?? "") else {
+            throw ActivitySummaryClientError.unsupportedProvider
+        }
+        let model = stringValue(payload["model"]) ?? provider.defaultModel
+        let timeoutSeconds = clampedInt(payload["timeoutSeconds"], defaultValue: 20, min: 5, max: 60)
+        let screenshot = try screenshotCapture.captureMainDisplay(maxPixelWidth: 1280, jpegQuality: 0.62)
+        let activity = currentActivityProvider(["date": todayString()]) ?? [:]
+        let app = stringValue(activity["app"]) ?? "Oriel"
+        let title = stringValue(activity["title"]) ?? app
+        let url = stringValue(activity["url"])
+        let start = intValue(activity["start"])
+        let end = intValue(activity["end"])
+        let metadata = ActivitySummaryMetadata(
+            activityID: "test-\(UUID().uuidString.lowercased())",
+            captureTimestampISO: ISO8601DateFormatter().string(from: Date()),
+            durationSeconds: start.flatMap { start in end.map { max(0, Int(($0 - start) / 1000)) } },
+            frontmostAppName: app,
+            bundleID: stringValue(activity["bundleId"]) ?? "",
+            processID: nil,
+            windowTitle: title,
+            browserURL: url,
+            browserDomain: browserDomain(from: url),
+            projectName: nil,
+            inputState: snakeInputState(stringValue(activity["interactionState"]) ?? "unknown"),
+            screenshotWidth: screenshot.width,
+            screenshotHeight: screenshot.height,
+            displayID: screenshot.displayID
+        )
+        let response = try await activitySummaryClient.summarize(ActivitySummaryRequest(
+            provider: provider.rawValue,
+            model: model,
+            metadata: metadata,
+            jpegData: screenshot.jpegData,
+            timeoutSeconds: timeoutSeconds
+        ))
+        return [
+            "tested": true,
+            "provider": provider.rawValue,
+            "model": model,
+            "summary": response.summary,
+            "imageWidth": screenshot.width,
+            "imageHeight": screenshot.height,
+            "compressedBytes": screenshot.jpegData.count
+        ]
+    }
+
+    private func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let value as String:
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        default:
+            return nil
+        }
+    }
+
+    private func intValue(_ value: Any?) -> Int64? {
+        switch value {
+        case let value as Int64:
+            return value
+        case let value as Int:
+            return Int64(value)
+        case let value as NSNumber:
+            return value.int64Value
+        case let value as String:
+            return Int64(value)
+        default:
+            return nil
+        }
+    }
+
+    private func clampedInt(_ value: Any?, defaultValue: Int, min: Int, max: Int) -> Int {
+        let number: Int?
+        switch value {
+        case let value as Int:
+            number = value
+        case let value as Int64:
+            number = Int(value)
+        case let value as NSNumber:
+            number = value.intValue
+        case let value as String:
+            number = Int(value)
+        default:
+            number = nil
+        }
+        return Swift.max(min, Swift.min(max, number ?? defaultValue))
+    }
+
+    private func browserDomain(from urlString: String?) -> String? {
+        guard let urlString, let host = URL(string: urlString)?.host?.lowercased(), !host.isEmpty else {
+            return nil
+        }
+        return host
+    }
+
+    private func snakeInputState(_ value: String) -> String {
+        switch value {
+        case "handsOn":
+            return "hands_on"
+        case "handsOff":
+            return "hands_off"
+        default:
+            return value
+        }
+    }
+
+    private func todayString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     private func errorReply(code: String, message: String) -> [String: Any] {

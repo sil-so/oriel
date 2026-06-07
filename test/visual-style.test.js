@@ -93,10 +93,30 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
   assert.match(css, /\.modal-panel--scroll\s*\{[\s\S]*padding-bottom:\s*0/);
   assert.doesNotMatch(scrollContentRule, /padding-bottom:/);
   assert.doesNotMatch(css, /\.modal-scroll-content\s*>\s*:last-child\s*\{/);
-  assert.match(css, /\.settings-modal-body\s*>\s*:last-child\s*\{[^}]*margin-bottom:\s*22px/s);
+  assert.match(css, /\.settings-section-panel\s*\{[^}]*padding-bottom:\s*22px/s);
+  assert.doesNotMatch(css, /\.settings-section-panel::after\s*\{/);
   assert.match(css, /#proj-details-entries-list::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 22px/s);
   assert.doesNotMatch(html.match(/id="confirm-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
   assert.doesNotMatch(html.match(/id="time-entry-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
+});
+
+test('modal overlays keep dialogs top aligned below the app header', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const overlayRule = css.match(/\.modal-overlay\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(overlayRule, /align-items:\s*flex-start/);
+  assert.match(overlayRule, /justify-content:\s*center/);
+  assert.match(overlayRule, /padding:\s*calc\(54px \+ 8px\) 16px 16px/);
+  assert.match(overlayRule, /overflow-y:\s*auto/);
+});
+
+test('settings tabs reuse the app tab active treatment', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const activeRule = css.match(/\.settings-section-tab\.is-active\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(activeRule, /background:\s*var\(--surface-raised\)/);
+  assert.match(activeRule, /box-shadow:\s*0 0 0 1px color-mix\(in oklch,\s*var\(--border\) 48%,\s*transparent\) inset/);
+  assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
 });
 
 test('native app chrome leaves only a compact gap after macOS traffic lights', () => {
@@ -201,7 +221,8 @@ test('web dropdowns use app-rendered menus instead of native select popups', () 
   assert.match(css, /\.custom-select-menu\s*\{[\s\S]*\}\s*\.custom-select-menu\.hidden\s*\{[\s\S]*display:\s*none/s);
   assert.match(css, /\.custom-select-option\.is-selected/);
   assert.match(css, /\.ai-model-option-list\s*\{[\s\S]*gap:\s*3px/s);
-  assert.match(css, /\.ai-settings-panel\s*\{[\s\S]*border-radius:\s*0;/s);
+  assert.doesNotMatch(css, /\.ai-settings-panel\s*\{/);
+  assert.match(html, /class="[^"]*\bai-model-picker-menu\b[^"]*\bpopover\b[^"]*"[^>]*id="settings-ai-model-picker-menu"/);
 });
 
 test('time entry task selector uses the app-rendered dropdown treatment', () => {

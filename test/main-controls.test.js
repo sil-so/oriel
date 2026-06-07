@@ -438,6 +438,57 @@ test('settings modal reopens with current theme and brand icon preference', asyn
   assert.equal(settingsModal.classList.contains('hidden'), false);
 });
 
+test('settings modal exposes section tabs and can open directly to AI settings', async () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const script = fs.readFileSync('js/main.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
+
+  assert.match(markup, /id="settings-modal"[\s\S]*class="[^"]*(?:^|\s)w-\[650px\](?:\s|")[^"]*"/);
+  assert.match(markup, /id="project-details-modal"[\s\S]*class="[^"]*(?:^|\s)w-\[650px\](?:\s|")[^"]*"/);
+  assert.match(markup, /data-settings-section-button="general"[\s\S]*General/);
+  assert.match(markup, /data-settings-section-button="capture"[\s\S]*Capture &amp; Privacy/);
+  assert.match(markup, /data-settings-section-button="ai"[\s\S]*AI/);
+  assert.match(markup, /data-settings-section-button="data"[\s\S]*Data/);
+  assert.match(markup, /data-settings-section-panel="ai"[\s\S]*Provider/);
+  assert.match(markup, /data-settings-section-panel="ai"[\s\S]*Screenshot Summaries/);
+  assert.match(script, /window\.openSettingsModal = openSettingsModal/);
+  assert.match(script, /openSettingsModal\(\{ section = 'general' \} = \{\}\)/);
+  assert.match(aiSettingsScript, /window\.refreshAiSettingsStatus = refreshAiSettingsStatus/);
+  assert.match(aiSettingsScript, /window\.getSelectedAiProviderAndModel = getSelectedAiProviderAndModel/);
+});
+
+test('AI settings section includes OpenRouter and screenshot summary controls', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const state = fs.readFileSync('js/state.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
+
+  assert.match(markup, /Provider &amp; Key/);
+  assert.match(markup, /Ask AI Model/);
+  assert.match(markup, /id="settings-ai-ask-provider"/);
+  assert.match(markup, /data-settings-ai-provider="openrouter"[\s\S]*OpenRouter/);
+  assert.match(markup, /id="settings-ai-provider-openrouter-key-state"/);
+  assert.doesNotMatch(markup, /Use Ask AI provider/);
+  assert.match(markup, /id="settings-ai-screenshot-frequency"[\s\S]*value="low"[\s\S]*Low/);
+  assert.match(markup, /id="settings-ai-screenshot-frequency"[\s\S]*value="balanced"[\s\S]*Balanced/);
+  assert.match(markup, /id="settings-ai-screenshot-frequency"[\s\S]*value="high"[\s\S]*High/);
+  assert.match(markup, /id="settings-ai-screenshot-daily-cap"[^>]+value="100"/);
+  assert.match(markup, /id="settings-ai-screenshot-timeout"[^>]+value="20"/);
+  assert.match(markup, /id="settings-ai-screenshot-model-picker-button"/);
+  assert.match(markup, /id="settings-ai-screenshot-model-search-input"/);
+  assert.match(markup, /id="settings-ai-screenshot-model-refresh-button"/);
+  assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-mode"/);
+  assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-input"/);
+  assert.match(state, /aiOpenRouterModel:\s*localStorage\.getItem\('aiOpenRouterModel'\)/);
+  assert.match(state, /aiScreenshotProvider:\s*localStorage\.getItem\('aiScreenshotProvider'\) \|\| ''/);
+  assert.match(state, /aiScreenshotSummariesEnabled:\s*parseStoredBooleanSetting\('aiScreenshotSummariesEnabled', false\)/);
+  assert.match(state, /aiScreenshotFrequencyPreset:\s*localStorage\.getItem\('aiScreenshotFrequencyPreset'\) \|\| 'balanced'/);
+  assert.match(aiSettingsScript, /DEFAULT_OPENROUTER_MODEL/);
+  assert.match(aiSettingsScript, /aiScreenshotFrequencyPreset/);
+  assert.match(aiSettingsScript, /settings-ai-screenshot-test-button/);
+  assert.match(styles, /\.ai-settings-grid--modal\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+});
+
 test('Activity Stream empty-row toggle persists and rerenders Day timelines', async () => {
   const { element, context, nativeRequests, stored } = loadMainControlsContext({
     nativeResponses: {

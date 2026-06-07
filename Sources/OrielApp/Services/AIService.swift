@@ -43,7 +43,8 @@ final class AIService {
         [
             "openai": keyStore.hasKey(for: "openai"),
             "google": keyStore.hasKey(for: "google"),
-            "anthropic": keyStore.hasKey(for: "anthropic")
+            "anthropic": keyStore.hasKey(for: "anthropic"),
+            "openrouter": keyStore.hasKey(for: "openrouter")
         ]
     }
 
@@ -94,6 +95,8 @@ final class AIService {
             responseText = try await requestGoogle(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
         case "anthropic":
             responseText = try await requestAnthropic(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        case "openrouter":
+            responseText = try await requestOpenRouter(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
         default:
             throw AIServiceError.invalidProvider
         }
@@ -115,6 +118,8 @@ final class AIService {
             models = try await requestGoogleModels(apiKey: apiKey)
         case "anthropic":
             models = try await requestAnthropicModels(apiKey: apiKey)
+        case "openrouter":
+            models = try await requestOpenRouterModels(apiKey: apiKey)
         default:
             throw AIServiceError.invalidProvider
         }
@@ -127,19 +132,16 @@ final class AIService {
     }
 
     private func normalizedProvider(_ value: String?) throws -> String {
-        let provider = (value ?? "").lowercased()
-        guard ["openai", "google", "anthropic"].contains(provider) else {
+        guard let provider = AIProvider.normalize(value) else {
             throw AIServiceError.invalidProvider
         }
-        return provider
+        return provider.rawValue
     }
 
     private func normalizedModel(_ value: String?, provider: String) -> String {
         let model = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !model.isEmpty { return model }
-        if provider == "google" { return "gemini-3.5-flash" }
-        if provider == "anthropic" { return "claude-sonnet-4-20250514" }
-        return "gpt-5.2"
+        return AIProvider(rawValue: provider)?.defaultModel ?? AIProvider.openai.defaultModel
     }
 
     private func sanitizeMessages(_ messages: [[String: Any]]) -> [[String: String]] {
@@ -277,6 +279,41 @@ final class AIService {
         return extractAnthropicText(object)
     }
 
+    private func requestOpenRouter(model: String, apiKey: String, systemPrompt: String, userPrompt: String) async throws -> String {
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                [
+                    "role": "system",
+                    "content": systemPrompt
+                ],
+                [
+                    "role": "user",
+                    "content": userPrompt
+                ]
+            ],
+            "response_format": [
+                "type": "json_object"
+            ],
+            "provider": [
+                "allow_fallbacks": false
+            ]
+        ]
+
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Oriel", forHTTPHeaderField: "X-Title")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let data = try await perform(request)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIServiceError.invalidProviderResponse
+        }
+        return extractOpenRouterText(object)
+    }
+
     private func requestOpenAIModels(apiKey: String) async throws -> [String] {
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
         request.httpMethod = "GET"
@@ -321,6 +358,25 @@ final class AIService {
         return rows.compactMap { $0["id"] as? String }.filter { $0.hasPrefix("claude-") }
     }
 
+    private func requestOpenRouterModels(apiKey: String) async throws -> [String] {
+        var request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/models")!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let data = try await perform(request)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIServiceError.invalidProviderResponse
+        }
+        let rows = object["data"] as? [[String: Any]] ?? []
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String else { return nil }
+            let architecture = row["architecture"] as? [String: Any] ?? [:]
+            let inputModalities = architecture["input_modalities"] as? [String] ?? []
+            guard inputModalities.contains("image") else { return nil }
+            return id
+        }
+    }
+
     private func perform(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await transport(request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -363,6 +419,20 @@ final class AIService {
     private func extractAnthropicText(_ object: [String: Any]) -> String {
         let content = object["content"] as? [[String: Any]] ?? []
         return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    private func extractOpenRouterText(_ object: [String: Any]) -> String {
+        let choices = object["choices"] as? [[String: Any]] ?? []
+        for choice in choices {
+            let message = choice["message"] as? [String: Any] ?? [:]
+            if let content = message["content"] as? String {
+                return content
+            }
+            if let content = message["content"] as? [[String: Any]] {
+                return content.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            }
+        }
+        return ""
     }
 
     private func isOpenAITextModel(_ id: String) -> Bool {
