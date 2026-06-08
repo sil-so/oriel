@@ -86,11 +86,20 @@ features.
 
 Oriel is a native macOS app with a bundled local web interface.
 
-```text
-Oriel.app
-  -> WKWebView bundled UI
-  -> OrielBridge native request/reply boundary
-  -> SQLiteStore at ~/Library/Application Support/Oriel/Oriel.sqlite
+```mermaid
+flowchart TD
+    App["Oriel.app"]
+    WebView["WKWebView bundled UI"]
+    Bridge["OrielBridge native request/reply boundary"]
+    Store["SQLiteStore<br/>~/Library/Application Support/Oriel/Oriel.sqlite"]
+    Browser["Optional Browser Companion<br/>Chrome / Brave Native Messaging"]
+    Providers["Optional network providers<br/>BYOK AI / Logo.dev"]
+
+    App --> WebView
+    App --> Bridge
+    Bridge --> Store
+    Browser --> Bridge
+    Bridge -. opt-in .-> Providers
 ```
 
 | Path | Responsibility |
