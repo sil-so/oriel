@@ -102,7 +102,8 @@ final class AIServiceTests: XCTestCase {
         let keyStore = FakeAPIKeyStore(keys: [
             "openai": "openai-key",
             "google": "gemini-key",
-            "anthropic": "claude-key"
+            "anthropic": "claude-key",
+            "openrouter": "openrouter-key"
         ])
         var capturedRequests: [URLRequest] = []
         let service = AIService(keyStore: keyStore) { request in
@@ -115,6 +116,8 @@ final class AIServiceTests: XCTestCase {
                 data = #"{"models":[{"name":"models/gemini-3.5-flash","supportedGenerationMethods":["generateContent"]},{"name":"models/embedding-001","supportedGenerationMethods":["embedContent"]}]}"#.data(using: .utf8)!
             } else if absoluteString == "https://api.anthropic.com/v1/models" {
                 data = #"{"data":[{"id":"claude-sonnet-4-20250514"},{"id":"claude-haiku-4-20250514"}]}"#.data(using: .utf8)!
+            } else if absoluteString == "https://openrouter.ai/api/v1/models" {
+                data = #"{"data":[{"id":"google/gemini-3.1-flash-lite","architecture":{"input_modalities":["text","image"]}},{"id":"openai/text-embedding-3-small","architecture":{"input_modalities":["text"]}}]}"#.data(using: .utf8)!
             } else {
                 XCTFail("Unexpected model list URL: \(absoluteString)")
                 data = #"{"data":[]}"#.data(using: .utf8)!
@@ -126,6 +129,7 @@ final class AIServiceTests: XCTestCase {
         XCTAssertEqual(keyStatus["openai"] as? Bool, true)
         XCTAssertEqual(keyStatus["google"] as? Bool, true)
         XCTAssertEqual(keyStatus["anthropic"] as? Bool, true)
+        XCTAssertEqual(keyStatus["openrouter"] as? Bool, true)
 
         let openAI = try await service.listModels(payload: ["provider": "openai"])
         XCTAssertEqual(openAI["models"] as? [String], ["gpt-5.2", "o4-mini"])
@@ -136,10 +140,103 @@ final class AIServiceTests: XCTestCase {
         let anthropic = try await service.listModels(payload: ["provider": "anthropic"])
         XCTAssertEqual(anthropic["models"] as? [String], ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"])
 
-        XCTAssertEqual(capturedRequests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer openai-key", nil, nil])
+        let openRouter = try await service.listModels(payload: ["provider": "openrouter"])
+        XCTAssertEqual(openRouter["models"] as? [String], ["google/gemini-3.1-flash-lite"])
+
+        XCTAssertEqual(capturedRequests.map { $0.value(forHTTPHeaderField: "Authorization") }, ["Bearer openai-key", nil, nil, "Bearer openrouter-key"])
         XCTAssertEqual(capturedRequests[1].value(forHTTPHeaderField: "x-goog-api-key"), "gemini-key")
         XCTAssertEqual(capturedRequests[2].value(forHTTPHeaderField: "x-api-key"), "claude-key")
         XCTAssertEqual(capturedRequests[2].value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+    }
+
+    func testAIServiceSendsOpenRouterChatRequestAndExtractsJSONText() async throws {
+        let keyStore = FakeAPIKeyStore(keys: ["openrouter": "openrouter-key"])
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: keyStore) { request in
+            capturedRequest = request
+            let data = #"{"choices":[{"message":{"content":"{\"text\":\"OpenRouter summary\",\"suggestions\":[]}"}}]}"#.data(using: .utf8)!
+            return (data, httpResponse(for: request.url!, status: 200))
+        }
+
+        let response = try await service.chat(payload: [
+            "provider": "openrouter",
+            "model": "google/gemini-3.1-flash-lite",
+            "messages": [["role": "user", "content": "Summarize"]],
+            "dayContext": ["date": "2026-05-25"]
+        ])
+
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer openrouter-key")
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("\"model\":\"google\\/gemini-3.1-flash-lite\"") || requestBody.contains("\"model\":\"google/gemini-3.1-flash-lite\""))
+        XCTAssertTrue(requestBody.contains("\"messages\""))
+        XCTAssertEqual(response["text"] as? String, "OpenRouter summary")
+    }
+
+    func testAIServiceGeneratesDailySummaryWithAskAIProviderAndModel() async throws {
+        let keyStore = FakeAPIKeyStore(keys: ["openai": "openai-key"])
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: keyStore) { request in
+            capturedRequest = request
+            let data = #"{"output_text":"{\"text\":\"Focused implementation work.\",\"highlights\":[\"Built AI settings\"],\"uncertainties\":[]}"}"#.data(using: .utf8)!
+            return (data, httpResponse(for: request.url!, status: 200))
+        }
+
+        let response = try await service.dailySummary(payload: [
+            "provider": "openai",
+            "model": "gpt-daily",
+            "date": "2026-06-07",
+            "activitySummaries": [[
+                "activityId": "activity-1",
+                "summary": [
+                    "cloud_safe_summary": "Edited AI settings.",
+                    "activity": "implementation",
+                    "confidence": 0.91
+                ]
+            ]],
+            "dayContext": [
+                "totals": ["recordedMs": 3_600_000]
+            ]
+        ])
+
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer openai-key")
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("structured activity summaries and local activity context"))
+        XCTAssertTrue(requestBody.contains("Use only the provided JSON"))
+        XCTAssertTrue(requestBody.contains("Treat activity summaries as high-detail sampled evidence"))
+        XCTAssertTrue(requestBody.contains("Write directly to the user using"))
+        XCTAssertTrue(requestBody.contains("Do not invent goals, emotions, productivity judgments"))
+        XCTAssertTrue(requestBody.contains("Do not start with, repeat, or name the selected date"))
+        XCTAssertTrue(requestBody.contains("the screenshots show"))
+        XCTAssertTrue(requestBody.contains("Structured activity-summary sources for the selected date"))
+        XCTAssertTrue(requestBody.contains("Generate the daily recap JSON now."))
+        XCTAssertFalse(requestBody.contains("\"uncertainties\""))
+        XCTAssertTrue(requestBody.contains("Edited AI settings."))
+        XCTAssertFalse(requestBody.contains("data:image"))
+        XCTAssertFalse(requestBody.contains("base64"))
+        XCTAssertEqual(response["text"] as? String, "Focused implementation work.")
+        XCTAssertEqual(response["highlights"] as? [String], ["Built AI settings"])
+        XCTAssertNil(response["uncertainties"])
+    }
+
+    func testAIServiceDailySummaryFailsCleanlyWithoutAskAIKey() async throws {
+        let service = AIService(keyStore: FakeAPIKeyStore(keys: [:])) { request in
+            XCTFail("Transport should not run without a saved key: \(request)")
+            return (Data(), httpResponse(for: URL(string: "https://example.com")!, status: 200))
+        }
+
+        do {
+            _ = try await service.dailySummary(payload: [
+                "provider": "openai",
+                "model": "gpt-daily",
+                "date": "2026-06-07",
+                "activitySummaries": []
+            ])
+            XCTFail("Expected missing key failure")
+        } catch AIServiceError.missingAPIKey {
+            // Expected.
+        }
     }
 }
 

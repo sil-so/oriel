@@ -104,6 +104,7 @@ function setupZoomDropdown() {
 
 let customSelectsInitialized = false;
 let customSelectIdCounter = 0;
+let settingsTooltipsInitialized = false;
 
 function getSelectedCustomOption(select) {
     return Array.from(select.options || []).find(option => option.value === select.value)
@@ -570,7 +571,14 @@ function setupProjectRatesToggles() {
 }
 
 const datePickerState = {
-    viewedMonth: null
+    viewedMonth: null,
+    activeTrigger: null
+};
+
+const aiInsightsState = {
+    isLoading: false,
+    rows: [],
+    generatingDate: ''
 };
 
 function requestJumpToCurrentTime() {
@@ -591,10 +599,7 @@ function requestTimelineCurrentJump() {
 
 async function goToToday({ closePicker = false } = {}) {
     state.currentDate = new Date();
-    clearTimelineSelectionForDateChange();
-    setupDateDisplay();
-    await refreshData();
-    requestTimelineCurrentJump();
+    await refreshCurrentDateView({ jumpToCurrent: true });
     if (closePicker) {
         closeDatePicker();
     }
@@ -613,6 +618,46 @@ function clearTimelineSelectionForDateChange() {
 
     if (typeof handleAiDateChanged === 'function') {
         handleAiDateChanged();
+    }
+}
+
+function aiInsightsDateString() {
+    const date = typeof state !== 'undefined' && state.currentDate ? state.currentDate : new Date();
+    if (typeof getFormattedDate === 'function') return getFormattedDate(date);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function syncAiInsightsDateControl() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+    const date = aiInsightsDateString();
+    const summaryDate = document.getElementById('ai-insights-summary-date');
+    const summaryDateDisplay = document.getElementById('ai-insights-summary-date-display');
+    if (summaryDate) summaryDate.value = date;
+    if (summaryDateDisplay && typeof state !== 'undefined' && state.currentDate) {
+        const options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+        summaryDateDisplay.textContent = state.currentDate.toLocaleDateString('en-GB', options);
+    }
+    if (typeof DOM !== 'undefined' && DOM.elDatePickerInput) DOM.elDatePickerInput.value = date;
+}
+
+async function refreshCurrentDateView({ jumpToCurrent = false } = {}) {
+    clearTimelineSelectionForDateChange();
+    setupDateDisplay();
+    syncAiInsightsDateControl();
+
+    if (state.currentView === 'aiInsights') {
+        if (typeof window.refreshAiInsights === 'function') {
+            await window.refreshAiInsights();
+        }
+        return;
+    }
+
+    await refreshData();
+    if (jumpToCurrent) {
+        requestTimelineCurrentJump();
     }
 }
 
@@ -638,6 +683,7 @@ async function setTimelineMode(mode, { refresh = true } = {}) {
     if (changed) {
         clearTimelineSelectionForDateChange();
         setupDateDisplay();
+        syncAiInsightsDateControl();
     }
 
     if (refresh) {
@@ -659,6 +705,14 @@ function setWorkTimesCollapsed(collapsed) {
     toggle.setAttribute('title', collapsed ? 'Expand Sidebar' : 'Collapse Sidebar');
 }
 
+function syncHeaderActionsForView() {
+    const toggle = document.getElementById('btn-toggle-work-times');
+    if (!toggle) return;
+    const hidden = state.currentView !== 'timeline';
+    toggle.hidden = hidden;
+    toggle.classList.toggle('hidden', hidden);
+}
+
 function setupWorkTimesToggle() {
     const toggle = document.getElementById('btn-toggle-work-times');
     if (!toggle) return;
@@ -672,6 +726,140 @@ function setupWorkTimesToggle() {
         setWorkTimesCollapsed(collapsed);
         localStorage.setItem('workTimesCollapsed', String(collapsed));
     });
+}
+
+function hideSettingsTooltip() {
+    const tooltip = document.getElementById('settings-floating-tooltip');
+    if (!tooltip) return;
+    tooltip.classList.add('hidden');
+    tooltip.textContent = '';
+}
+
+function buildSettingsTooltipContent(tooltip, trigger) {
+    const text = String(trigger?.dataset?.settingsTooltip || '').trim();
+    const title = String(trigger?.dataset?.settingsTooltipTitle || '').trim();
+    const list = String(trigger?.dataset?.settingsTooltipList || '').trim();
+    const note = String(trigger?.dataset?.settingsTooltipNote || '').trim();
+
+    tooltip.textContent = '';
+
+    if (title || list || note) {
+        if (title) {
+            const titleEl = document.createElement('div');
+            titleEl.className = 'settings-tooltip-title';
+            titleEl.textContent = title;
+            tooltip.appendChild(titleEl);
+        }
+
+        const rows = list
+            .split(/\n+/)
+            .map(row => row.trim())
+            .filter(Boolean)
+            .map(row => {
+                const separatorIndex = row.indexOf('|');
+                if (separatorIndex === -1) {
+                    return { term: '', detail: row };
+                }
+                return {
+                    term: row.slice(0, separatorIndex).trim(),
+                    detail: row.slice(separatorIndex + 1).trim()
+                };
+            })
+            .filter(row => row.term || row.detail);
+
+        if (rows.length) {
+            const listEl = document.createElement('div');
+            listEl.className = 'settings-tooltip-list';
+            rows.forEach(row => {
+                const rowEl = document.createElement('div');
+                rowEl.className = 'settings-tooltip-row';
+
+                const termEl = document.createElement('span');
+                termEl.className = 'settings-tooltip-term';
+                termEl.textContent = row.term;
+
+                const detailEl = document.createElement('span');
+                detailEl.className = 'settings-tooltip-detail';
+                detailEl.textContent = row.detail;
+
+                rowEl.append(termEl, detailEl);
+                listEl.appendChild(rowEl);
+            });
+            tooltip.appendChild(listEl);
+        }
+
+        if (note) {
+            const noteEl = document.createElement('div');
+            noteEl.className = 'settings-tooltip-note';
+            noteEl.textContent = note;
+            tooltip.appendChild(noteEl);
+        }
+
+        return true;
+    }
+
+    if (!text) return false;
+    tooltip.textContent = text;
+    return true;
+}
+
+function showSettingsTooltip(trigger) {
+    const tooltip = document.getElementById('settings-floating-tooltip');
+    if (!tooltip || typeof trigger?.getBoundingClientRect !== 'function') return;
+
+    if (!buildSettingsTooltipContent(tooltip, trigger)) return;
+    tooltip.classList.remove('hidden');
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect?.() || { width: 260, height: 80 };
+    const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 1024;
+    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 768;
+    const margin = 12;
+    const preferredLeft = triggerRect.left + (triggerRect.width / 2) - (tooltipRect.width / 2);
+    const maxLeft = Math.max(margin, viewportWidth - tooltipRect.width - margin);
+    const left = Math.min(Math.max(preferredLeft, margin), maxLeft);
+    let top = triggerRect.top - tooltipRect.height - 8;
+    if (top < margin) {
+        top = triggerRect.bottom + 8;
+    }
+    top = Math.min(Math.max(top, margin), Math.max(margin, viewportHeight - tooltipRect.height - margin));
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+}
+
+function settingsTooltipTriggerFromTarget(target) {
+    return target?.closest?.('[data-settings-tooltip], [data-settings-tooltip-list], [data-settings-tooltip-note], [data-settings-tooltip-title]') || null;
+}
+
+function bindSettingsTooltips() {
+    if (!settingsTooltipsInitialized) {
+        settingsTooltipsInitialized = true;
+        document.addEventListener('pointerover', event => {
+            const trigger = settingsTooltipTriggerFromTarget(event.target);
+            if (trigger) showSettingsTooltip(trigger);
+        });
+        document.addEventListener('pointerout', event => {
+            const trigger = settingsTooltipTriggerFromTarget(event.target);
+            if (!trigger) return;
+            if (!event.relatedTarget || !trigger.contains?.(event.relatedTarget)) {
+                hideSettingsTooltip();
+            }
+        });
+        document.addEventListener('focusin', event => {
+            const trigger = settingsTooltipTriggerFromTarget(event.target);
+            if (trigger) showSettingsTooltip(trigger);
+        });
+        document.addEventListener('focusout', event => {
+            if (settingsTooltipTriggerFromTarget(event.target)) hideSettingsTooltip();
+        });
+    }
+
+    const settingsBody = document.getElementById('settings-modal-body');
+    if (settingsBody && !settingsBody._settingsTooltipScrollBound) {
+        settingsBody._settingsTooltipScrollBound = true;
+        settingsBody.addEventListener('scroll', hideSettingsTooltip);
+    }
 }
 
 function syncEmptyActivityRowsToggle() {
@@ -765,6 +953,10 @@ function closeModalById(modalId) {
     const modal = document.getElementById(modalId);
     if (!modal || modal.classList.contains('hidden')) return false;
 
+    if (modalId === 'settings-modal') {
+        hideSettingsTooltip();
+    }
+
     if (modalId === 'time-entry-modal' && typeof closeTimeEntryModal === 'function') {
         closeTimeEntryModal();
     } else {
@@ -782,6 +974,7 @@ function closeTopModal() {
     const modalIds = [
         'confirm-modal',
         'project-details-modal',
+        'ai-insights-detail-modal',
         'settings-modal',
         'rules-modal',
         'project-modal',
@@ -798,6 +991,7 @@ function setupModalDismissalHandlers() {
     [
         'confirm-modal',
         'project-details-modal',
+        'ai-insights-detail-modal',
         'settings-modal',
         'rules-modal',
         'project-modal',
@@ -843,6 +1037,7 @@ function setupMainEventListeners() {
     setupWorkTimesToggle();
     setupEmptyActivityRowsToggle();
     setupModalDismissalHandlers();
+    bindSettingsTooltips();
 
     // Auto-Assignment Rules Modal triggers
     const btnRules = document.getElementById('btn-rules');
@@ -942,6 +1137,50 @@ function setupMainEventListeners() {
         title: 'Window Title',
         url: 'URL'
     };
+
+    function setSettingsSection(section = 'general') {
+        const nextSection = ['general', 'capture', 'ai', 'data'].includes(section) ? section : 'general';
+        hideSettingsTooltip();
+        document.querySelectorAll?.('[data-settings-section-button]')?.forEach(button => {
+            const isActive = button.dataset.settingsSectionButton === nextSection;
+            button.classList.toggle('is-active', isActive);
+            button.setAttribute('aria-selected', String(isActive));
+        });
+        document.querySelectorAll?.('[data-settings-section-panel]')?.forEach(panel => {
+            panel.classList.toggle('hidden', panel.dataset.settingsSectionPanel !== nextSection);
+        });
+        bindSettingsTooltips();
+    }
+
+    async function openSettingsModal({ section = 'general' } = {}) {
+        if (window.OrielData && window.OrielData.isNative) {
+            try {
+                const nativeSettings = await window.OrielData.request('settings.get', {});
+                Object.assign(state.settings, nativeSettings);
+                if (typeof window.applyTheme === 'function') {
+                    window.applyTheme(state.settings.theme);
+                }
+                syncEmptyActivityRowsToggle();
+            } catch (error) {
+                console.error('Error fetching native settings:', error);
+            }
+        }
+        await refreshLogoDevKeyStatus();
+        if (typeof window.refreshAiSettingsStatus === 'function') {
+            await window.refreshAiSettingsStatus();
+        }
+        syncSettingsControls();
+        setSettingsSection(section);
+        bindSettingsTooltips();
+        if (settingsModal) {
+            settingsModal.classList.remove('hidden');
+        }
+        if (typeof window.fetchTrackingExclusions === 'function') {
+            await window.fetchTrackingExclusions();
+            renderTrackingExclusions();
+        }
+    }
+    window.openSettingsModal = openSettingsModal;
 
     function renderTrackingExclusions() {
         if (!settingsExclusionsList) return;
@@ -1308,35 +1547,17 @@ function setupMainEventListeners() {
         }
     }
 
+    document.querySelectorAll?.('[data-settings-section-button]')?.forEach(button => {
+        button.addEventListener('click', () => setSettingsSection(button.dataset.settingsSectionButton));
+    });
+
     if (btnSettings) {
-        btnSettings.addEventListener('click', async () => {
-            if (window.OrielData && window.OrielData.isNative) {
-                try {
-                    const nativeSettings = await window.OrielData.request('settings.get', {});
-                    Object.assign(state.settings, nativeSettings);
-                    if (typeof window.applyTheme === 'function') {
-                        window.applyTheme(state.settings.theme);
-                    }
-                    syncEmptyActivityRowsToggle();
-                } catch (error) {
-                    console.error('Error fetching native settings:', error);
-                }
-            }
-            await refreshLogoDevKeyStatus();
-            syncSettingsControls();
-            if (settingsModal) {
-                settingsModal.classList.remove('hidden');
-            }
-            if (typeof window.fetchTrackingExclusions === 'function') {
-                await window.fetchTrackingExclusions();
-                renderTrackingExclusions();
-            }
-        });
+        btnSettings.addEventListener('click', () => openSettingsModal({ section: 'general' }));
     }
 
     if (settingsModalBtnClose) {
         settingsModalBtnClose.addEventListener('click', () => {
-            if (settingsModal) settingsModal.classList.add('hidden');
+            closeModalById('settings-modal');
         });
     }
 
@@ -1492,13 +1713,344 @@ function setupMainEventListeners() {
     }
 
     function setActiveWorkspaceTab(activeTab) {
-        [DOM.elTabTimeline, DOM.elTabProjects, DOM.elTabStats].forEach(tab => {
+        [DOM.elTabTimeline, DOM.elTabProjects, DOM.elTabStats, DOM.elTabAiInsights].forEach(tab => {
             const active = tab === activeTab;
+            if (!tab) return;
             tab.classList.toggle('app-tab--active', active);
             if (typeof tab.setAttribute === 'function') {
                 tab.setAttribute('aria-selected', String(active));
             }
         });
+    }
+
+    function parseAiInsightsDate(value) {
+        const [year, month, day] = String(value || '').split('-').map(Number);
+        if (!year || !month || !day) return null;
+        return new Date(year, month - 1, day);
+    }
+
+    function formatAiInsightsDate(date) {
+        if (typeof getFormattedDate === 'function') return getFormattedDate(date);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function aiInsightsRangeBounds() {
+        const current = new Date(state.currentDate || new Date());
+        current.setHours(0, 0, 0, 0);
+        const end = new Date(current);
+        const start = new Date(current);
+        start.setDate(start.getDate() - 365);
+        return {
+            startDate: formatAiInsightsDate(start),
+            endDate: formatAiInsightsDate(end)
+        };
+    }
+
+    function aiInsightsFriendlyDate(date) {
+        const parsed = parseAiInsightsDate(date);
+        if (!parsed) return date;
+        return parsed.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    function aiInsightsStatusLabel(status) {
+        if (status === 'succeeded') return 'Generated';
+        if (status === 'ready') return 'Ready';
+        if (status === 'failed') return 'Failed';
+        if (status === 'generating') return 'Generating';
+        return 'Empty';
+    }
+
+    function createAiInsightsElement(tag, className, text = '') {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (text) element.textContent = text;
+        return element;
+    }
+
+    function appendAiInsightsMarkdownParagraph(container, lines) {
+        const text = lines.join(' ').replace(/\s+/g, ' ').trim();
+        if (!text) return;
+        container.appendChild(createAiInsightsElement('p', '', text));
+    }
+
+    function appendAiInsightsMarkdownList(container, items, ordered = false) {
+        const list = createAiInsightsElement(ordered ? 'ol' : 'ul', 'ai-insights-card-markdown-list');
+        items
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+            .forEach(item => {
+                list.appendChild(createAiInsightsElement('li', '', item));
+            });
+        if (list.children?.length) {
+            container.appendChild(list);
+        }
+    }
+
+    function renderAiInsightsMarkdown(text, className = 'ai-insights-card-summary ai-insights-card-markdown') {
+        const container = createAiInsightsElement('div', className);
+        const lines = String(text || '')
+            .replace(/\r\n?/g, '\n')
+            .split('\n');
+        let paragraphLines = [];
+        let listItems = [];
+        let listOrdered = false;
+
+        const flushParagraph = () => {
+            appendAiInsightsMarkdownParagraph(container, paragraphLines);
+            paragraphLines = [];
+        };
+        const flushList = () => {
+            appendAiInsightsMarkdownList(container, listItems, listOrdered);
+            listItems = [];
+        };
+
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                flushParagraph();
+                flushList();
+                return;
+            }
+
+            const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+            const orderedMatch = trimmed.match(/^\d+[.)]\s+(.+)$/);
+            if (unorderedMatch || orderedMatch) {
+                flushParagraph();
+                const ordered = Boolean(orderedMatch);
+                if (listItems.length && listOrdered !== ordered) {
+                    flushList();
+                }
+                listOrdered = ordered;
+                listItems.push((unorderedMatch || orderedMatch)[1]);
+                return;
+            }
+
+            flushList();
+            paragraphLines.push(trimmed.replace(/^#{1,6}\s+/, ''));
+        });
+
+        flushParagraph();
+        flushList();
+
+        if (!container.children?.length) {
+            container.appendChild(createAiInsightsElement('p', '', 'Daily summary generated.'));
+        }
+        return container;
+    }
+
+    function aiInsightsPreviewText(text) {
+        const lines = String(text || '')
+            .replace(/\r\n?/g, '\n')
+            .split('\n');
+        const paragraphLines = [];
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                if (paragraphLines.length > 0) break;
+                continue;
+            }
+            if (/^[-*]\s+/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed) || /^(highlights?|uncertainties):$/i.test(trimmed)) {
+                if (paragraphLines.length > 0) break;
+                continue;
+            }
+            paragraphLines.push(trimmed.replace(/^#{1,6}\s+/, ''));
+        }
+
+        return paragraphLines.join(' ').replace(/\s+/g, ' ').trim() || 'Daily summary generated.';
+    }
+
+    function renderAiInsightsPreview(text) {
+        const previewText = aiInsightsPreviewText(text);
+        const preview = createAiInsightsElement('div', 'ai-insights-card-summary ai-insights-card-summary--fade');
+        preview.appendChild(createAiInsightsElement('p', '', previewText));
+        return preview;
+    }
+
+    function visibleAiInsightsRows() {
+        const rows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
+        return rows
+            .sort((first, second) => String(second.date || '').localeCompare(String(first.date || '')));
+    }
+
+    function renderAiInsightsCards() {
+        const grid = document.getElementById('ai-insights-card-grid');
+        const emptyState = document.getElementById('ai-insights-empty-state');
+        if (!grid) return;
+        const rows = visibleAiInsightsRows();
+        grid.replaceChildren();
+        if (emptyState) {
+            emptyState.classList.toggle('hidden', rows.length > 0 || aiInsightsState.isLoading);
+            emptyState.textContent = aiInsightsState.isLoading
+                ? 'Loading AI summaries...'
+                : 'No generated or ready-to-generate AI summaries in this range.';
+        }
+        if (aiInsightsState.isLoading && rows.length === 0) {
+            const loading = createAiInsightsElement('div', 'ai-insights-loading', 'Loading AI summaries...');
+            grid.appendChild(loading);
+            return;
+        }
+        rows.forEach(row => {
+            grid.appendChild(createAiInsightsCard(row));
+        });
+    }
+
+    function createAiInsightsCard(row) {
+        const status = row.status || 'empty';
+        const card = createAiInsightsElement('article', `ai-insights-card ai-insights-card--${status}`);
+        if (row.date) {
+            card.id = `ai-insights-card-${row.date}`;
+        }
+
+        const header = createAiInsightsElement('div', 'ai-insights-card-header');
+        const titleBlock = createAiInsightsElement('div', 'ai-insights-card-title');
+        titleBlock.appendChild(createAiInsightsElement('h2', '', aiInsightsFriendlyDate(row.date || '')));
+        const statusPill = createAiInsightsElement('span', 'ai-insights-status-pill', aiInsightsStatusLabel(status));
+        statusPill.dataset.state = status;
+        header.appendChild(titleBlock);
+        header.appendChild(statusPill);
+        card.appendChild(header);
+
+        if (status === 'succeeded') {
+            appendGeneratedAiInsightsContent(card, row);
+        } else if (status === 'failed') {
+            appendFailedAiInsightsContent(card, row);
+        } else if (status === 'ready') {
+            appendReadyAiInsightsContent(card, row);
+        }
+        return card;
+    }
+
+    function appendAiInsightsHighlights(container, highlights, className = 'ai-insights-card-highlights') {
+        if (!Array.isArray(highlights)) return;
+        const cleanHighlights = highlights.map(item => String(item || '').trim()).filter(Boolean);
+        if (cleanHighlights.length === 0) return;
+        const list = createAiInsightsElement('ul', className);
+        cleanHighlights.forEach(item => {
+            list.appendChild(createAiInsightsElement('li', '', item));
+        });
+        container.appendChild(list);
+    }
+
+    function openAiInsightsDetail(row) {
+        const modal = document.getElementById('ai-insights-detail-modal');
+        const title = document.getElementById('ai-insights-detail-title');
+        const body = document.getElementById('ai-insights-detail-body');
+        if (!modal || !body) return;
+        if (title) title.textContent = aiInsightsFriendlyDate(row?.date || '');
+
+        const summary = row?.summary || {};
+        const text = String(summary.text || 'Daily summary generated.').trim();
+        body.replaceChildren();
+        body.appendChild(renderAiInsightsMarkdown(text, 'ai-insights-detail-summary ai-insights-card-markdown'));
+        appendAiInsightsHighlights(body, summary.highlights, 'ai-insights-detail-highlights');
+        modal.classList.remove('hidden');
+    }
+
+    function appendGeneratedAiInsightsContent(card, row) {
+        const summary = row.summary || {};
+        const text = String(summary.text || 'Daily summary generated.').trim();
+        card.appendChild(renderAiInsightsPreview(text));
+
+        const actions = createAiInsightsElement('div', 'ai-insights-card-actions');
+        const openButton = createAiInsightsElement('button', 'button-secondary', 'Open');
+        openButton.type = 'button';
+        openButton.addEventListener('click', () => openAiInsightsDetail(row));
+        const isGenerating = aiInsightsState.generatingDate === row.date;
+        const regenerateButton = createAiInsightsElement('button', 'button-secondary', isGenerating ? 'Generating...' : 'Regenerate');
+        regenerateButton.type = 'button';
+        regenerateButton.dataset.action = 'generate';
+        regenerateButton.disabled = !window.OrielData?.isNative || isGenerating;
+        regenerateButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        actions.appendChild(openButton);
+        actions.appendChild(regenerateButton);
+        card.appendChild(actions);
+    }
+
+    function appendReadyAiInsightsContent(card, row) {
+        card.appendChild(createAiInsightsElement(
+            'p',
+            'ai-insights-card-note',
+            'Screenshot activity summaries are available for this day.'
+        ));
+        const isGenerating = aiInsightsState.generatingDate === row.date;
+        const generateButton = createAiInsightsElement('button', 'button-primary ai-insights-card-generate', isGenerating ? 'Generating...' : 'Generate daily summary');
+        generateButton.type = 'button';
+        generateButton.dataset.action = 'generate';
+        generateButton.disabled = !window.OrielData?.isNative || isGenerating;
+        generateButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        card.appendChild(generateButton);
+    }
+
+    function appendFailedAiInsightsContent(card, row) {
+        const message = row.errorMessage || 'Daily AI summary generation failed.';
+        card.appendChild(createAiInsightsElement('p', 'ai-insights-card-error', message));
+        const isGenerating = aiInsightsState.generatingDate === row.date;
+        const retryButton = createAiInsightsElement('button', 'button-secondary ai-insights-card-generate', isGenerating ? 'Generating...' : 'Try again');
+        retryButton.type = 'button';
+        retryButton.dataset.action = 'generate';
+        retryButton.disabled = !window.OrielData?.isNative || isGenerating;
+        retryButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        card.appendChild(retryButton);
+    }
+
+    async function refreshAiInsights({ focusDate = '' } = {}) {
+        syncAiInsightsDateControl();
+        if (!window.OrielData?.isNative) {
+            aiInsightsState.rows = [];
+            aiInsightsState.isLoading = false;
+            renderAiInsightsCards();
+            return;
+        }
+        try {
+            aiInsightsState.isLoading = true;
+            renderAiInsightsCards();
+            const payload = await window.OrielData.request('dailyAISummaries.list', {
+                ...aiInsightsRangeBounds(),
+                includeEmpty: false
+            });
+            aiInsightsState.rows = Array.isArray(payload) ? payload : [];
+            aiInsightsState.isLoading = false;
+            renderAiInsightsCards();
+            const targetDate = focusDate || aiInsightsDateString();
+            const targetCard = targetDate ? document.getElementById(`ai-insights-card-${targetDate}`) : null;
+            targetCard?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+            targetCard?.classList?.add?.('is-focused');
+            if (targetCard) {
+                setTimeout(() => targetCard.classList?.remove?.('is-focused'), 1200);
+            }
+        } catch (error) {
+            aiInsightsState.rows = [{
+                date: aiInsightsDateString(),
+                status: 'failed',
+                sourceSummaryCount: 0,
+                errorMessage: error?.message || 'Could not load AI Insights.'
+            }];
+            aiInsightsState.isLoading = false;
+            renderAiInsightsCards();
+        }
+    }
+    window.refreshAiInsights = refreshAiInsights;
+
+    async function generateAiInsightsDailySummary(date = aiInsightsDateString()) {
+        if (!window.OrielData?.isNative || !date) return;
+        try {
+            aiInsightsState.generatingDate = date;
+            renderAiInsightsCards();
+            await window.OrielData.request('dailyAISummaries.generate', { date });
+            aiInsightsState.generatingDate = '';
+            await refreshAiInsights({ focusDate: date });
+        } catch (error) {
+            aiInsightsState.generatingDate = '';
+            const existingRows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
+            aiInsightsState.rows = existingRows.map(row => row.date === date
+                ? { ...row, status: 'failed', errorMessage: error?.message || 'Could not generate the daily AI summary.' }
+                : row);
+            renderAiInsightsCards();
+        }
     }
 
     DOM.elTimelineModeDay?.addEventListener('click', async () => {
@@ -1509,6 +2061,7 @@ function setupMainEventListeners() {
         await setTimelineMode('week');
     });
     syncTimelineModeControls();
+    syncHeaderActionsForView();
 
     // View navigation tab workspace switchers
     DOM.elTabTimeline.addEventListener('click', () => {
@@ -1516,8 +2069,10 @@ function setupMainEventListeners() {
         DOM.elSchedulerWorkspace.classList.remove('hidden');
         DOM.elProjectsWorkspace.classList.add('hidden');
         DOM.elStatsWorkspace.classList.add('hidden');
+        DOM.elAiInsightsWorkspace?.classList.add('hidden');
         setDateNavigationVisible(true);
         syncTimelineModeControls();
+        syncHeaderActionsForView();
 
         setActiveWorkspaceTab(DOM.elTabTimeline);
 
@@ -1529,7 +2084,9 @@ function setupMainEventListeners() {
         DOM.elSchedulerWorkspace.classList.add('hidden');
         DOM.elProjectsWorkspace.classList.remove('hidden');
         DOM.elStatsWorkspace.classList.add('hidden');
+        DOM.elAiInsightsWorkspace?.classList.add('hidden');
         setDateNavigationVisible(false);
+        syncHeaderActionsForView();
 
         setActiveWorkspaceTab(DOM.elTabProjects);
 
@@ -1541,7 +2098,9 @@ function setupMainEventListeners() {
         DOM.elSchedulerWorkspace.classList.add('hidden');
         DOM.elProjectsWorkspace.classList.add('hidden');
         DOM.elStatsWorkspace.classList.remove('hidden');
+        DOM.elAiInsightsWorkspace?.classList.add('hidden');
         setDateNavigationVisible(false);
+        syncHeaderActionsForView();
 
         setActiveWorkspaceTab(DOM.elTabStats);
 
@@ -1550,12 +2109,30 @@ function setupMainEventListeners() {
         }
     });
 
+    DOM.elTabAiInsights?.addEventListener('click', async () => {
+        state.currentView = 'aiInsights';
+        DOM.elSchedulerWorkspace.classList.add('hidden');
+        DOM.elProjectsWorkspace.classList.add('hidden');
+        DOM.elStatsWorkspace.classList.add('hidden');
+        DOM.elAiInsightsWorkspace?.classList.remove('hidden');
+        setDateNavigationVisible(false);
+        syncHeaderActionsForView();
+
+        setActiveWorkspaceTab(DOM.elTabAiInsights);
+        await refreshAiInsights();
+    });
+
+    document.getElementById('ai-insights-detail-close')?.addEventListener('click', () => {
+        closeModalById('ai-insights-detail-modal');
+    });
+
     // Details Popup handlers
     DOM.elPopupCloseBtn.addEventListener('click', dismissActivityDetailsPopup);
 
     // Global window Esc key overlay / multi-select dismiss logic
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+            hideSettingsTooltip();
             closeDatePicker();
             if (closeTopModal()) return;
 
@@ -1566,6 +2143,7 @@ function setupMainEventListeners() {
             dismissActivityDetailsPopup();
         }
     });
+    window.addEventListener('scroll', hideSettingsTooltip);
 
     // Global dismiss of Details Popover when clicking outside
     window.addEventListener('click', (e) => {
@@ -1578,17 +2156,15 @@ function setupMainEventListeners() {
 
     // Date navigation controls
     document.getElementById('btn-prev-day').addEventListener('click', async () => {
-        state.currentDate.setDate(state.currentDate.getDate() - (state.timelineMode === 'week' ? 7 : 1));
-        clearTimelineSelectionForDateChange();
-        setupDateDisplay();
-        await refreshData();
+        const deltaDays = state.currentView === 'aiInsights' ? 1 : (state.timelineMode === 'week' ? 7 : 1);
+        state.currentDate.setDate(state.currentDate.getDate() - deltaDays);
+        await refreshCurrentDateView();
     });
 
     document.getElementById('btn-next-day').addEventListener('click', async () => {
-        state.currentDate.setDate(state.currentDate.getDate() + (state.timelineMode === 'week' ? 7 : 1));
-        clearTimelineSelectionForDateChange();
-        setupDateDisplay();
-        await refreshData();
+        const deltaDays = state.currentView === 'aiInsights' ? 1 : (state.timelineMode === 'week' ? 7 : 1);
+        state.currentDate.setDate(state.currentDate.getDate() + deltaDays);
+        await refreshCurrentDateView();
     });
 
     document.getElementById('btn-today').addEventListener('click', async () => {
@@ -1598,16 +2174,14 @@ function setupMainEventListeners() {
     DOM.elDatePickerInput.addEventListener('change', async () => {
         const [year, month, day] = DOM.elDatePickerInput.value.split('-').map(Number);
         state.currentDate = new Date(year, month - 1, day);
-        clearTimelineSelectionForDateChange();
-        setupDateDisplay();
-        await refreshData();
+        await refreshCurrentDateView();
     });
 
     const datePickerTrigger = document.getElementById('date-picker-trigger');
     if (datePickerTrigger) {
         datePickerTrigger.addEventListener('click', (e) => {
             if (e.target.closest('#date-picker-popover')) return;
-            openDatePicker();
+            openDatePicker(datePickerTrigger);
         });
     }
 
@@ -1647,7 +2221,8 @@ function setupMainEventListeners() {
     }
 
     document.addEventListener('click', (e) => {
-        if (!datePickerTrigger || e.target.closest('#date-picker-trigger')) return;
+        if (datePickerTrigger && e.target.closest('#date-picker-trigger')) return;
+        if (e.target.closest('#date-picker-popover')) return;
         closeDatePicker();
     });
 
@@ -2348,16 +2923,33 @@ function setDateNavigationVisible(isVisible) {
     dateNavigation.classList.toggle('hidden', !isVisible);
 }
 
-function openDatePicker() {
+function setDatePickerTriggerExpanded(trigger, expanded) {
+    if (trigger && typeof trigger.setAttribute === 'function') {
+        trigger.setAttribute('aria-expanded', String(expanded));
+    }
+}
+
+function resetDatePickerPopoverPosition(popover) {
+    if (!popover?.style) return;
+    ['position', 'top', 'left', 'right', 'bottom', 'width'].forEach(prop => {
+        popover.style[prop] = '';
+    });
+}
+
+function openDatePicker(trigger = null) {
     const popover = document.getElementById('date-picker-popover');
     if (!popover) return;
 
+    setDatePickerTriggerExpanded(datePickerState.activeTrigger, false);
+    datePickerState.activeTrigger = trigger || document.getElementById('date-picker-trigger');
+    setDatePickerTriggerExpanded(datePickerState.activeTrigger, true);
     datePickerState.viewedMonth = new Date(
         state.currentDate.getFullYear(),
         state.currentDate.getMonth(),
         1
     );
     renderDatePicker();
+    resetDatePickerPopoverPosition(popover);
     popover.classList.remove('hidden');
 }
 
@@ -2365,6 +2957,9 @@ function closeDatePicker() {
     const popover = document.getElementById('date-picker-popover');
     if (!popover) return;
     popover.classList.add('hidden');
+    setDatePickerTriggerExpanded(datePickerState.activeTrigger, false);
+    datePickerState.activeTrigger = null;
+    resetDatePickerPopoverPosition(popover);
 }
 
 function shiftDatePickerMonth(delta) {
@@ -2433,9 +3028,7 @@ function renderDatePicker() {
             e.stopPropagation();
             const [year, month, day] = button.dataset.date.split('-').map(Number);
             state.currentDate = new Date(year, month - 1, day);
-            clearTimelineSelectionForDateChange();
-            setupDateDisplay();
-            await refreshData();
+            await refreshCurrentDateView();
             closeDatePicker();
         });
     });
@@ -2456,6 +3049,7 @@ async function init() {
         }
     }
     setupDateDisplay();
+    syncAiInsightsDateControl();
     setupMainEventListeners();
     if (window.setupScrollSync) setupScrollSync();
     
@@ -2492,6 +3086,7 @@ async function init() {
                 state.currentDate = new Date();
                 clearTimelineSelectionForDateChange();
                 setupDateDisplay();
+                syncAiInsightsDateControl();
             }
             window.systemTodayDateStr = currentRealTodayStr;
         }

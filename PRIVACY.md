@@ -49,6 +49,13 @@ Network access is limited to explicit user-enabled features:
 - **Ask AI:** disabled until the user configures a provider API key. When used,
   Oriel sends the prompt and selected-day context to the chosen provider. API
   keys are stored in Keychain.
+- **AI screenshot summaries:** disabled by default. When enabled, Oriel may
+  capture a foreground activity screenshot, downscale and JPEG-compress it in
+  memory, and send it with activity metadata to the selected provider. Oriel
+  does not store the screenshot or raw provider response. It stores only the
+  validated summary JSON, provider/model name, status, sanitized error text,
+  dimensions, compressed byte count, and request metadata needed for later
+  local summaries.
 - **AI model refresh:** when requested by the user, Oriel contacts the selected
   provider to list available models.
 
@@ -72,7 +79,9 @@ be used to prune matching historical activity where the app exposes that flow.
 
 Local data can also be removed by deleting the Oriel database and caches from
 the paths listed above. Backup archives should be treated as private because
-they can contain activity history, projects, settings, and time entries.
+they can contain activity history, projects, settings, time entries, and
+validated AI screenshot summaries. Archives do not include API keys or raw
+screenshots.
 
 ## Development And Contributions
 

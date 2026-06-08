@@ -1,38 +1,7 @@
 (function initializeAiSidebar(global) {
-    const DEFAULT_OPENAI_MODEL = 'gpt-5.2';
-    const DEFAULT_GOOGLE_MODEL = 'gemini-3.5-flash';
-    const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
     const AI_PROMPT_MESSAGE_LIMIT = 8;
     const AI_CONTEXT_ITEM_LIMIT = 60;
     const AI_UNLOGGED_RANGE_DETAIL_MIN_MS = 60 * 1000;
-    const AI_MODEL_CACHE_KEY = 'oriel.aiModelCache.v1';
-    const AI_MODEL_REFRESH_SUCCESS_MS = 2600;
-    const AI_PROVIDERS = [
-        {
-            id: 'openai',
-            label: 'OpenAI',
-            settingKey: 'aiOpenAIModel',
-            storageKey: 'aiOpenAIModel',
-            defaultModel: DEFAULT_OPENAI_MODEL,
-            curatedModels: ['gpt-5.2', 'gpt-5.2-mini', 'gpt-5.1', 'gpt-4.1']
-        },
-        {
-            id: 'google',
-            label: 'Gemini',
-            settingKey: 'aiGoogleModel',
-            storageKey: 'aiGoogleModel',
-            defaultModel: DEFAULT_GOOGLE_MODEL,
-            curatedModels: ['gemini-3.5-flash', 'gemini-3.5-pro', 'gemini-2.5-flash', 'gemini-2.5-pro']
-        },
-        {
-            id: 'anthropic',
-            label: 'Claude',
-            settingKey: 'aiAnthropicModel',
-            storageKey: 'aiAnthropicModel',
-            defaultModel: DEFAULT_ANTHROPIC_MODEL,
-            curatedModels: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250514']
-        }
-    ];
     const AI_DRAFT_EXCLUDED_APPS = new Set([
         'music',
         'spotify',
@@ -645,15 +614,8 @@
     }
 
     const aiChats = createAiChatState();
-    let aiKeyStatus = { openai: false, google: false, anthropic: false };
-    let aiModelCache = loadAiModelCache();
     let aiInitialized = false;
     let aiIsLoading = false;
-    let aiSettingsFeedbackTimer = null;
-    let aiKeyEditProvider = null;
-    let aiModelRefreshState = { provider: '', status: 'idle', message: '', count: 0, refreshedAt: '' };
-    let aiModelRefreshConfirmProvider = '';
-    let aiModelRefreshSuccessTimer = null;
 
     function byId(id) {
         return global.document?.getElementById?.(id) || null;
@@ -666,65 +628,6 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
-    }
-
-    function providerConfig(provider) {
-        return AI_PROVIDERS.find(candidate => candidate.id === provider) || null;
-    }
-
-    function providerIds() {
-        return AI_PROVIDERS.map(provider => provider.id);
-    }
-
-    function selectedProvider() {
-        const provider = global.state?.settings?.aiProvider || '';
-        return providerConfig(provider) ? provider : '';
-    }
-
-    function modelForProvider(provider) {
-        const config = providerConfig(provider) || AI_PROVIDERS[0];
-        return global.state?.settings?.[config.settingKey] || config.defaultModel;
-    }
-
-    function selectedModel() {
-        return modelForProvider(selectedProvider() || 'openai');
-    }
-
-    function loadAiModelCache() {
-        try {
-            const parsed = JSON.parse(global.localStorage?.getItem?.(AI_MODEL_CACHE_KEY) || '{}');
-            return parsed && typeof parsed === 'object' ? parsed : {};
-        } catch (_error) {
-            return {};
-        }
-    }
-
-    function saveAiModelCache() {
-        try {
-            global.localStorage?.setItem?.(AI_MODEL_CACHE_KEY, JSON.stringify(aiModelCache));
-        } catch (_error) {
-            // Model cache is a non-secret convenience; ignore storage failures.
-        }
-    }
-
-    function cachedModelsForProvider(provider) {
-        const cached = aiModelCache?.[provider]?.models;
-        return Array.isArray(cached) ? cached.filter(Boolean) : [];
-    }
-
-    function isCuratedModel(provider, model) {
-        const config = providerConfig(provider);
-        return Boolean(config?.curatedModels?.includes(model));
-    }
-
-    function isCachedModel(provider, model) {
-        return cachedModelsForProvider(provider).includes(model);
-    }
-
-    function modelOptionsForProvider(provider) {
-        const config = providerConfig(provider) || AI_PROVIDERS[0];
-        const ids = [...config.curatedModels, ...cachedModelsForProvider(config.id), modelForProvider(config.id)];
-        return Array.from(new Set(ids.map(model => String(model || '').trim()).filter(Boolean)));
     }
 
     function activityOverlapMs(activity, start, end) {
@@ -784,61 +687,29 @@
         status.closest?.('.ai-status-line')?.classList.toggle('is-empty', !message && !aiIsLoading);
     }
 
-    function setAiSettingsFeedback(message, tone = 'muted', { autoClear = true } = {}) {
-        const feedback = byId('ai-settings-feedback');
-        if (!feedback) return;
-        if (aiSettingsFeedbackTimer) {
-            clearTimeout(aiSettingsFeedbackTimer);
-            aiSettingsFeedbackTimer = null;
-        }
-        feedback.textContent = message;
-        feedback.dataset.tone = tone;
-        if (message && autoClear) {
-            aiSettingsFeedbackTimer = setTimeout(() => {
-                feedback.textContent = '';
-                feedback.dataset.tone = 'muted';
-                aiSettingsFeedbackTimer = null;
-            }, 2600);
+    function openAiConfiguration() {
+        if (typeof global.openSettingsModal === 'function') {
+            global.openSettingsModal({ section: 'ai' });
+        } else {
+            setAiStatus('Open Preferences to configure AI.', 'error');
         }
     }
 
-    function clearAiModelRefreshSuccessTimer() {
-        if (!aiModelRefreshSuccessTimer) return;
-        global.clearTimeout?.(aiModelRefreshSuccessTimer);
-        aiModelRefreshSuccessTimer = null;
+    function currentAiSelection() {
+        return typeof global.getSelectedAiProviderAndModel === 'function'
+            ? global.getSelectedAiProviderAndModel()
+            : { provider: '', model: '', hasKey: false };
     }
 
-    function scheduleAiModelRefreshSuccessClear(provider) {
-        clearAiModelRefreshSuccessTimer();
-        if (typeof global.setTimeout !== 'function') return;
-        aiModelRefreshSuccessTimer = global.setTimeout(() => {
-            aiModelRefreshSuccessTimer = null;
-            if (aiModelRefreshState.provider === provider && aiModelRefreshState.status === 'success') {
-                aiModelRefreshState = { provider: '', status: 'idle', message: '', count: 0, refreshedAt: '' };
-                renderAiModelPicker();
-            }
-        }, AI_MODEL_REFRESH_SUCCESS_MS);
-    }
-
-    function clearAiModelRefreshSuccessState() {
-        clearAiModelRefreshSuccessTimer();
-        if (aiModelRefreshState.status === 'success') {
-            aiModelRefreshState = { provider: '', status: 'idle', message: '', count: 0, refreshedAt: '' };
+    function hasAnyAiProviderKey() {
+        if (typeof global.hasAnyAiProviderKey === 'function') {
+            return global.hasAnyAiProviderKey();
         }
-    }
-
-    function providerLabel(provider) {
-        return providerConfig(provider)?.label || 'AI';
-    }
-
-    function setAiSettingsOpen(isOpen) {
-        const panel = byId('ai-settings-panel');
-        const button = byId('ai-settings-button');
-        panel?.classList.toggle('hidden', !isOpen);
-        button?.setAttribute('aria-expanded', String(Boolean(isOpen)));
-        if (!isOpen) setAiSettingsFeedback('', 'muted', { autoClear: false });
-        if (isOpen) renderAiModelOptions();
-        if (!isOpen) setAiModelPickerOpen(false);
+        const providers = Array.isArray(global.AI_PROVIDERS) ? global.AI_PROVIDERS : [];
+        if (typeof global.aiProviderHasSavedKey === 'function') {
+            return providers.some(provider => global.aiProviderHasSavedKey(provider.id));
+        }
+        return Boolean(currentAiSelection().hasKey);
     }
 
     function setAiLoadingState(isLoading) {
@@ -883,346 +754,6 @@
             }
         }
         if (nextTab === 'ai') renderAiSidebar();
-    }
-
-    function syncAiSettingsControls({ resetKey = false } = {}) {
-        renderAiProviderCards();
-        renderAiKeyControls({ resetKey });
-        renderAiModelPicker();
-    }
-
-    function setElementHidden(element, isHidden) {
-        element?.classList.toggle('hidden', Boolean(isHidden));
-    }
-
-    function renderAiKeyControls({ resetKey = false } = {}) {
-        const provider = selectedProvider();
-        const hasProvider = Boolean(provider);
-        const hasKey = hasProvider && Boolean(aiKeyStatus[provider]);
-        const isEditing = hasKey && aiKeyEditProvider === provider;
-        const keyInput = byId('ai-api-key-input');
-        const editButton = byId('ai-key-edit-button');
-        const saveButton = byId('ai-key-save-button');
-        const saveLabel = byId('ai-key-save-label') || saveButton?.querySelector?.('span');
-        const cancelButton = byId('ai-key-cancel-button');
-        const deleteButton = byId('ai-key-delete-button');
-
-        if (aiKeyEditProvider && aiKeyEditProvider !== provider) {
-            aiKeyEditProvider = null;
-        }
-
-        if (keyInput) {
-            keyInput.disabled = !hasProvider || (hasKey && !isEditing);
-            keyInput.placeholder = !hasProvider
-                ? 'Choose provider first'
-                : (hasKey && !isEditing ? '' : (isEditing ? 'Paste new API key' : 'Paste API key'));
-            if (resetKey || (hasKey && !isEditing)) {
-                keyInput.value = hasKey && !isEditing ? '********' : '';
-            }
-        }
-
-        setElementHidden(editButton, !hasKey || isEditing);
-        setElementHidden(saveButton, !hasProvider || (hasKey && !isEditing));
-        setElementHidden(cancelButton, !isEditing);
-        setElementHidden(deleteButton, !hasKey || isEditing);
-        if (saveLabel) saveLabel.textContent = isEditing ? 'Save new key' : 'Save key';
-    }
-
-    function setAiKeyEditMode(isEditing) {
-        const provider = selectedProvider();
-        aiKeyEditProvider = isEditing && provider ? provider : null;
-        syncAiSettingsControls({ resetKey: true });
-        if (isEditing) byId('ai-api-key-input')?.focus?.({ preventScroll: true });
-    }
-
-    async function saveAiSettings(partial) {
-        Object.assign(global.state.settings, partial);
-        if (partial.aiProvider !== undefined) global.localStorage?.setItem?.('aiProvider', partial.aiProvider);
-        if (partial.aiOpenAIModel !== undefined) global.localStorage?.setItem?.('aiOpenAIModel', partial.aiOpenAIModel);
-        if (partial.aiGoogleModel !== undefined) global.localStorage?.setItem?.('aiGoogleModel', partial.aiGoogleModel);
-        if (partial.aiAnthropicModel !== undefined) global.localStorage?.setItem?.('aiAnthropicModel', partial.aiAnthropicModel);
-        if (!global.OrielData?.isNative) return;
-        try {
-            const updated = await global.OrielData.request('ai.settings.update', partial);
-            Object.assign(global.state.settings, updated);
-        } catch (error) {
-            console.error('Error saving AI settings:', error);
-            setAiSettingsFeedback('Could not save AI settings.', 'error');
-        }
-    }
-
-    async function resolveAiProviderSelection(status = aiKeyStatus) {
-        if (selectedProvider()) return selectedProvider();
-        const configuredProviders = providerIds().filter(provider => Boolean(status?.[provider]));
-        if (configuredProviders.length !== 1) return '';
-        const provider = configuredProviders[0];
-        await saveAiSettings({ aiProvider: provider });
-        return provider;
-    }
-
-    function renderAiProviderCards() {
-        const provider = selectedProvider();
-        AI_PROVIDERS.forEach(config => {
-            const card = global.document?.querySelector?.(`[data-ai-provider="${config.id}"]`);
-            const keyState = byId(`ai-provider-${config.id}-key-state`);
-            const hasKey = Boolean(aiKeyStatus[config.id]);
-            card?.classList.toggle('is-selected', provider === config.id);
-            card?.setAttribute('aria-checked', String(provider === config.id));
-            if (keyState) {
-                keyState.dataset.state = hasKey ? 'saved' : 'missing';
-                if (hasKey) {
-                    keyState.textContent = '';
-                    keyState.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i>';
-                    keyState.setAttribute('aria-label', 'Key saved');
-                    keyState.setAttribute('title', 'Key saved');
-                } else {
-                    keyState.innerHTML = '';
-                    keyState.textContent = 'No key';
-                    keyState.removeAttribute?.('aria-label');
-                    keyState.removeAttribute?.('title');
-                }
-            }
-        });
-    }
-
-    function renderAiSettingsStatus() {
-        const keyStatus = byId('ai-settings-key-status');
-        if (!keyStatus) return;
-
-        const provider = selectedProvider();
-        const configuredCount = providerIds().filter(candidate => Boolean(aiKeyStatus[candidate])).length;
-        if (provider && aiKeyStatus[provider]) {
-            keyStatus.textContent = 'Configured';
-            keyStatus.dataset.state = 'ready';
-        } else if (!provider && configuredCount > 1) {
-            keyStatus.textContent = 'Choose provider';
-            keyStatus.dataset.state = 'unconfigured';
-        } else if (!provider) {
-            keyStatus.textContent = 'Add key';
-            keyStatus.dataset.state = 'missing';
-        } else {
-            keyStatus.textContent = 'Key needed';
-            keyStatus.dataset.state = 'missing';
-        }
-    }
-
-    function setAiModelPickerOpen(isOpen) {
-        const menu = byId('ai-model-picker-menu');
-        const button = byId('ai-model-picker-button');
-        menu?.classList.toggle('hidden', !isOpen);
-        button?.setAttribute('aria-expanded', String(Boolean(isOpen)));
-        if (!isOpen) aiModelRefreshConfirmProvider = '';
-        if (isOpen) {
-            const search = byId('ai-model-search-input');
-            if (search) search.value = '';
-            renderAiModelOptions();
-            search?.focus?.({ preventScroll: true });
-        }
-    }
-
-    function renderAiModelPicker() {
-        const provider = selectedProvider() || 'openai';
-        const label = byId('ai-model-picker-label');
-        const button = byId('ai-model-picker-button');
-        const refreshButton = byId('ai-model-refresh-button');
-        const refreshIcon = refreshButton?.querySelector?.('i');
-        const refreshLabel = byId('ai-model-refresh-label') || refreshButton?.querySelector?.('span');
-        const refreshConfirm = byId('ai-model-refresh-confirm');
-        const refreshConfirmText = byId('ai-model-refresh-confirm-text');
-        const refreshConfirmButton = byId('ai-model-refresh-confirm-button');
-        const refreshCancelButton = byId('ai-model-refresh-cancel-button');
-        const meta = byId('ai-model-refresh-meta');
-        const selected = modelForProvider(provider);
-        const stateApplies = aiModelRefreshState.provider === provider;
-        if (aiModelRefreshConfirmProvider && aiModelRefreshConfirmProvider !== selectedProvider()) {
-            aiModelRefreshConfirmProvider = '';
-        }
-        if (label) label.textContent = selected;
-        if (button) button.disabled = !selectedProvider();
-
-        const isRefreshing = stateApplies && aiModelRefreshState.status === 'loading';
-        const isSuccess = stateApplies && aiModelRefreshState.status === 'success' && aiModelRefreshState.count > 0;
-        const isConfirming = Boolean(selectedProvider()) && aiModelRefreshConfirmProvider === provider;
-        if (refreshButton) {
-            refreshButton.disabled = !selectedProvider() || isRefreshing;
-            refreshButton.classList.toggle('is-loading', isRefreshing);
-            refreshButton.classList.toggle('is-success', isSuccess);
-        }
-        if (refreshIcon) {
-            refreshIcon.className = isSuccess ? 'ph ph-check' : 'ph ph-arrows-clockwise';
-            refreshIcon.classList.toggle('is-loading', isRefreshing);
-        }
-        if (refreshLabel) {
-            refreshLabel.textContent = isRefreshing
-                ? 'Refreshing...'
-                : (isSuccess ? 'Models refreshed' : 'Refresh from provider...');
-        }
-        setElementHidden(refreshConfirm, !isConfirming);
-        if (refreshConfirmText && isConfirming) {
-            refreshConfirmText.textContent = `Refresh ${providerLabel(provider)} models now? This will contact the provider API once.`;
-        }
-        if (refreshConfirmButton) refreshConfirmButton.disabled = isRefreshing;
-        if (refreshCancelButton) refreshCancelButton.disabled = isRefreshing;
-
-        if (meta) {
-            meta.dataset.tone = 'muted';
-            if (stateApplies && aiModelRefreshState.status === 'loading') {
-                meta.textContent = 'Refreshing models...';
-            } else if (stateApplies && aiModelRefreshState.status === 'error') {
-                meta.textContent = aiModelRefreshState.message || 'Could not refresh models.';
-                meta.dataset.tone = 'error';
-            } else if (stateApplies && aiModelRefreshState.status === 'success' && aiModelRefreshState.count === 0) {
-                meta.textContent = 'No compatible models returned.';
-            } else {
-                meta.textContent = '';
-            }
-        }
-        renderAiModelOptions();
-    }
-
-    function modelOptionSource(provider, model, { isCustomSearch = false } = {}) {
-        if (isCustomSearch) return 'Custom';
-        if (isCuratedModel(provider, model)) return 'Model';
-        if (isCachedModel(provider, model)) return 'Fetched';
-        return 'Custom';
-    }
-
-    function renderAiModelOptions() {
-        const list = byId('ai-model-option-list');
-        if (!list) return;
-        const provider = selectedProvider() || 'openai';
-        const search = String(byId('ai-model-search-input')?.value || '').trim();
-        const selected = modelForProvider(provider);
-        const lowerSearch = search.toLowerCase();
-        const options = modelOptionsForProvider(provider)
-            .filter(model => !lowerSearch || model.toLowerCase().includes(lowerSearch));
-
-        const exactSearchMatch = search && modelOptionsForProvider(provider).some(model => model.toLowerCase() === lowerSearch);
-        if (search && !exactSearchMatch) options.unshift(search);
-
-        if (options.length === 0) {
-            list.innerHTML = '<div class="ai-model-option" aria-disabled="true">No matching models</div>';
-            return;
-        }
-
-        list.innerHTML = options.map(model => {
-            const isSelected = model === selected;
-            const source = modelOptionSource(provider, model, { isCustomSearch: search && model === search && !exactSearchMatch });
-            return `
-                <button type="button" class="ai-model-option${isSelected ? ' is-selected' : ''}" data-ai-model="${escapeHtml(model)}" role="option" aria-selected="${String(isSelected)}">
-                    <span>${escapeHtml(model)}</span>
-                    <span class="ai-model-option-source">${source}</span>
-                </button>
-            `;
-        }).join('');
-
-        list.querySelectorAll?.('[data-ai-model]')?.forEach(button => {
-            button.addEventListener('click', () => selectAiModel(button.dataset.aiModel));
-        });
-    }
-
-    async function selectAiModel(model) {
-        const provider = selectedProvider();
-        const config = providerConfig(provider);
-        const value = String(model || '').trim();
-        if (!config || !value) return;
-        await saveAiSettings({ [config.settingKey]: value });
-        setAiModelPickerOpen(false);
-        renderAiSidebar();
-    }
-
-    function requestAiModelRefreshConfirmation() {
-        clearAiModelRefreshSuccessState();
-        const provider = selectedProvider();
-        if (!provider) {
-            aiModelRefreshConfirmProvider = '';
-            aiModelRefreshState = { provider: '', status: 'error', message: 'Choose a provider first.', count: 0, refreshedAt: '' };
-            renderAiModelPicker();
-            return;
-        }
-        if (!global.OrielData?.isNative) {
-            aiModelRefreshConfirmProvider = '';
-            aiModelRefreshState = { provider, status: 'error', message: 'Model refresh requires Oriel.app.', count: 0, refreshedAt: '' };
-            renderAiModelPicker();
-            return;
-        }
-        if (!aiKeyStatus[provider]) {
-            aiModelRefreshConfirmProvider = '';
-            aiModelRefreshState = { provider, status: 'error', message: 'Save a key for this provider first.', count: 0, refreshedAt: '' };
-            renderAiModelPicker();
-            return;
-        }
-
-        aiModelRefreshConfirmProvider = provider;
-        renderAiModelPicker();
-        setAiModelPickerOpen(true);
-    }
-
-    function cancelAiModelRefreshConfirmation() {
-        aiModelRefreshConfirmProvider = '';
-        renderAiModelPicker();
-    }
-
-    async function refreshAiModelsForSelectedProvider() {
-        const provider = selectedProvider();
-        if (!provider || !global.OrielData?.isNative || !aiKeyStatus[provider]) {
-            requestAiModelRefreshConfirmation();
-            return;
-        }
-        if (aiModelRefreshConfirmProvider !== provider) {
-            requestAiModelRefreshConfirmation();
-            return;
-        }
-
-        clearAiModelRefreshSuccessTimer();
-        aiModelRefreshConfirmProvider = '';
-        aiModelRefreshState = { provider, status: 'loading', message: '', count: 0, refreshedAt: '' };
-        renderAiModelPicker();
-        try {
-            const response = await global.OrielData.request('ai.models.list', { provider });
-            const models = Array.isArray(response?.models) ? response.models.filter(Boolean) : [];
-            const mergedModels = Array.from(new Set([...cachedModelsForProvider(provider), ...models].map(model => String(model || '').trim()).filter(Boolean)));
-            const refreshedAt = response?.refreshedAt || new Date().toISOString();
-            aiModelCache[provider] = {
-                models: mergedModels,
-                refreshedAt
-            };
-            aiModelRefreshState = {
-                provider,
-                status: 'success',
-                message: models.length > 0 ? 'Model list refreshed.' : 'No compatible models returned.',
-                count: models.length,
-                refreshedAt
-            };
-            saveAiModelCache();
-            if (models.length > 0) scheduleAiModelRefreshSuccessClear(provider);
-            renderAiModelPicker();
-        } catch (error) {
-            console.error('Error refreshing AI models:', error);
-            aiModelRefreshState = {
-                provider,
-                status: 'error',
-                message: error?.message || 'Could not refresh models.',
-                count: 0,
-                refreshedAt: ''
-            };
-            renderAiModelPicker();
-        }
-    }
-
-    async function refreshAiKeyStatus() {
-        if (!global.OrielData?.isNative) {
-            aiKeyStatus = { openai: false, google: false, anthropic: false };
-            return aiKeyStatus;
-        }
-        try {
-            aiKeyStatus = await global.OrielData.request('ai.keys.status', {});
-        } catch (error) {
-            console.error('Error loading AI key status:', error);
-            aiKeyStatus = { openai: false, google: false, anthropic: false };
-            setAiSettingsFeedback('Could not read key status.', 'error');
-        }
-        return aiKeyStatus;
     }
 
     function renderMessages(dateStr) {
@@ -1274,7 +805,6 @@
         const dateStr = getDateString();
         const dateLabel = byId('ai-day-label');
         if (dateLabel) dateLabel.textContent = dateStr;
-        syncAiSettingsControls();
         renderMessages(dateStr);
         const newChatButton = byId('ai-new-chat-button');
         if (newChatButton) {
@@ -1282,7 +812,7 @@
             newChatButton.disabled = !activeChat || activeChat.messages.length === 0;
         }
 
-        renderAiSettingsStatus();
+        byId('ai-unconfigured-status')?.classList.toggle('hidden', hasAnyAiProviderKey());
         setAiLoadingState(aiIsLoading);
     }
 
@@ -1353,20 +883,21 @@
         const content = String(promptText ?? input?.value ?? '').trim();
         if (!content) return;
 
-        const provider = selectedProvider();
+        const selection = currentAiSelection();
+        const provider = selection.provider;
         if (!provider) {
             setAiStatus('Choose an AI provider first.', 'error');
-            setAiSettingsOpen(true);
+            openAiConfiguration();
             return;
         }
         if (!global.OrielData?.isNative) {
             setAiStatus('Ask AI requires Oriel.app so your API key can stay in Keychain.', 'error');
-            setAiSettingsOpen(true);
+            openAiConfiguration();
             return;
         }
-        if (!aiKeyStatus[provider]) {
+        if (!selection.hasKey) {
             setAiStatus('Save an API key for the selected provider first.', 'error');
-            setAiSettingsOpen(true);
+            openAiConfiguration();
             return;
         }
 
@@ -1390,7 +921,7 @@
                 chatId: activeChat.id,
                 date: dateStr,
                 provider,
-                model: selectedModel(),
+                model: selection.model,
                 messages: aiChats.getPromptMessages(dateStr, activeChat.id),
                 intent,
                 dayContext
@@ -1415,99 +946,17 @@
         }
     }
 
-    async function saveAiKey() {
-        const provider = selectedProvider();
-        const apiKey = byId('ai-api-key-input')?.value?.trim() || '';
-        if (!provider || !apiKey) {
-            setAiSettingsFeedback('Choose a provider and paste a key.', 'error');
-            return;
-        }
-        if (!global.OrielData?.isNative) {
-            setAiSettingsFeedback('Keychain storage is available in Oriel.app.', 'error');
-            return;
-        }
-        try {
-            aiKeyStatus = await global.OrielData.request('ai.keys.save', { provider, apiKey });
-            aiKeyEditProvider = null;
-            byId('ai-api-key-input').value = '';
-            setAiSettingsFeedback('Key saved in Keychain.', 'success');
-            syncAiSettingsControls({ resetKey: true });
-            renderAiSidebar();
-        } catch (error) {
-            console.error('Error saving AI key:', error);
-            setAiSettingsFeedback('Could not save API key.', 'error');
-        }
-    }
-
-    async function deleteAiKey() {
-        const provider = selectedProvider();
-        if (!provider || !global.OrielData?.isNative) return;
-        const confirmed = typeof global.confirm === 'function'
-            ? global.confirm(`Remove the saved ${providerLabel(provider)} API key from Keychain?`)
-            : true;
-        if (!confirmed) return;
-        try {
-            aiKeyStatus = await global.OrielData.request('ai.keys.delete', { provider });
-            aiKeyEditProvider = null;
-            setAiSettingsFeedback('Key removed.', 'success');
-            syncAiSettingsControls({ resetKey: true });
-            renderAiSidebar();
-        } catch (error) {
-            console.error('Error deleting AI key:', error);
-            setAiSettingsFeedback('Could not remove API key.', 'error');
-        }
-    }
-
     function bindAiSidebar() {
         if (aiInitialized || !global.document) return;
         aiInitialized = true;
 
         byId('sidebar-tab-work-times')?.addEventListener('click', () => setSidebarTab('work-times'));
         byId('sidebar-tab-ai')?.addEventListener('click', () => setSidebarTab('ai'));
-        byId('ai-settings-button')?.addEventListener('click', () => {
-            const panel = byId('ai-settings-panel');
-            setAiSettingsOpen(panel?.classList.contains('hidden'));
-        });
-        byId('ai-settings-close-button')?.addEventListener('click', () => setAiSettingsOpen(false));
-        byId('ai-key-edit-button')?.addEventListener('click', () => setAiKeyEditMode(true));
-        byId('ai-key-cancel-button')?.addEventListener('click', () => setAiKeyEditMode(false));
+        byId('ai-settings-button')?.addEventListener('click', openAiConfiguration);
         byId('ai-new-chat-button')?.addEventListener('click', () => {
             aiChats.resetChatForDate(getDateString());
             renderAiSidebar();
         });
-        global.document.querySelectorAll?.('[data-ai-provider]')?.forEach(button => {
-            button.addEventListener('click', async () => {
-                const provider = button.dataset.aiProvider;
-                if (!providerConfig(provider)) return;
-                aiKeyEditProvider = null;
-                aiModelRefreshConfirmProvider = '';
-                await saveAiSettings({ aiProvider: provider });
-                syncAiSettingsControls({ resetKey: true });
-                renderAiSidebar();
-            });
-        });
-        byId('ai-model-picker-button')?.addEventListener('click', event => {
-            event.stopPropagation();
-            const menu = byId('ai-model-picker-menu');
-            setAiModelPickerOpen(menu?.classList.contains('hidden'));
-        });
-        byId('ai-model-search-input')?.addEventListener('input', renderAiModelOptions);
-        byId('ai-model-search-input')?.addEventListener('keydown', event => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                selectAiModel(event.target.value);
-            } else if (event.key === 'Escape') {
-                setAiModelPickerOpen(false);
-            }
-        });
-        byId('ai-model-refresh-button')?.addEventListener('click', requestAiModelRefreshConfirmation);
-        byId('ai-model-refresh-confirm-button')?.addEventListener('click', refreshAiModelsForSelectedProvider);
-        byId('ai-model-refresh-cancel-button')?.addEventListener('click', cancelAiModelRefreshConfirmation);
-        global.document.addEventListener?.('click', event => {
-            if (!event.target?.closest?.('.ai-model-picker')) setAiModelPickerOpen(false);
-        });
-        byId('ai-key-save-button')?.addEventListener('click', saveAiKey);
-        byId('ai-key-delete-button')?.addEventListener('click', deleteAiKey);
         byId('ai-send-button')?.addEventListener('click', () => sendAiMessage());
         global.document.querySelectorAll?.('[data-ai-prompt]')?.forEach(button => {
             button.addEventListener('click', () => sendAiMessage(button.dataset.aiPrompt));
@@ -1525,9 +974,11 @@
 
     async function initAiSidebar() {
         bindAiSidebar();
-        syncAiSettingsControls({ resetKey: true });
-        await refreshAiKeyStatus();
-        await resolveAiProviderSelection(aiKeyStatus);
+        if (typeof global.initAiSettings === 'function') {
+            await global.initAiSettings();
+        } else if (typeof global.refreshAiSettingsStatus === 'function') {
+            await global.refreshAiSettingsStatus();
+        }
         renderAiSidebar();
     }
 
@@ -1535,9 +986,6 @@
         renderAiSidebar();
     }
 
-    global.DEFAULT_OPENAI_MODEL = DEFAULT_OPENAI_MODEL;
-    global.DEFAULT_GOOGLE_MODEL = DEFAULT_GOOGLE_MODEL;
-    global.DEFAULT_ANTHROPIC_MODEL = DEFAULT_ANTHROPIC_MODEL;
     global.createAiChatState = createAiChatState;
     global.buildAiDayContext = buildAiDayContext;
     global.buildAiDraftActivitySet = buildAiDraftActivitySet;
@@ -1546,8 +994,7 @@
     global.describeAiSuggestion = describeAiSuggestion;
     global.applyAiSuggestion = applyAiSuggestion;
     global.setAiLoadingState = setAiLoadingState;
-    global.resolveAiProviderSelection = resolveAiProviderSelection;
-    global.refreshAiModelsForSelectedProvider = refreshAiModelsForSelectedProvider;
+    global.renderAiSidebar = renderAiSidebar;
     global.initAiSidebar = initAiSidebar;
     global.handleAiDateChanged = handleAiDateChanged;
 })(window);

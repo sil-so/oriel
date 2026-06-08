@@ -62,6 +62,9 @@ test('native host provides WKWebView reply bridge and desktop lifecycle controls
   assert.match(bridge, /ai\.keys\.save/);
   assert.match(bridge, /ai\.keys\.delete/);
   assert.match(bridge, /ai\.keys\.status/);
+  assert.match(bridge, /system\.openScreenRecordingSettings/);
+  assert.match(bridge, /Privacy_ScreenCapture/);
+  assert.match(bridge, /NSWorkspace\.shared\.open/);
   assert.match(bridge, /logoDev\.key\.status/);
   assert.match(bridge, /logoDev\.key\.save/);
   assert.match(bridge, /logoDev\.key\.delete/);

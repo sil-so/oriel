@@ -35,7 +35,9 @@ backup archives stay on the user's Mac by default.
 
 Logo.dev and AI provider calls are opt-in. Enabling branded website icons sends
 website domains to Logo.dev. Using Ask AI sends selected-day context to the
-configured provider.
+configured provider. Enabling AI screenshot summaries sends compressed
+screenshots and activity metadata to the configured provider, but Oriel does not
+store raw screenshots or provider responses.
 
 See [PRIVACY.md](./PRIVACY.md) for the detailed data-handling model.
 
