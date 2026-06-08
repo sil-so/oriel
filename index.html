@@ -91,6 +91,9 @@
                 <button class="app-tab" id="tab-stats" role="tab" aria-selected="false">
                     <i class="ph ph-chart-bar text-[14px]"></i> Statistics
                 </button>
+                <button class="app-tab" id="tab-ai-insights" role="tab" aria-selected="false">
+                    <i class="ph ph-sparkle text-[14px]"></i> AI Insights
+                </button>
             </div>
 
         </div>
@@ -130,9 +133,17 @@
                     </div>
                 </div>
             </div>
+            <div class="header-actions flex items-center gap-2" id="header-actions">
+                <button class="icon-button" title="Settings" id="btn-settings"><i class="ph ph-sliders-horizontal text-lg"></i></button>
+                <button class="icon-button" title="Collapse Sidebar" aria-label="Collapse Sidebar" aria-pressed="false" id="btn-toggle-work-times">
+                    <i class="ph ph-sidebar-simple text-lg"></i>
+                </button>
+            </div>
 
         </div>
     </div>
+
+    <div id="settings-floating-tooltip" class="settings-floating-tooltip hidden" role="tooltip"></div>
 
     <!-- Main Content Workspace -->
     <div class="flex-1 flex min-h-0 relative" id="scheduler-workspace">
@@ -231,7 +242,6 @@
                 </div>
                 <div class="flex items-center gap-3 text-gray-400">
                     <button class="icon-button" title="Time Entry Rules" id="btn-rules"><i class="ph ph-lightbulb text-lg"></i></button>
-                    <button class="icon-button" title="Settings" id="btn-settings"><i class="ph ph-sliders-horizontal text-lg"></i></button>
                 </div>
             </div>
 
@@ -282,9 +292,6 @@
                         <span>Ask AI</span>
                     </button>
                 </div>
-                <button class="icon-button" title="Collapse Sidebar" aria-label="Collapse Sidebar" aria-pressed="false" id="btn-toggle-work-times">
-                    <i class="ph ph-sidebar-simple text-lg"></i>
-                </button>
             </div>
 
             <div class="side-summary-content app-scrollbar-safe p-5 flex flex-col gap-6 overflow-y-auto flex-1">
@@ -343,94 +350,9 @@
                                 <i class="ph ph-plus"></i>
                                 <span>New</span>
                             </button>
-                            <button type="button" class="icon-button ai-settings-button" id="ai-settings-button" title="AI Settings" aria-label="AI Settings" aria-expanded="false" aria-controls="ai-settings-panel">
+                            <span class="ai-unconfigured-status hidden" id="ai-unconfigured-status">No AI provider configured</span>
+                            <button type="button" class="icon-button ai-settings-button" id="ai-settings-button" title="AI Settings" aria-label="AI Settings">
                                 <i class="ph ph-gear-six"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="surface-panel ai-settings-panel app-scrollbar-safe hidden" id="ai-settings-panel">
-                        <div class="ai-settings-header">
-                            <div class="ai-settings-heading">
-                                <span>AI Settings</span>
-                                <span>Keys stay in macOS Keychain.</span>
-                            </div>
-                            <button type="button" class="icon-button ai-settings-close-button" id="ai-settings-close-button" aria-label="Close AI Settings">
-                                <i class="ph ph-x"></i>
-                            </button>
-                            <div class="ai-settings-state">
-                                <span class="status-pill ai-settings-key-status" id="ai-settings-key-status">Add key</span>
-                                <span class="ai-settings-feedback" id="ai-settings-feedback" role="status" aria-live="polite"></span>
-                            </div>
-                        </div>
-                        <div class="ai-settings-grid">
-                            <div class="ai-field">
-                                <span>Provider</span>
-                                <div class="ai-provider-list" id="ai-provider-list" role="radiogroup" aria-label="AI provider">
-                                    <button type="button" class="ai-provider-card" data-ai-provider="openai" role="radio" aria-checked="false">
-                                        <span class="ai-provider-name">OpenAI</span>
-                                        <span class="ai-provider-key-state" id="ai-provider-openai-key-state">No key</span>
-                                    </button>
-                                    <button type="button" class="ai-provider-card" data-ai-provider="google" role="radio" aria-checked="false">
-                                        <span class="ai-provider-name">Gemini</span>
-                                        <span class="ai-provider-key-state" id="ai-provider-google-key-state">No key</span>
-                                    </button>
-                                    <button type="button" class="ai-provider-card" data-ai-provider="anthropic" role="radio" aria-checked="false">
-                                        <span class="ai-provider-name">Claude</span>
-                                        <span class="ai-provider-key-state" id="ai-provider-anthropic-key-state">No key</span>
-                                    </button>
-                                </div>
-                            </div>
-                            <label class="ai-field">
-                                <span>Model</span>
-                                <div class="ai-model-picker">
-                                    <button type="button" class="field ai-model-picker-button" id="ai-model-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="ai-model-picker-menu">
-                                        <span id="ai-model-picker-label">gpt-5.2</span>
-                                        <i class="ph ph-caret-down"></i>
-                                    </button>
-                                    <div class="ai-model-picker-menu popover hidden" id="ai-model-picker-menu" role="listbox">
-                                        <input type="search" class="field ai-settings-input ai-model-search-input" id="ai-model-search-input" aria-label="Search AI models" placeholder="Search or type model ID">
-                                        <div class="ai-model-option-list app-scrollbar-safe" id="ai-model-option-list"></div>
-                                        <button type="button" class="button-secondary ai-model-refresh-button" id="ai-model-refresh-button">
-                                            <i class="ph ph-arrows-clockwise"></i>
-                                            <span id="ai-model-refresh-label">Refresh from provider...</span>
-                                        </button>
-                                        <div class="ai-model-refresh-confirm hidden" id="ai-model-refresh-confirm" role="group" aria-label="Confirm model refresh">
-                                            <span id="ai-model-refresh-confirm-text">Refresh models from provider?</span>
-                                            <div class="ai-model-refresh-confirm-actions">
-                                                <button type="button" class="button-primary" id="ai-model-refresh-confirm-button">
-                                                    Refresh now
-                                                </button>
-                                                <button type="button" class="button-secondary" id="ai-model-refresh-cancel-button">
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <span class="ai-model-refresh-meta" id="ai-model-refresh-meta"></span>
-                            </label>
-                            <label class="ai-field ai-field--key">
-                                <span>API Key</span>
-                                <div class="ai-key-input-shell">
-                                    <input type="password" class="field ai-settings-input" id="ai-api-key-input" aria-label="AI API key" placeholder="Paste API key" autocomplete="off">
-                                    <button type="button" class="icon-button ai-key-edit-button hidden" id="ai-key-edit-button" title="Replace saved API key" aria-label="Replace saved API key">
-                                        <i class="ph ph-pencil-simple"></i>
-                                    </button>
-                                </div>
-                            </label>
-                            <div class="ai-key-actions">
-                                <button type="button" class="button-primary ai-key-save-button" id="ai-key-save-button">
-                                    <i class="ph ph-check"></i>
-                                    <span id="ai-key-save-label">Save key</span>
-                                </button>
-                                <button type="button" class="button-secondary ai-key-cancel-button hidden" id="ai-key-cancel-button">
-                                    Cancel
-                                </button>
-                            </div>
-                            <button type="button" class="button-secondary ai-key-remove-button hidden" id="ai-key-delete-button" title="Remove saved API key" aria-label="Remove saved API key">
-                                <i class="ph ph-trash"></i>
-                                Remove saved key
                             </button>
                         </div>
                     </div>
@@ -481,7 +403,7 @@
     <!-- Reporting workspace -->
     <div id="stats-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
         <!-- Period picker row -->
-        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4 border-b border-[#2d2f34] pb-5">
+        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4">
             <div>
                 <h1 class="text-xl font-bold text-white tracking-wide">Reporting & Statistics</h1>
                 <p class="text-gray-400 text-xs mt-1">Deep analysis of program usage, website navigation, and tracked-to-logged conversion rates.</p>
@@ -588,6 +510,37 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- AI Insights workspace -->
+    <div id="ai-insights-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
+        <div class="flex justify-between items-start shrink-0 flex-wrap gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">AI Insights</h1>
+                <p class="text-gray-400 text-xs mt-1">Generate a daily recap from stored screenshot activity summaries. Screenshots are not stored or shown here.</p>
+            </div>
+        </div>
+
+        <div class="ai-insights-card-grid" id="ai-insights-card-grid" aria-live="polite"></div>
+        <div class="ai-insights-empty-state hidden" id="ai-insights-empty-state">
+            No generated or ready-to-generate AI summaries in this range.
+        </div>
+    </div>
+
+    <!-- MODAL: AI Insights Daily Summary -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-start justify-center hidden" id="ai-insights-detail-modal" aria-modal="true" role="dialog" aria-labelledby="ai-insights-detail-title">
+        <div class="modal-panel modal-panel--scroll w-[650px] max-w-[calc(100vw-32px)] max-h-[88vh] relative flex flex-col gap-4 mt-12">
+            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
+                <div class="flex items-center gap-2 min-w-0">
+                    <i class="ph ph-sparkle text-accent"></i>
+                    <h3 class="text-base font-bold text-white truncate" id="ai-insights-detail-title">Daily Summary</h3>
+                </div>
+                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="ai-insights-detail-close" aria-label="Close AI summary">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+            <div id="ai-insights-detail-body" class="modal-scroll-content ai-insights-detail-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0"></div>
         </div>
     </div>
 
@@ -813,7 +766,7 @@
 
     <!-- MODAL: Settings -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="settings-modal">
-        <div class="modal-panel modal-panel--scroll w-[600px] max-h-[88vh] relative flex flex-col gap-5">
+        <div class="modal-panel modal-panel--scroll w-[650px] max-w-[calc(100vw-32px)] max-h-[88vh] relative flex flex-col gap-4">
             <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
                 <h3 class="text-base font-bold text-white flex items-center gap-1.5">
                     <i class="ph ph-sliders text-blue-400"></i> Preferences & Settings
@@ -823,7 +776,15 @@
                 </button>
             </div>
 
+            <div class="settings-section-tabs" role="tablist" aria-label="Settings sections">
+                <button type="button" class="settings-section-tab is-active" data-settings-section-button="general" role="tab" aria-selected="true">General</button>
+                <button type="button" class="settings-section-tab" data-settings-section-button="capture" role="tab" aria-selected="false">Capture &amp; Privacy</button>
+                <button type="button" class="settings-section-tab" data-settings-section-button="ai" role="tab" aria-selected="false">AI</button>
+                <button type="button" class="settings-section-tab" data-settings-section-button="data" role="tab" aria-selected="false">Data</button>
+            </div>
+
             <div id="settings-modal-body" class="modal-scroll-content settings-modal-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
+                <div class="settings-section-panel flex flex-col gap-4" data-settings-section-panel="general" role="tabpanel">
                 <!-- Appearance -->
                 <div class="surface-panel p-3.5 flex items-center justify-between gap-4">
                     <div class="flex flex-col gap-1">
@@ -891,6 +852,9 @@
                         <span class="ai-settings-feedback" id="settings-logo-dev-key-feedback" role="status" aria-live="polite"></span>
                     </div>
                 </div>
+                </div>
+
+                <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="capture" role="tabpanel">
 
                 <!-- Tracking Exclusions -->
                 <div class="flex flex-col gap-3 bg-[#141416]/50 p-3.5 rounded-xl border border-[#2d2f34]">
@@ -977,6 +941,241 @@
                         <div class="text-[11px] text-gray-500 italic py-2 text-center">No title cleanup rules configured.</div>
                     </div>
                 </div>
+                </div>
+
+                <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="ai" role="tabpanel">
+                    <div class="surface-panel p-3.5 flex flex-col gap-3">
+                        <div class="ai-settings-header">
+                            <div class="ai-settings-heading">
+                                <span>Provider &amp; Key</span>
+                                <span>Choose a provider key to view or edit. Keys stay in macOS Keychain.</span>
+                            </div>
+                        </div>
+                        <div class="ai-settings-grid ai-settings-grid--modal">
+                            <div class="ai-field">
+                                <span>Provider</span>
+                                <div class="ai-provider-list ai-provider-list--modal" id="settings-ai-provider-list" role="radiogroup" aria-label="AI key provider">
+                                    <button type="button" class="ai-provider-card" data-settings-ai-provider="openai" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">OpenAI</span>
+                                        <span class="ai-provider-key-state" id="settings-ai-provider-openai-key-state">No key</span>
+                                    </button>
+                                    <button type="button" class="ai-provider-card" data-settings-ai-provider="google" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">Gemini</span>
+                                        <span class="ai-provider-key-state" id="settings-ai-provider-google-key-state">No key</span>
+                                    </button>
+                                    <button type="button" class="ai-provider-card" data-settings-ai-provider="anthropic" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">Claude</span>
+                                        <span class="ai-provider-key-state" id="settings-ai-provider-anthropic-key-state">No key</span>
+                                    </button>
+                                    <button type="button" class="ai-provider-card" data-settings-ai-provider="openrouter" role="radio" aria-checked="false">
+                                        <span class="ai-provider-name">OpenRouter</span>
+                                        <span class="ai-provider-key-state" id="settings-ai-provider-openrouter-key-state">No key</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <label class="ai-field ai-field--key">
+                                <span>API Key</span>
+                                <div class="ai-key-input-shell">
+                                    <input type="password" class="field ai-settings-input" id="settings-ai-api-key-input" aria-label="AI API key" placeholder="Paste API key" autocomplete="off">
+                                    <button type="button" class="icon-button ai-key-edit-button hidden" id="settings-ai-key-edit-button" title="Replace saved API key" aria-label="Replace saved API key">
+                                        <i class="ph ph-pencil-simple"></i>
+                                    </button>
+                                </div>
+                            </label>
+                            <div class="ai-key-actions">
+                                <button type="button" class="button-primary ai-key-save-button" id="settings-ai-key-save-button">
+                                    <i class="ph ph-check"></i>
+                                    <span id="settings-ai-key-save-label">Save key</span>
+                                </button>
+                                <button type="button" class="button-secondary ai-key-cancel-button hidden" id="settings-ai-key-cancel-button">
+                                    Cancel
+                                </button>
+                            </div>
+                            <button type="button" class="button-secondary ai-key-remove-button hidden" id="settings-ai-key-delete-button" title="Remove saved API key" aria-label="Remove saved API key">
+                                <i class="ph ph-trash"></i>
+                                Remove saved key
+                            </button>
+                            <span class="ai-settings-feedback" id="settings-ai-feedback" role="status" aria-live="polite"></span>
+                        </div>
+                    </div>
+
+                    <div class="surface-panel p-3.5 flex flex-col gap-3">
+                        <div class="ai-settings-heading">
+                            <span>Ask AI &amp; AI Insights</span>
+                            <span>Used for chat in the Ask AI sidebar and generating daily summaries.</span>
+                        </div>
+                        <label class="ai-field">
+                            <span>Provider</span>
+                            <div class="custom-select-wrapper w-full">
+                                <select class="custom-select" id="settings-ai-ask-provider">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="google">Gemini</option>
+                                    <option value="anthropic">Claude</option>
+                                    <option value="openrouter">OpenRouter</option>
+                                </select>
+                                <i class="ph ph-caret-down custom-select-icon"></i>
+                            </div>
+                        </label>
+                        <label class="ai-field">
+                            <span>Model</span>
+                            <div class="ai-model-picker">
+                                <button type="button" class="field ai-model-picker-button" id="settings-ai-model-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="settings-ai-model-picker-menu">
+                                    <span id="settings-ai-model-picker-label">gpt-5.2</span>
+                                    <i class="ph ph-caret-down"></i>
+                                </button>
+                                <div class="ai-model-picker-menu popover hidden" id="settings-ai-model-picker-menu" role="listbox">
+                                    <input type="search" class="field ai-settings-input ai-model-search-input" id="settings-ai-model-search-input" aria-label="Search AI models" placeholder="Search or type model ID">
+                                    <div class="ai-model-option-list app-scrollbar-safe" id="settings-ai-model-option-list"></div>
+                                    <button type="button" class="button-secondary ai-model-refresh-button" id="settings-ai-model-refresh-button">
+                                        <i class="ph ph-arrows-clockwise"></i>
+                                        <span id="settings-ai-model-refresh-label">Refresh from provider...</span>
+                                    </button>
+                                    <span class="ai-model-refresh-meta" id="settings-ai-model-refresh-meta"></span>
+                                    <div class="ai-model-refresh-confirm hidden" id="settings-ai-model-refresh-confirm" role="group" aria-label="Confirm model refresh">
+                                        <span id="settings-ai-model-refresh-confirm-text">Refresh models from provider?</span>
+                                        <div class="ai-model-refresh-confirm-actions">
+                                            <button type="button" class="button-primary" id="settings-ai-model-refresh-confirm-button">
+                                                Refresh now
+                                            </button>
+                                            <button type="button" class="button-secondary" id="settings-ai-model-refresh-cancel-button">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="surface-panel p-3.5 flex flex-col gap-3">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex flex-col gap-1">
+                                <span class="text-sm font-semibold text-white">Screenshot Summaries</span>
+                                <span class="text-[11px] text-gray-400 leading-normal">Optional and off by default. When enabled, Oriel sends compressed screenshots and activity metadata to the selected provider. Screenshots are not stored.</span>
+                            </div>
+                            <label class="oriel-toggle mt-1" for="settings-ai-screenshot-enabled">
+                                <input type="checkbox" id="settings-ai-screenshot-enabled" class="oriel-toggle-input" aria-label="Enable AI screenshot summaries">
+                                <span class="oriel-toggle-track" aria-hidden="true"></span>
+                            </label>
+                        </div>
+
+                        <label class="ai-field">
+                            <span>Provider</span>
+                            <div class="custom-select-wrapper w-full">
+                                <select class="custom-select" id="settings-ai-screenshot-provider">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="google">Gemini</option>
+                                    <option value="anthropic">Claude</option>
+                                    <option value="openrouter">OpenRouter</option>
+                                </select>
+                                <i class="ph ph-caret-down custom-select-icon"></i>
+                            </div>
+                        </label>
+
+                        <div class="ai-screenshot-controls-grid">
+                            <label class="ai-field">
+                                <span class="ai-field-label-with-help">
+                                    Frequency
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-frequency-help" aria-label="Screenshot frequency help" data-settings-tooltip-title="Frequency presets" data-settings-tooltip-list="Low|120s dwell / 30m same-context cooldown&#10;Balanced|60s dwell / 10m same-context cooldown&#10;High|45s dwell / 5m same-context cooldown" data-settings-tooltip-note="Frequency only changes dwell and same-context cooldown. Daily cap and timeout stay independent.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
+                                <div class="custom-select-wrapper w-full">
+                                    <select class="custom-select" id="settings-ai-screenshot-frequency">
+                                        <option value="low">Low</option>
+                                        <option value="balanced" selected>Balanced</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                    <i class="ph ph-caret-down custom-select-icon"></i>
+                                </div>
+                            </label>
+                            <label class="ai-field">
+                                <span class="ai-field-label-with-help">
+                                    Daily Cap
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-daily-cap-help" aria-label="Daily cap help" data-settings-tooltip="Daily cap limits how many screenshot summaries can be sent per day.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
+                                <input type="number" id="settings-ai-screenshot-daily-cap" min="1" max="1000" value="100" class="field ai-settings-input" aria-label="Daily screenshot summary cap">
+                            </label>
+                            <label class="ai-field">
+                                <span class="ai-field-label-with-help">
+                                    Timeout Seconds
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-timeout-help" aria-label="Timeout help" data-settings-tooltip="Timeout limits how long Oriel waits for one provider request.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
+                                <input type="number" id="settings-ai-screenshot-timeout" min="5" max="60" value="20" class="field ai-settings-input" aria-label="Screenshot summary timeout seconds">
+                            </label>
+                        </div>
+
+                        <label class="ai-field">
+                            <span>Model</span>
+                            <div class="ai-model-picker">
+                                <button type="button" class="field ai-model-picker-button" id="settings-ai-screenshot-model-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="settings-ai-screenshot-model-picker-menu">
+                                    <span id="settings-ai-screenshot-model-picker-label">gpt-5.2</span>
+                                    <i class="ph ph-caret-down"></i>
+                                </button>
+                                <div class="ai-model-picker-menu popover hidden" id="settings-ai-screenshot-model-picker-menu" role="listbox">
+                                    <input type="search" class="field ai-settings-input ai-model-search-input" id="settings-ai-screenshot-model-search-input" aria-label="Search screenshot summary models" placeholder="Search or type model ID">
+                                    <div class="ai-model-option-list app-scrollbar-safe" id="settings-ai-screenshot-model-option-list"></div>
+                                    <button type="button" class="button-secondary ai-model-refresh-button" id="settings-ai-screenshot-model-refresh-button">
+                                        <i class="ph ph-arrows-clockwise"></i>
+                                        <span id="settings-ai-screenshot-model-refresh-label">Refresh from provider...</span>
+                                    </button>
+                                    <span class="ai-model-refresh-meta" id="settings-ai-screenshot-model-refresh-meta"></span>
+                                    <div class="ai-model-refresh-confirm hidden" id="settings-ai-screenshot-model-refresh-confirm" role="group" aria-label="Confirm screenshot model refresh">
+                                        <span id="settings-ai-screenshot-model-refresh-confirm-text">Refresh models from provider?</span>
+                                        <div class="ai-model-refresh-confirm-actions">
+                                            <button type="button" class="button-primary" id="settings-ai-screenshot-model-refresh-confirm-button">
+                                                Refresh now
+                                            </button>
+                                            <button type="button" class="button-secondary" id="settings-ai-screenshot-model-refresh-cancel-button">
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </label>
+
+                        <div class="surface-panel surface-panel--inset p-3 flex flex-col gap-3">
+                            <div class="ai-settings-heading">
+                                <span>Sensitive Screenshot Exclusions</span>
+                                <span>Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="settings-ai-screenshot-sensitive-input" class="field ai-settings-input flex-1" placeholder="App name or bundle ID" aria-label="Sensitive screenshot exclusion">
+                                <button type="button" class="button-secondary shrink-0" id="settings-ai-screenshot-sensitive-add-button">
+                                    Add
+                                </button>
+                            </div>
+                            <div class="ai-sensitive-list" id="settings-ai-screenshot-sensitive-list"></div>
+                        </div>
+
+                        <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3 flex gap-3">
+                            <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
+                            <p class="text-[11px] text-gray-300 leading-relaxed">
+                                Oriel skips screenshot analysis while you are away, hands-off, in excluded or sensitive apps, missing provider configuration, over the daily cap, or without Screen Recording permission.
+                            </p>
+                        </div>
+
+                        <div class="flex flex-col items-end gap-2">
+                            <button type="button" class="button-secondary" id="settings-ai-screenshot-test-button">
+                                <i class="ph ph-camera"></i>
+                                Test Screenshot Analysis
+                            </button>
+                            <span class="ai-settings-feedback" id="settings-ai-screenshot-test-feedback" role="status" aria-live="polite"></span>
+                            <button type="button" class="button-secondary hidden" id="settings-ai-screenshot-open-screen-recording-button">
+                                <i class="ph ph-arrow-square-out"></i>
+                                Open Screen Recording Settings
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="data" role="tabpanel">
 
                 <!-- Danger Zone -->
                 <div class="border-t border-[#2d2f34] pt-4 mt-1 flex flex-col gap-3">
@@ -992,6 +1191,7 @@
                             Purge All Data
                         </button>
                     </div>
+                </div>
                 </div>
             </div>
 
@@ -1119,6 +1319,7 @@
     <script src="/js/modals.js"></script>
     <script src="/js/projects.js"></script>
     <script src="/js/reporting.js"></script>
+    <script src="/js/ai-settings.js"></script>
     <script src="/js/ai-sidebar.js"></script>
     <script src="/js/main.js"></script>
 </body>

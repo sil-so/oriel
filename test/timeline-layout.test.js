@@ -215,8 +215,11 @@ test('theme-aware scrollbars use app tokens and stable content gutters', () => {
     return new RegExp(`\\b${className}\\b`).test(tag);
   };
 
-  assert.equal(hasElementClass('ai-settings-panel', 'app-scrollbar-safe'), true);
-  assert.equal(hasElementClass('ai-model-option-list', 'app-scrollbar-safe'), true);
+  assert.equal(hasElementClass('settings-modal-body', 'app-scrollbar-safe'), true);
+  assert.equal(hasElementClass('settings-ai-model-option-list', 'app-scrollbar-safe'), true);
+  assert.match(css, /\.settings-section-panel\s*\{[^}]*padding-bottom:\s*22px/s);
+  assert.doesNotMatch(css, /\.settings-section-panel::after\s*\{/);
+  assert.doesNotMatch(css, /\.settings-modal-body\s*>\s*:last-child\s*\{/);
   assert.match(main, /custom-select-menu app-scrollbar-safe popover hidden/);
 
   const unsafeStaticScrollables = [...html.matchAll(/<[^>]+>/g)]
@@ -280,16 +283,32 @@ test('settings and Work Times panels keep controls aligned and collapsible', () 
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
   const main = fs.readFileSync('js/main.js', 'utf8');
+  const topHeader = html.slice(
+    html.indexOf('id="date-navigation"'),
+    html.indexOf('<!-- Main Content Workspace -->')
+  );
+  const sidebarHeader = html.slice(
+    html.indexOf('aria-label="Sidebar panels"') - 200,
+    html.indexOf('aria-label="Sidebar panels"') + 500
+  );
+  const timeEntriesHeader = html.slice(
+    html.indexOf('<h2>Time Entries</h2>') - 200,
+    html.indexOf('<h2>Time Entries</h2>') + 500
+  );
 
   assert.match(html, /id="settings-modal-body" class="[^"]*\bsettings-modal-body\b/);
-  assert.match(css, /\.settings-modal-body\s*\{[\s\S]*scrollbar-gutter:\s*stable/s);
-  assert.match(css, /\.settings-modal-body\s*\{[\s\S]*padding-right:\s*14px/s);
+  assert.match(css, /\.settings-modal-body\s*\{[\s\S]*scrollbar-gutter:\s*auto/s);
+  assert.match(css, /\.settings-modal-body\s*\{[\s\S]*padding-right:\s*0/s);
+  assert.match(topHeader, /id="btn-settings"/);
+  assert.doesNotMatch(timeEntriesHeader, /id="btn-settings"/);
 
-  assert.match(html, /id="btn-toggle-work-times"/);
+  assert.match(topHeader, /id="btn-toggle-work-times"/);
+  assert.ok(topHeader.indexOf('id="btn-settings"') < topHeader.indexOf('id="btn-toggle-work-times"'));
+  assert.doesNotMatch(sidebarHeader, /id="btn-toggle-work-times"/);
   assert.match(html, /class="[^"]*\bwork-breakdown-row\b[^"]*"/);
   assert.match(css, /\.work-breakdown-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/s);
-  assert.match(css, /\.side-summary\.is-collapsed\s*\{[\s\S]*width:\s*46px !important/s);
-  assert.match(css, /#scheduler-workspace\.is-work-times-collapsed #timeline-selection-overlay\s*\{[\s\S]*right:\s*46px/s);
+  assert.match(css, /\.side-summary\.is-collapsed\s*\{[\s\S]*display:\s*none/s);
+  assert.match(css, /#scheduler-workspace\.is-work-times-collapsed #timeline-selection-overlay\s*\{[\s\S]*right:\s*0/s);
   assert.match(main, /function setWorkTimesCollapsed\(collapsed\)/);
 });
 

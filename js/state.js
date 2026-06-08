@@ -4,7 +4,18 @@ const SUPPORTED_MIN_ACTIVITY_THRESHOLDS = new Set([10, 30, 60]);
 const DEFAULT_AI_OPENAI_MODEL = 'gpt-5.2';
 const DEFAULT_AI_GOOGLE_MODEL = 'gemini-3.5-flash';
 const DEFAULT_AI_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_AI_OPENROUTER_MODEL = 'google/gemini-3.1-flash-lite';
 const TITLE_CLEANUP_RULE_STRING_LIMIT = 500;
+const DEFAULT_AI_SCREENSHOT_SENSITIVE_APPS = [
+    '1password',
+    'bitwarden',
+    'dashlane',
+    'keychain access',
+    'lastpass',
+    'proton pass',
+    'keeper password',
+    'authenticator'
+];
 
 const DEFAULT_TITLE_CLEANUP_RULES = [
     {
@@ -145,6 +156,18 @@ function parseStoredBooleanSetting(key, defaultValue = false) {
     return defaultValue;
 }
 
+function parseStoredStringListSetting(key, defaultValue = []) {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        if (!Array.isArray(parsed)) return Array.from(defaultValue);
+        return Array.from(new Set(parsed
+            .map(value => String(value || '').trim())
+            .filter(Boolean)));
+    } catch (_error) {
+        return Array.from(defaultValue);
+    }
+}
+
 const state = {
     currentDate: new Date(),
     zoom: 5, // zoom interval in minutes
@@ -172,6 +195,18 @@ const state = {
         aiOpenAIModel: localStorage.getItem('aiOpenAIModel') || DEFAULT_AI_OPENAI_MODEL,
         aiGoogleModel: localStorage.getItem('aiGoogleModel') || DEFAULT_AI_GOOGLE_MODEL,
         aiAnthropicModel: localStorage.getItem('aiAnthropicModel') || DEFAULT_AI_ANTHROPIC_MODEL,
+        aiOpenRouterModel: localStorage.getItem('aiOpenRouterModel') || DEFAULT_AI_OPENROUTER_MODEL,
+        aiScreenshotProvider: localStorage.getItem('aiScreenshotProvider') || '',
+        aiScreenshotSummariesEnabled: parseStoredBooleanSetting('aiScreenshotSummariesEnabled', false),
+        aiScreenshotFrequencyPreset: localStorage.getItem('aiScreenshotFrequencyPreset') || 'balanced',
+        aiScreenshotDailyCap: Number.parseInt(localStorage.getItem('aiScreenshotDailyCap') || '100', 10),
+        aiScreenshotTimeoutSeconds: Number.parseInt(localStorage.getItem('aiScreenshotTimeoutSeconds') || '20', 10),
+        aiScreenshotModelMode: localStorage.getItem('aiScreenshotModelMode') || 'askAI',
+        aiScreenshotOpenAIModel: localStorage.getItem('aiScreenshotOpenAIModel') || DEFAULT_AI_OPENAI_MODEL,
+        aiScreenshotGoogleModel: localStorage.getItem('aiScreenshotGoogleModel') || DEFAULT_AI_GOOGLE_MODEL,
+        aiScreenshotAnthropicModel: localStorage.getItem('aiScreenshotAnthropicModel') || DEFAULT_AI_ANTHROPIC_MODEL,
+        aiScreenshotOpenRouterModel: localStorage.getItem('aiScreenshotOpenRouterModel') || DEFAULT_AI_OPENROUTER_MODEL,
+        aiScreenshotSensitiveApps: parseStoredStringListSetting('aiScreenshotSensitiveApps', DEFAULT_AI_SCREENSHOT_SENSITIVE_APPS),
         titleCleanupRules: parseStoredTitleCleanupRules()
     },
     
@@ -263,6 +298,7 @@ const DOM = {
     get elTabTimeline() { return document.getElementById('tab-timeline'); },
     get elTabProjects() { return document.getElementById('tab-projects'); },
     get elTabStats() { return document.getElementById('tab-stats'); },
+    get elTabAiInsights() { return document.getElementById('tab-ai-insights'); },
     get elTimelineModeSwitch() { return document.getElementById('timeline-mode-switch'); },
     get elTimelineModeDay() { return document.getElementById('timeline-mode-day'); },
     get elTimelineModeWeek() { return document.getElementById('timeline-mode-week'); },
@@ -272,6 +308,7 @@ const DOM = {
     get elWeekTimelineContainer() { return document.getElementById('week-timeline-container'); },
     get elProjectsWorkspace() { return document.getElementById('projects-workspace'); },
     get elStatsWorkspace() { return document.getElementById('stats-workspace'); },
+    get elAiInsightsWorkspace() { return document.getElementById('ai-insights-workspace'); },
     get elProjectsPageGrid() { return document.getElementById('projects-page-grid'); },
 
     // Popup details

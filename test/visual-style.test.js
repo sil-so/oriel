@@ -93,10 +93,83 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
   assert.match(css, /\.modal-panel--scroll\s*\{[\s\S]*padding-bottom:\s*0/);
   assert.doesNotMatch(scrollContentRule, /padding-bottom:/);
   assert.doesNotMatch(css, /\.modal-scroll-content\s*>\s*:last-child\s*\{/);
-  assert.match(css, /\.settings-modal-body\s*>\s*:last-child\s*\{[^}]*margin-bottom:\s*22px/s);
+  assert.match(css, /\.settings-section-panel\s*\{[^}]*padding-bottom:\s*22px/s);
+  assert.doesNotMatch(css, /\.settings-section-panel::after\s*\{/);
   assert.match(css, /#proj-details-entries-list::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 22px/s);
   assert.doesNotMatch(html.match(/id="confirm-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
   assert.doesNotMatch(html.match(/id="time-entry-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
+});
+
+test('modal overlays keep dialogs top aligned below the app header', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const overlayRule = css.match(/\.modal-overlay\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(overlayRule, /align-items:\s*flex-start/);
+  assert.match(overlayRule, /justify-content:\s*center/);
+  assert.match(overlayRule, /padding:\s*calc\(54px \+ 8px\) 16px 16px/);
+  assert.match(overlayRule, /overflow-y:\s*auto/);
+});
+
+test('settings tabs reuse the app tab active treatment', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const activeRule = css.match(/\.settings-section-tab\.is-active\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(activeRule, /background:\s*var\(--surface-raised\)/);
+  assert.match(activeRule, /box-shadow:\s*0 0 0 1px color-mix\(in oklch,\s*var\(--border\) 48%,\s*transparent\) inset/);
+  assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
+});
+
+test('AI Insights header omits archive controls and workspace separator', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const insightsHeader = html.match(/id="ai-insights-workspace"[\s\S]*?id="ai-insights-card-grid"/)?.[0] || '';
+
+  assert.doesNotMatch(insightsHeader, /ai-insights-summary-date-trigger|ai-insights-range-filter|ai-insights-status-filter/);
+  assert.doesNotMatch(insightsHeader, /Jump to date|Range|Status/);
+  assert.doesNotMatch(insightsHeader, /justify-between[^"]*border-b/);
+});
+
+test('AI Insights detail modal puts bottom spacing inside the scroll content', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const modalPanelClass = html.match(/id="ai-insights-detail-modal"[\s\S]*?<div class="([^"]*\bmodal-panel\b[^"]*)"/)?.[1] || '';
+
+  assert.match(modalPanelClass, /\bmodal-panel--scroll\b/);
+  assert.match(html, /id="ai-insights-detail-body"[^>]*class="[^"]*\bmodal-scroll-content\b[^"]*"/);
+  assert.match(css, /\.ai-insights-detail-body::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 6px/s);
+  assert.doesNotMatch(css.match(/\.ai-insights-detail-body\s*\{[^}]*\}/)?.[0] || '', /padding-bottom:/);
+});
+
+test('AI Insights card previews fade after two readable lines', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const previewRule = css.match(/\.ai-insights-card-summary--fade\s*\{[^}]*\}/)?.[0] || '';
+  const fadeRule = css.match(/\.ai-insights-card-summary--fade::after\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(previewRule, /height:\s*calc\(1\.55em \* 4\)/);
+  assert.match(previewRule, /max-height:\s*calc\(1\.55em \* 4\)/);
+  assert.match(fadeRule, /height:\s*calc\(1\.55em \* 2\)/);
+});
+
+test('settings tooltip is not nested inside the hideable scheduler workspace', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const schedulerIndex = html.indexOf('id="scheduler-workspace"');
+  const tooltipIndex = html.indexOf('id="settings-floating-tooltip"');
+
+  assert.ok(tooltipIndex !== -1);
+  assert.ok(schedulerIndex !== -1);
+  assert.ok(tooltipIndex < schedulerIndex);
+});
+
+test('header sidebar toggle uses real hidden-state styling', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  assert.match(css, /#btn-toggle-work-times\[hidden\][\s\S]*display:\s*none\s*!important/);
+});
+
+test('Statistics workspace header does not draw a separator line', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const statsHeader = html.match(/id="stats-workspace"[\s\S]*?id="stats-presets-container"/)?.[0] || '';
+
+  assert.doesNotMatch(statsHeader, /justify-between[^"]*border-b/);
 });
 
 test('native app chrome leaves only a compact gap after macOS traffic lights', () => {
@@ -201,7 +274,8 @@ test('web dropdowns use app-rendered menus instead of native select popups', () 
   assert.match(css, /\.custom-select-menu\s*\{[\s\S]*\}\s*\.custom-select-menu\.hidden\s*\{[\s\S]*display:\s*none/s);
   assert.match(css, /\.custom-select-option\.is-selected/);
   assert.match(css, /\.ai-model-option-list\s*\{[\s\S]*gap:\s*3px/s);
-  assert.match(css, /\.ai-settings-panel\s*\{[\s\S]*border-radius:\s*0;/s);
+  assert.doesNotMatch(css, /\.ai-settings-panel\s*\{/);
+  assert.match(html, /class="[^"]*\bai-model-picker-menu\b[^"]*\bpopover\b[^"]*"[^>]*id="settings-ai-model-picker-menu"/);
 });
 
 test('time entry task selector uses the app-rendered dropdown treatment', () => {

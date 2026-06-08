@@ -15,6 +15,7 @@ final class TrackingController {
         let url: String?
         let bundleIdentifier: String?
         let appPath: String?
+        let processIdentifier: pid_t?
         let interactionState: InteractionState
 
         func matches(_ other: ActiveSegment) -> Bool {
@@ -34,6 +35,7 @@ final class TrackingController {
                 url: url,
                 bundleIdentifier: bundleIdentifier,
                 appPath: appPath,
+                processIdentifier: processIdentifier,
                 interactionState: interactionState
             )
         }
@@ -46,12 +48,17 @@ final class TrackingController {
                 url: url,
                 bundleIdentifier: bundleIdentifier,
                 appPath: appPath,
+                processIdentifier: processIdentifier,
                 interactionState: interactionState
             )
         }
     }
 
     private let store: SQLiteStore
+    private let keyStore: APIKeyStore
+    private let activitySummaryClient: ActivitySummaryClient
+    private let activitySummaryCoordinator: ActivitySummaryCoordinator
+    private let screenshotCapture: ActivityScreenshotCapturing
     private let idleThresholdSeconds: TimeInterval = 30
     private var observers: [NSObjectProtocol] = []
     private var timer: Timer?
@@ -59,8 +66,18 @@ final class TrackingController {
     private var isAway = false
     private(set) var isPaused = false
 
-    init(store: SQLiteStore) {
+    init(
+        store: SQLiteStore,
+        keyStore: APIKeyStore = KeychainStore(),
+        activitySummaryClient: ActivitySummaryClient? = nil,
+        activitySummaryCoordinator: ActivitySummaryCoordinator = ActivitySummaryCoordinator(),
+        screenshotCapture: ActivityScreenshotCapturing = ActivityScreenshotCapture()
+    ) {
         self.store = store
+        self.keyStore = keyStore
+        self.activitySummaryClient = activitySummaryClient ?? ProviderActivitySummaryClient(keyStore: keyStore)
+        self.activitySummaryCoordinator = activitySummaryCoordinator
+        self.screenshotCapture = screenshotCapture
     }
 
     deinit {
@@ -220,6 +237,7 @@ final class TrackingController {
             url: event.url,
             bundleIdentifier: application.bundleIdentifier,
             appPath: application.bundleURL?.path,
+            processIdentifier: application.processIdentifier,
             interactionState: interactionState(now: now)
         ))
     }
@@ -365,6 +383,7 @@ final class TrackingController {
             url: url,
             bundleIdentifier: application.bundleIdentifier,
             appPath: application.bundleURL?.path,
+            processIdentifier: application.processIdentifier,
             interactionState: interactionState
         )
     }
@@ -404,7 +423,9 @@ final class TrackingController {
         guard try !store.isCaptureExcluded(app: segment.app, title: segment.title, url: segment.url) else {
             return
         }
+        let activityID = "activity-\(UUID().uuidString.lowercased())"
         try store.recordActivity(
+            id: activityID,
             start: start,
             end: end,
             app: segment.app,
@@ -414,5 +435,371 @@ final class TrackingController {
             appPath: segment.appPath,
             interactionState: segment.interactionState.rawValue
         )
+        maybeEnqueueActivitySummary(activityID: activityID, segment: segment, start: start, end: end)
+    }
+
+    private func maybeEnqueueActivitySummary(activityID: String, segment: ActiveSegment, start: Int64, end: Int64) {
+        guard segment.interactionState == .handsOn else { return }
+
+        let persistedSettings = (try? store.request(operation: "settings.get", payload: [:]) as? [String: Any]) ?? [:]
+        guard !Self.isScreenshotSensitive(
+            app: segment.app,
+            title: segment.title,
+            bundleIdentifier: segment.bundleIdentifier,
+            appPath: segment.appPath,
+            settings: persistedSettings
+        ) else { return }
+        let settings = activitySummarySettings(from: persistedSettings)
+        guard settings.enabled else { return }
+        let durationSeconds = max(0, Int((end - start) / 1000))
+        guard durationSeconds >= settings.dwellSeconds else { return }
+        guard let provider = Self.screenshotSummaryProvider(from: persistedSettings) else {
+            storeActivityAISummaryFailure(
+                activityID: activityID,
+                provider: "",
+                model: "",
+                code: "missing_provider",
+                message: "Choose an AI provider before enabling screenshot summaries."
+            )
+            return
+        }
+        let model = Self.screenshotSummaryModel(provider: provider, settings: persistedSettings)
+        guard keyStore.hasKey(for: provider.rawValue) else {
+            storeActivityAISummaryFailure(
+                activityID: activityID,
+                provider: provider.rawValue,
+                model: model,
+                code: "missing_api_key",
+                message: "No API key is saved for the selected AI provider."
+            )
+            return
+        }
+        guard screenshotCapture.hasScreenRecordingPermission() else {
+            storeActivityAISummaryFailure(
+                activityID: activityID,
+                provider: provider.rawValue,
+                model: model,
+                code: "screen_recording_permission_missing",
+                message: "Screen Recording permission is required for screenshot summaries."
+            )
+            return
+        }
+
+        let contextKey = activitySummaryContextKey(segment)
+        let decision = activitySummaryCoordinator.decision(
+            contextKey: contextKey,
+            durationSeconds: durationSeconds,
+            settings: settings
+        )
+        guard decision == .enqueue else {
+            if decision == .queueFull {
+                storeActivityAISummarySkipped(
+                    activityID: activityID,
+                    provider: provider.rawValue,
+                    model: model,
+                    code: "queue_full",
+                    message: "The screenshot summary queue is full."
+                )
+            }
+            return
+        }
+
+        activitySummaryCoordinator.enqueueReserved { [weak self] in
+            await self?.captureAndSummarizeActivity(
+                activityID: activityID,
+                segment: segment,
+                start: start,
+                end: end,
+                provider: provider,
+                model: model,
+                settings: settings,
+                contextKey: contextKey
+            )
+        }
+    }
+
+    private func captureAndSummarizeActivity(
+        activityID: String,
+        segment: ActiveSegment,
+        start: Int64,
+        end: Int64,
+        provider: AIProvider,
+        model: String,
+        settings: ActivitySummarySettings,
+        contextKey: String
+    ) async {
+        do {
+            let screenshot = try screenshotCapture.captureMainDisplay(maxPixelWidth: 1280, jpegQuality: 0.62)
+            let metadata = activitySummaryMetadata(
+                activityID: activityID,
+                segment: segment,
+                start: start,
+                end: end,
+                screenshot: screenshot
+            )
+            let request = ActivitySummaryRequest(
+                provider: provider.rawValue,
+                model: model,
+                metadata: metadata,
+                jpegData: screenshot.jpegData,
+                timeoutSeconds: settings.timeoutSeconds
+            )
+            let response = try await activitySummaryClient.summarize(request)
+            storeActivityAISummary(
+                [
+                    "activityId": activityID,
+                    "status": "succeeded",
+                    "provider": provider.rawValue,
+                    "model": model,
+                    "summary": response.summary,
+                    "imageWidth": screenshot.width,
+                    "imageHeight": screenshot.height,
+                    "compressedBytes": screenshot.jpegData.count,
+                    "requestMetadata": [
+                        "contextKey": contextKey,
+                        "frequencyPreset": settings.frequencyPreset,
+                        "timeoutSeconds": settings.timeoutSeconds,
+                        "durationSeconds": max(0, Int((end - start) / 1000))
+                    ]
+                ]
+            )
+        } catch {
+            let failure = activitySummaryFailure(for: error)
+            storeActivityAISummaryFailure(
+                activityID: activityID,
+                provider: provider.rawValue,
+                model: model,
+                code: failure.code,
+                message: failure.message
+            )
+        }
+    }
+
+    private func activitySummaryMetadata(
+        activityID: String,
+        segment: ActiveSegment,
+        start: Int64,
+        end: Int64,
+        screenshot: CapturedActivityScreenshot
+    ) -> ActivitySummaryMetadata {
+        ActivitySummaryMetadata(
+            activityID: activityID,
+            captureTimestampISO: ISO8601DateFormatter().string(from: Date()),
+            durationSeconds: max(0, Int((end - start) / 1000)),
+            frontmostAppName: segment.app,
+            bundleID: segment.bundleIdentifier ?? "",
+            processID: segment.processIdentifier.map(Int.init),
+            windowTitle: segment.title,
+            browserURL: segment.url,
+            browserDomain: browserDomain(from: segment.url),
+            projectName: nil,
+            inputState: segment.interactionState == .handsOn ? "hands_on" : "hands_off",
+            screenshotWidth: screenshot.width,
+            screenshotHeight: screenshot.height,
+            displayID: screenshot.displayID
+        )
+    }
+
+    private func activitySummarySettings(from settings: [String: Any]) -> ActivitySummarySettings {
+        ActivitySummarySettings(
+            enabled: boolValue(settings["aiScreenshotSummariesEnabled"]),
+            frequencyPreset: ["low", "balanced", "high"].contains(stringValue(settings["aiScreenshotFrequencyPreset"]) ?? "")
+                ? stringValue(settings["aiScreenshotFrequencyPreset"])!
+                : "balanced",
+            dailyCap: clampedInt(settings["aiScreenshotDailyCap"], defaultValue: 100, min: 1, max: 1000),
+            timeoutSeconds: clampedInt(settings["aiScreenshotTimeoutSeconds"], defaultValue: 20, min: 5, max: 60)
+        )
+    }
+
+    static func screenshotSummaryModel(provider: AIProvider, settings: [String: Any]) -> String {
+        let key: String
+        switch provider {
+        case .openai:
+            key = "aiScreenshotOpenAIModel"
+        case .google:
+            key = "aiScreenshotGoogleModel"
+        case .anthropic:
+            key = "aiScreenshotAnthropicModel"
+        case .openrouter:
+            key = "aiScreenshotOpenRouterModel"
+        }
+        return trimmedString(settings[key]) ?? provider.defaultModel
+    }
+
+    static func screenshotSummaryProvider(from settings: [String: Any]) -> AIProvider? {
+        if let screenshotProvider = AIProvider.normalize(trimmedString(settings["aiScreenshotProvider"])) {
+            return screenshotProvider
+        }
+        return AIProvider.normalize(trimmedString(settings["aiProvider"]))
+    }
+
+    private static func trimmedString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func activitySummaryContextKey(_ segment: ActiveSegment) -> String {
+        let appKey = (segment.bundleIdentifier?.isEmpty == false ? segment.bundleIdentifier : segment.app) ?? segment.app
+        let detail = browserDomain(from: segment.url) ?? cleanedContextTitle(segment.title)
+        return "\(appKey.lowercased())|\(detail)"
+    }
+
+    private func browserDomain(from urlString: String?) -> String? {
+        guard let urlString, let host = URL(string: urlString)?.host?.lowercased(), !host.isEmpty else {
+            return nil
+        }
+        return host
+    }
+
+    private func cleanedContextTitle(_ title: String) -> String {
+        title
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    static func isScreenshotSensitive(
+        app: String,
+        title: String,
+        bundleIdentifier: String?,
+        appPath: String?,
+        settings: [String: Any]
+    ) -> Bool {
+        let configured = settings["aiScreenshotSensitiveApps"] as? [String]
+        let patterns = configured?.isEmpty == false ? configured! : [
+            "1password",
+            "bitwarden",
+            "dashlane",
+            "keychain access",
+            "lastpass",
+            "proton pass",
+            "keeper password",
+            "authenticator"
+        ]
+        let combined = [
+            app,
+            title,
+            bundleIdentifier ?? "",
+            appPath ?? ""
+        ].joined(separator: " ").lowercased()
+        return patterns
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .contains { combined.contains($0) }
+    }
+
+    private func storeActivityAISummaryFailure(
+        activityID: String,
+        provider: String,
+        model: String,
+        code: String,
+        message: String
+    ) {
+        storeActivityAISummary([
+            "activityId": activityID,
+            "status": "failed",
+            "provider": provider,
+            "model": model,
+            "errorCode": code,
+            "errorMessage": message
+        ])
+    }
+
+    private func storeActivityAISummarySkipped(
+        activityID: String,
+        provider: String,
+        model: String,
+        code: String,
+        message: String
+    ) {
+        storeActivityAISummary([
+            "activityId": activityID,
+            "status": "skipped",
+            "provider": provider,
+            "model": model,
+            "errorCode": code,
+            "errorMessage": message
+        ])
+    }
+
+    private func storeActivityAISummary(_ payload: [String: Any]) {
+        DispatchQueue.main.async { [weak self] in
+            do {
+                try self?.store.upsertActivityAISummary(payload)
+            } catch {
+                NSLog("Oriel could not persist AI activity summary state: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private func activitySummaryFailure(for error: Error) -> (code: String, message: String) {
+        if case let ActivitySummaryClientError.providerError(statusCode, code, message) = error {
+            return ("provider_\(statusCode)_\(code)", message)
+        }
+        if let error = error as? ActivitySummaryClientError {
+            switch error {
+            case .missingAPIKey:
+                return ("missing_api_key", error.localizedDescription)
+            case .unsupportedProvider:
+                return ("unsupported_provider", error.localizedDescription)
+            case .invalidProviderResponse:
+                return ("invalid_provider_response", error.localizedDescription)
+            case .providerError:
+                break
+            }
+        }
+        if let error = error as? ActivityScreenshotCaptureError {
+            switch error {
+            case .screenRecordingPermissionMissing:
+                return ("screen_recording_permission_missing", error.localizedDescription)
+            case .captureFailed:
+                return ("capture_failed", error.localizedDescription)
+            case .encodingFailed:
+                return ("encoding_failed", error.localizedDescription)
+            }
+        }
+        return ("summary_failed", String(error.localizedDescription.prefix(300)))
+    }
+
+    private func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let value as String:
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        default:
+            return nil
+        }
+    }
+
+    private func boolValue(_ value: Any?) -> Bool {
+        switch value {
+        case let value as Bool:
+            return value
+        case let value as NSNumber:
+            return value.boolValue
+        case let value as String:
+            return ["true", "1", "yes"].contains(value.lowercased())
+        default:
+            return false
+        }
+    }
+
+    private func clampedInt(_ value: Any?, defaultValue: Int, min: Int, max: Int) -> Int {
+        let number: Int?
+        switch value {
+        case let value as Int:
+            number = value
+        case let value as Int64:
+            number = Int(value)
+        case let value as NSNumber:
+            number = value.intValue
+        case let value as String:
+            number = Int(value)
+        default:
+            number = nil
+        }
+        return Swift.max(min, Swift.min(max, number ?? defaultValue))
     }
 }
