@@ -17,6 +17,9 @@ maintainable, and easy to review.
 
 ## Pull Requests
 
+- Use Conventional Commit-style PR titles, such as
+  `feat: add AI screenshot summaries`. Do not prefix PR titles with `[codex]`;
+  keep Codex attribution in branch names and workflow context instead.
 - Use `.github/PULL_REQUEST_TEMPLATE.md` as the source of truth for every PR
   description.
 - Keep the template's Markdown section headings exactly: `## Summary`,
