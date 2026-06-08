@@ -53,6 +53,7 @@
     let aiModelCache = loadAiModelCache();
     let aiInitialized = false;
     let aiSettingsFeedbackTimer = null;
+    let screenshotTestFeedbackTimer = null;
     let aiKeyProvider = '';
     let aiKeyEditProvider = null;
     let aiModelRefreshState = { provider: '', status: 'idle', message: '', count: 0, refreshedAt: '' };
@@ -210,6 +211,61 @@
         }
     }
 
+    function setScreenRecordingSettingsVisible(isVisible) {
+        setElementHidden(byId('settings-ai-screenshot-open-screen-recording-button'), !isVisible);
+    }
+
+    function setScreenshotTestFeedback(message, tone = 'muted', { autoClear = true, showScreenRecordingSettings = false } = {}) {
+        const feedback = byId('settings-ai-screenshot-test-feedback');
+        if (!feedback) return;
+        if (screenshotTestFeedbackTimer) {
+            clearTimeout(screenshotTestFeedbackTimer);
+            screenshotTestFeedbackTimer = null;
+        }
+        feedback.textContent = message;
+        feedback.dataset.tone = tone;
+        setScreenRecordingSettingsVisible(Boolean(showScreenRecordingSettings));
+        if (message && autoClear) {
+            screenshotTestFeedbackTimer = setTimeout(() => {
+                feedback.textContent = '';
+                feedback.dataset.tone = 'muted';
+                screenshotTestFeedbackTimer = null;
+                if (!showScreenRecordingSettings) setScreenRecordingSettingsVisible(false);
+            }, 2600);
+        }
+    }
+
+    function isScreenRecordingPermissionError(error) {
+        const message = String(error?.message || error || '');
+        const code = String(error?.code || error?.error?.code || '');
+        return code === 'screen_recording_permission_missing'
+            || /screen recording permission/i.test(message);
+    }
+
+    async function openScreenRecordingSettings() {
+        if (!global.OrielData?.isNative) {
+            setScreenshotTestFeedback(
+                'Open System Settings > Privacy & Security > Screen & System Audio Recording.',
+                'muted',
+                { autoClear: false, showScreenRecordingSettings: true }
+            );
+            return;
+        }
+        try {
+            await global.OrielData.request('system.openScreenRecordingSettings', {});
+            setScreenshotTestFeedback('Opened Screen Recording settings.', 'success', {
+                showScreenRecordingSettings: true
+            });
+        } catch (error) {
+            console.error('Error opening Screen Recording settings:', error);
+            setScreenshotTestFeedback(
+                'Open System Settings > Privacy & Security > Screen & System Audio Recording.',
+                'error',
+                { autoClear: false, showScreenRecordingSettings: true }
+            );
+        }
+    }
+
     function clearAiModelRefreshSuccessTimer() {
         if (!aiModelRefreshSuccessTimer) return;
         global.clearTimeout?.(aiModelRefreshSuccessTimer);
@@ -264,9 +320,10 @@
                 'aiScreenshotOpenAIModel',
                 'aiScreenshotGoogleModel',
                 'aiScreenshotAnthropicModel',
-                'aiScreenshotOpenRouterModel'
+                'aiScreenshotOpenRouterModel',
+                'aiScreenshotSensitiveApps'
             ].includes(key)) {
-                global.localStorage?.setItem?.(key, String(value));
+                global.localStorage?.setItem?.(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
             }
         });
         if (!global.OrielData?.isNative) return global.state.settings;
@@ -466,16 +523,17 @@
 
         if (meta) {
             meta.dataset.tone = 'muted';
+            let metaText = '';
             if (stateApplies && aiModelRefreshState.status === 'loading') {
-                meta.textContent = 'Refreshing models...';
+                metaText = 'Refreshing models...';
             } else if (stateApplies && aiModelRefreshState.status === 'error') {
-                meta.textContent = aiModelRefreshState.message || 'Could not refresh models.';
+                metaText = aiModelRefreshState.message || 'Could not refresh models.';
                 meta.dataset.tone = 'error';
             } else if (stateApplies && aiModelRefreshState.status === 'success' && aiModelRefreshState.count === 0) {
-                meta.textContent = 'No compatible models returned.';
-            } else {
-                meta.textContent = '';
+                metaText = 'No compatible models returned.';
             }
+            meta.textContent = metaText;
+            setElementHidden(meta, !metaText);
         }
         renderModelOptions(picker);
     }
@@ -699,6 +757,27 @@
         return Number.isFinite(seconds) ? Math.min(60, Math.max(5, seconds)) : 20;
     }
 
+    function defaultScreenshotSensitiveApps() {
+        return [
+            '1password',
+            'bitwarden',
+            'dashlane',
+            'keychain access',
+            'lastpass',
+            'proton pass',
+            'keeper password',
+            'authenticator'
+        ];
+    }
+
+    function normalizeSensitiveApps(value) {
+        const raw = Array.isArray(value) ? value : defaultScreenshotSensitiveApps();
+        return Array.from(new Set(raw
+            .map(item => String(item || '').trim())
+            .filter(Boolean)
+            .slice(0, 80)));
+    }
+
     function normalizeScreenshotProvider(value) {
         return providerConfig(value) ? value : (selectedProvider() || 'openai');
     }
@@ -732,6 +811,21 @@
         if (dailyCap) dailyCap.value = normalizeDailyCap(global.state?.settings?.aiScreenshotDailyCap || 100);
         if (timeout) timeout.value = normalizeTimeout(global.state?.settings?.aiScreenshotTimeoutSeconds || 20);
         syncScreenshotProviderControl();
+        renderScreenshotSensitiveApps();
+    }
+
+    function renderScreenshotSensitiveApps() {
+        const list = byId('settings-ai-screenshot-sensitive-list');
+        if (!list) return;
+        const entries = normalizeSensitiveApps(global.state?.settings?.aiScreenshotSensitiveApps);
+        list.innerHTML = entries.map(entry => `
+            <div class="ai-sensitive-row" data-sensitive-app="${escapeHtml(entry)}">
+                <span>${escapeHtml(entry)}</span>
+                <button type="button" class="ai-sensitive-remove" data-sensitive-remove="${escapeHtml(entry)}" aria-label="Remove ${escapeHtml(entry)}">
+                    <i class="ph ph-x"></i>
+                </button>
+            </div>
+        `).join('');
     }
 
     function syncAiSettingsControls({ resetKey = false } = {}) {
@@ -766,6 +860,27 @@
         syncAiSettingsControls();
     }
 
+    async function saveScreenshotSensitiveApps(entries) {
+        const normalized = normalizeSensitiveApps(entries);
+        await saveAiSettings({ aiScreenshotSensitiveApps: normalized });
+        global.state.settings.aiScreenshotSensitiveApps = normalized;
+        renderScreenshotSensitiveApps();
+    }
+
+    async function addScreenshotSensitiveApp() {
+        const input = byId('settings-ai-screenshot-sensitive-input');
+        const value = String(input?.value || '').trim();
+        if (!value) return;
+        const current = normalizeSensitiveApps(global.state?.settings?.aiScreenshotSensitiveApps);
+        await saveScreenshotSensitiveApps([...current, value]);
+        if (input) input.value = '';
+    }
+
+    async function removeScreenshotSensitiveApp(value) {
+        const current = normalizeSensitiveApps(global.state?.settings?.aiScreenshotSensitiveApps);
+        await saveScreenshotSensitiveApps(current.filter(entry => entry !== value));
+    }
+
     async function saveAskProviderFromControl(event) {
         const provider = providerConfig(event?.target?.value) ? event.target.value : 'openai';
         resetAiModelRefreshState();
@@ -777,28 +892,32 @@
     async function runTestScreenshotAnalysis() {
         const provider = selectedScreenshotProvider();
         if (!provider) {
-            setAiSettingsFeedback('Choose a provider first.', 'error');
-            return;
-        }
-        if (!aiKeyStatus[provider]) {
-            setAiSettingsFeedback('Save a key for this provider first.', 'error');
+            setScreenshotTestFeedback('Choose a provider first.', 'error');
             return;
         }
         if (!global.OrielData?.isNative) {
-            setAiSettingsFeedback('Test screenshot analysis requires Oriel.app.', 'error');
+            setScreenshotTestFeedback('Test screenshot analysis requires Oriel.app.', 'error');
+            return;
+        }
+        if (!aiKeyStatus[provider]) {
+            setScreenshotTestFeedback('Save a key for this provider first.', 'error');
             return;
         }
         try {
-            setAiSettingsFeedback('Testing screenshot analysis...', 'muted', { autoClear: false });
+            setScreenshotTestFeedback('Testing screenshot analysis...', 'muted', { autoClear: false });
             await global.OrielData.request('ai.screenshotSummary.test', {
                 provider,
                 model: selectedScreenshotModel(),
                 timeoutSeconds: normalizeTimeout(global.state?.settings?.aiScreenshotTimeoutSeconds || 20)
             });
-            setAiSettingsFeedback('Screenshot analysis test completed.', 'success');
+            setScreenshotTestFeedback('Screenshot analysis test completed.', 'success');
         } catch (error) {
             console.error('Error testing screenshot analysis:', error);
-            setAiSettingsFeedback(error?.message || 'Screenshot analysis test failed.', 'error');
+            const showScreenRecordingSettings = isScreenRecordingPermissionError(error);
+            setScreenshotTestFeedback(error?.message || 'Screenshot analysis test failed.', 'error', {
+                autoClear: !showScreenRecordingSettings,
+                showScreenRecordingSettings
+            });
         }
     }
 
@@ -873,6 +992,17 @@
         byId('settings-ai-key-cancel-button')?.addEventListener('click', () => setAiKeyEditMode(false));
         byId('settings-ai-key-save-button')?.addEventListener('click', saveAiKey);
         byId('settings-ai-key-delete-button')?.addEventListener('click', deleteAiKey);
+        byId('settings-ai-screenshot-sensitive-add-button')?.addEventListener('click', addScreenshotSensitiveApp);
+        byId('settings-ai-screenshot-sensitive-input')?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            addScreenshotSensitiveApp();
+        });
+        byId('settings-ai-screenshot-sensitive-list')?.addEventListener('click', event => {
+            const remove = event.target?.closest?.('[data-sensitive-remove]');
+            if (!remove) return;
+            removeScreenshotSensitiveApp(remove.dataset.sensitiveRemove);
+        });
         [
             'settings-ai-screenshot-enabled',
             'settings-ai-screenshot-provider',
@@ -881,6 +1011,7 @@
             'settings-ai-screenshot-timeout'
         ].forEach(id => byId(id)?.addEventListener('change', saveScreenshotSettingFromControl));
         byId('settings-ai-screenshot-test-button')?.addEventListener('click', runTestScreenshotAnalysis);
+        byId('settings-ai-screenshot-open-screen-recording-button')?.addEventListener('click', openScreenRecordingSettings);
 
         syncAiSettingsControls({ resetKey: true });
     }

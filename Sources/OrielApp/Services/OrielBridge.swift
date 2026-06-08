@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import WebKit
 
@@ -50,7 +51,7 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
 
-        if operation == "ai.chat" || operation == "ai.models.list" || operation == "ai.screenshotSummary.test" {
+        if operation == "ai.chat" || operation == "ai.models.list" || operation == "ai.screenshotSummary.test" || operation == "dailyAISummaries.generate" {
             Task {
                 do {
                     let value: Any
@@ -58,6 +59,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
                         value = try await aiService.chat(payload: payload)
                     } else if operation == "ai.models.list" {
                         value = try await aiService.listModels(payload: payload)
+                    } else if operation == "dailyAISummaries.generate" {
+                        value = try await generateDailyAISummary(payload: payload)
                     } else {
                         value = try await testScreenshotSummary(payload: payload)
                     }
@@ -84,6 +87,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             } else if operation == "ai.keys.delete" {
                 let provider = payload["provider"] as? String ?? ""
                 value = try aiService.deleteKey(provider: provider)
+            } else if operation == "system.openScreenRecordingSettings" {
+                value = openScreenRecordingSettings()
             } else if operation == "logoDev.key.status" {
                 value = logoDevKeyService.keyStatus()
             } else if operation == "logoDev.key.save" {
@@ -140,7 +145,92 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             "aiScreenshotOpenAIModel": settings["aiScreenshotOpenAIModel"] as? String ?? "gpt-5.2",
             "aiScreenshotGoogleModel": settings["aiScreenshotGoogleModel"] as? String ?? "gemini-3.5-flash",
             "aiScreenshotAnthropicModel": settings["aiScreenshotAnthropicModel"] as? String ?? "claude-sonnet-4-20250514",
-            "aiScreenshotOpenRouterModel": settings["aiScreenshotOpenRouterModel"] as? String ?? "google/gemini-3.1-flash-lite"
+            "aiScreenshotOpenRouterModel": settings["aiScreenshotOpenRouterModel"] as? String ?? "google/gemini-3.1-flash-lite",
+            "aiScreenshotSensitiveApps": settings["aiScreenshotSensitiveApps"] as? [String] ?? []
+        ]
+    }
+
+    private func generateDailyAISummary(payload: [String: Any]) async throws -> [String: Any] {
+        let date = stringValue(payload["date"]) ?? todayString()
+        let activitySummaries = try store.request(operation: "activityAISummaries.list", payload: ["date": date]) as? [[String: Any]] ?? []
+        let succeededSummaries = activitySummaries.filter { ($0["status"] as? String) == "succeeded" }
+        if succeededSummaries.isEmpty {
+            try store.upsertDailyAISummary([
+                "date": date,
+                "status": "empty",
+                "sourceSummaryCount": 0
+            ])
+            return try store.request(operation: "dailyAISummaries.get", payload: ["date": date]) as? [String: Any] ?? [:]
+        }
+
+        let settings = try store.request(operation: "settings.get", payload: [:]) as? [String: Any] ?? [:]
+        guard let provider = AIProvider.normalize(settings["aiProvider"] as? String ?? "") else {
+            try store.upsertDailyAISummary([
+                "date": date,
+                "status": "failed",
+                "errorCode": "missing_provider",
+                "errorMessage": "Choose an Ask AI provider before generating daily AI summaries.",
+                "sourceSummaryCount": succeededSummaries.count
+            ])
+            return try store.request(operation: "dailyAISummaries.get", payload: ["date": date]) as? [String: Any] ?? [:]
+        }
+        let model = askAIModel(provider: provider, settings: settings)
+        do {
+            let summary = try await aiService.dailySummary(payload: [
+                "provider": provider.rawValue,
+                "model": model,
+                "date": date,
+                "activitySummaries": succeededSummaries.map(sanitizedDailySummarySource),
+                "dayContext": [
+                    "activities": try store.request(operation: "activities.list", payload: ["date": date]) as? [[String: Any]] ?? [],
+                    "timeEntries": try store.request(operation: "entries.list", payload: ["date": date]) as? [[String: Any]] ?? []
+                ]
+            ])
+            try store.upsertDailyAISummary([
+                "date": date,
+                "status": "succeeded",
+                "provider": provider.rawValue,
+                "model": model,
+                "summary": summary,
+                "sourceSummaryCount": succeededSummaries.count
+            ])
+        } catch {
+            try store.upsertDailyAISummary([
+                "date": date,
+                "status": "failed",
+                "provider": provider.rawValue,
+                "model": model,
+                "errorCode": "ai_failure",
+                "errorMessage": error.localizedDescription,
+                "sourceSummaryCount": succeededSummaries.count
+            ])
+        }
+        return try store.request(operation: "dailyAISummaries.get", payload: ["date": date]) as? [String: Any] ?? [:]
+    }
+
+    private func askAIModel(provider: AIProvider, settings: [String: Any]) -> String {
+        let key: String
+        switch provider {
+        case .openai:
+            key = "aiOpenAIModel"
+        case .google:
+            key = "aiGoogleModel"
+        case .anthropic:
+            key = "aiAnthropicModel"
+        case .openrouter:
+            key = "aiOpenRouterModel"
+        }
+        return stringValue(settings[key]) ?? provider.defaultModel
+    }
+
+    private func sanitizedDailySummarySource(_ row: [String: Any]) -> [String: Any] {
+        [
+            "activityId": row["activityId"] as? String ?? "",
+            "start": row["start"] ?? 0,
+            "end": row["end"] ?? 0,
+            "app": row["app"] as? String ?? "",
+            "title": row["title"] as? String ?? "",
+            "summary": row["summary"] as? [String: Any] ?? [:]
         ]
     }
 
@@ -189,6 +279,13 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             "imageHeight": screenshot.height,
             "compressedBytes": screenshot.jpegData.count
         ]
+    }
+
+    private func openScreenRecordingSettings() -> [String: Any] {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            _ = NSWorkspace.shared.open(url)
+        }
+        return ["opened": true]
     }
 
     private func stringValue(_ value: Any?) -> String? {

@@ -172,6 +172,72 @@ final class AIServiceTests: XCTestCase {
         XCTAssertTrue(requestBody.contains("\"messages\""))
         XCTAssertEqual(response["text"] as? String, "OpenRouter summary")
     }
+
+    func testAIServiceGeneratesDailySummaryWithAskAIProviderAndModel() async throws {
+        let keyStore = FakeAPIKeyStore(keys: ["openai": "openai-key"])
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: keyStore) { request in
+            capturedRequest = request
+            let data = #"{"output_text":"{\"text\":\"Focused implementation work.\",\"highlights\":[\"Built AI settings\"],\"uncertainties\":[]}"}"#.data(using: .utf8)!
+            return (data, httpResponse(for: request.url!, status: 200))
+        }
+
+        let response = try await service.dailySummary(payload: [
+            "provider": "openai",
+            "model": "gpt-daily",
+            "date": "2026-06-07",
+            "activitySummaries": [[
+                "activityId": "activity-1",
+                "summary": [
+                    "cloud_safe_summary": "Edited AI settings.",
+                    "activity": "implementation",
+                    "confidence": 0.91
+                ]
+            ]],
+            "dayContext": [
+                "totals": ["recordedMs": 3_600_000]
+            ]
+        ])
+
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer openai-key")
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("structured activity summaries and local activity context"))
+        XCTAssertTrue(requestBody.contains("Use only the provided JSON"))
+        XCTAssertTrue(requestBody.contains("Treat activity summaries as high-detail sampled evidence"))
+        XCTAssertTrue(requestBody.contains("Write directly to the user using"))
+        XCTAssertTrue(requestBody.contains("Do not invent goals, emotions, productivity judgments"))
+        XCTAssertTrue(requestBody.contains("Do not start with, repeat, or name the selected date"))
+        XCTAssertTrue(requestBody.contains("the screenshots show"))
+        XCTAssertTrue(requestBody.contains("Structured activity-summary sources for the selected date"))
+        XCTAssertTrue(requestBody.contains("Generate the daily recap JSON now."))
+        XCTAssertFalse(requestBody.contains("\"uncertainties\""))
+        XCTAssertTrue(requestBody.contains("Edited AI settings."))
+        XCTAssertFalse(requestBody.contains("data:image"))
+        XCTAssertFalse(requestBody.contains("base64"))
+        XCTAssertEqual(response["text"] as? String, "Focused implementation work.")
+        XCTAssertEqual(response["highlights"] as? [String], ["Built AI settings"])
+        XCTAssertNil(response["uncertainties"])
+    }
+
+    func testAIServiceDailySummaryFailsCleanlyWithoutAskAIKey() async throws {
+        let service = AIService(keyStore: FakeAPIKeyStore(keys: [:])) { request in
+            XCTFail("Transport should not run without a saved key: \(request)")
+            return (Data(), httpResponse(for: URL(string: "https://example.com")!, status: 200))
+        }
+
+        do {
+            _ = try await service.dailySummary(payload: [
+                "provider": "openai",
+                "model": "gpt-daily",
+                "date": "2026-06-07",
+                "activitySummaries": []
+            ])
+            XCTFail("Expected missing key failure")
+        } catch AIServiceError.missingAPIKey {
+            // Expected.
+        }
+    }
 }
 
 private final class FakeAPIKeyStore: APIKeyStore {

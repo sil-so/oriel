@@ -91,6 +91,9 @@
                 <button class="app-tab" id="tab-stats" role="tab" aria-selected="false">
                     <i class="ph ph-chart-bar text-[14px]"></i> Statistics
                 </button>
+                <button class="app-tab" id="tab-ai-insights" role="tab" aria-selected="false">
+                    <i class="ph ph-sparkle text-[14px]"></i> AI Insights
+                </button>
             </div>
 
         </div>
@@ -127,16 +130,20 @@
                             <button class="date-step-button" id="btn-prev-day" type="button" aria-label="Previous day"><i class="ph ph-caret-left"></i></button>
                             <button class="date-step-button" id="btn-next-day" type="button" aria-label="Next day"><i class="ph ph-caret-right"></i></button>
                         </div>
-                        <button class="icon-button" title="Settings" id="btn-settings"><i class="ph ph-sliders-horizontal text-lg"></i></button>
-                        <button class="icon-button" title="Collapse Sidebar" aria-label="Collapse Sidebar" aria-pressed="false" id="btn-toggle-work-times">
-                            <i class="ph ph-sidebar-simple text-lg"></i>
-                        </button>
                     </div>
                 </div>
+            </div>
+            <div class="header-actions flex items-center gap-2" id="header-actions">
+                <button class="icon-button" title="Settings" id="btn-settings"><i class="ph ph-sliders-horizontal text-lg"></i></button>
+                <button class="icon-button" title="Collapse Sidebar" aria-label="Collapse Sidebar" aria-pressed="false" id="btn-toggle-work-times">
+                    <i class="ph ph-sidebar-simple text-lg"></i>
+                </button>
             </div>
 
         </div>
     </div>
+
+    <div id="settings-floating-tooltip" class="settings-floating-tooltip hidden" role="tooltip"></div>
 
     <!-- Main Content Workspace -->
     <div class="flex-1 flex min-h-0 relative" id="scheduler-workspace">
@@ -396,7 +403,7 @@
     <!-- Reporting workspace -->
     <div id="stats-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
         <!-- Period picker row -->
-        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4 border-b border-[#2d2f34] pb-5">
+        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4">
             <div>
                 <h1 class="text-xl font-bold text-white tracking-wide">Reporting & Statistics</h1>
                 <p class="text-gray-400 text-xs mt-1">Deep analysis of program usage, website navigation, and tracked-to-logged conversion rates.</p>
@@ -503,6 +510,37 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- AI Insights workspace -->
+    <div id="ai-insights-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
+        <div class="flex justify-between items-start shrink-0 flex-wrap gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-white tracking-wide">AI Insights</h1>
+                <p class="text-gray-400 text-xs mt-1">Generate a daily recap from stored screenshot activity summaries. Screenshots are not stored or shown here.</p>
+            </div>
+        </div>
+
+        <div class="ai-insights-card-grid" id="ai-insights-card-grid" aria-live="polite"></div>
+        <div class="ai-insights-empty-state hidden" id="ai-insights-empty-state">
+            No generated or ready-to-generate AI summaries in this range.
+        </div>
+    </div>
+
+    <!-- MODAL: AI Insights Daily Summary -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-start justify-center hidden" id="ai-insights-detail-modal" aria-modal="true" role="dialog" aria-labelledby="ai-insights-detail-title">
+        <div class="modal-panel modal-panel--scroll w-[650px] max-w-[calc(100vw-32px)] max-h-[88vh] relative flex flex-col gap-4 mt-12">
+            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
+                <div class="flex items-center gap-2 min-w-0">
+                    <i class="ph ph-sparkle text-accent"></i>
+                    <h3 class="text-base font-bold text-white truncate" id="ai-insights-detail-title">Daily Summary</h3>
+                </div>
+                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="ai-insights-detail-close" aria-label="Close AI summary">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+            <div id="ai-insights-detail-body" class="modal-scroll-content ai-insights-detail-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0"></div>
         </div>
     </div>
 
@@ -964,11 +1002,11 @@
 
                     <div class="surface-panel p-3.5 flex flex-col gap-3">
                         <div class="ai-settings-heading">
-                            <span>Ask AI Model</span>
-                            <span>Used for chat in the Ask AI sidebar.</span>
+                            <span>Ask AI &amp; AI Insights</span>
+                            <span>Used for chat in the Ask AI sidebar and generating daily summaries.</span>
                         </div>
                         <label class="ai-field">
-                            <span>Ask AI Provider</span>
+                            <span>Provider</span>
                             <div class="custom-select-wrapper w-full">
                                 <select class="custom-select" id="settings-ai-ask-provider">
                                     <option value="openai">OpenAI</option>
@@ -1023,7 +1061,7 @@
                         </div>
 
                         <label class="ai-field">
-                            <span>Screenshot Provider</span>
+                            <span>Provider</span>
                             <div class="custom-select-wrapper w-full">
                                 <select class="custom-select" id="settings-ai-screenshot-provider">
                                     <option value="openai">OpenAI</option>
@@ -1035,9 +1073,14 @@
                             </div>
                         </label>
 
-                        <div class="grid grid-cols-3 gap-3">
+                        <div class="ai-screenshot-controls-grid">
                             <label class="ai-field">
-                                <span>Frequency</span>
+                                <span class="ai-field-label-with-help">
+                                    Frequency
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-frequency-help" aria-label="Screenshot frequency help" data-settings-tooltip-title="Frequency presets" data-settings-tooltip-list="Low|120s dwell / 30m same-context cooldown&#10;Balanced|60s dwell / 10m same-context cooldown&#10;High|45s dwell / 5m same-context cooldown" data-settings-tooltip-note="Frequency only changes dwell and same-context cooldown. Daily cap and timeout stay independent.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
                                 <div class="custom-select-wrapper w-full">
                                     <select class="custom-select" id="settings-ai-screenshot-frequency">
                                         <option value="low">Low</option>
@@ -1048,17 +1091,27 @@
                                 </div>
                             </label>
                             <label class="ai-field">
-                                <span>Daily Cap</span>
+                                <span class="ai-field-label-with-help">
+                                    Daily Cap
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-daily-cap-help" aria-label="Daily cap help" data-settings-tooltip="Daily cap limits how many screenshot summaries can be sent per day.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
                                 <input type="number" id="settings-ai-screenshot-daily-cap" min="1" max="1000" value="100" class="field ai-settings-input" aria-label="Daily screenshot summary cap">
                             </label>
                             <label class="ai-field">
-                                <span>Timeout Seconds</span>
+                                <span class="ai-field-label-with-help">
+                                    Timeout Seconds
+                                    <button type="button" class="settings-info-button" id="settings-ai-screenshot-timeout-help" aria-label="Timeout help" data-settings-tooltip="Timeout limits how long Oriel waits for one provider request.">
+                                        <i class="ph ph-info"></i>
+                                    </button>
+                                </span>
                                 <input type="number" id="settings-ai-screenshot-timeout" min="5" max="60" value="20" class="field ai-settings-input" aria-label="Screenshot summary timeout seconds">
                             </label>
                         </div>
 
                         <label class="ai-field">
-                            <span>Screenshot Model</span>
+                            <span>Model</span>
                             <div class="ai-model-picker">
                                 <button type="button" class="field ai-model-picker-button" id="settings-ai-screenshot-model-picker-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="settings-ai-screenshot-model-picker-menu">
                                     <span id="settings-ai-screenshot-model-picker-label">gpt-5.2</span>
@@ -1087,6 +1140,20 @@
                             </div>
                         </label>
 
+                        <div class="surface-panel surface-panel--inset p-3 flex flex-col gap-3">
+                            <div class="ai-settings-heading">
+                                <span>Sensitive Screenshot Exclusions</span>
+                                <span>Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="settings-ai-screenshot-sensitive-input" class="field ai-settings-input flex-1" placeholder="App name or bundle ID" aria-label="Sensitive screenshot exclusion">
+                                <button type="button" class="button-secondary shrink-0" id="settings-ai-screenshot-sensitive-add-button">
+                                    Add
+                                </button>
+                            </div>
+                            <div class="ai-sensitive-list" id="settings-ai-screenshot-sensitive-list"></div>
+                        </div>
+
                         <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3 flex gap-3">
                             <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
                             <p class="text-[11px] text-gray-300 leading-relaxed">
@@ -1094,10 +1161,15 @@
                             </p>
                         </div>
 
-                        <div class="flex justify-end">
+                        <div class="flex flex-col items-end gap-2">
                             <button type="button" class="button-secondary" id="settings-ai-screenshot-test-button">
                                 <i class="ph ph-camera"></i>
                                 Test Screenshot Analysis
+                            </button>
+                            <span class="ai-settings-feedback" id="settings-ai-screenshot-test-feedback" role="status" aria-live="polite"></span>
+                            <button type="button" class="button-secondary hidden" id="settings-ai-screenshot-open-screen-recording-button">
+                                <i class="ph ph-arrow-square-out"></i>
+                                Open Screen Recording Settings
                             </button>
                         </div>
                     </div>

@@ -56,12 +56,22 @@ function loadAiSidebarContext() {
         aiGoogleModel: 'gemini-3.5-flash',
         aiAnthropicModel: 'claude-sonnet-4-20250514',
         aiOpenRouterModel: 'google/gemini-3.1-flash-lite',
-        aiScreenshotProvider: '',
-        aiScreenshotSummariesEnabled: false,
-        aiScreenshotFrequencyPreset: 'balanced',
-        aiScreenshotDailyCap: 100,
-        aiScreenshotTimeoutSeconds: 20,
-        aiScreenshotModelMode: 'askAI'
+      aiScreenshotProvider: '',
+      aiScreenshotSummariesEnabled: false,
+      aiScreenshotFrequencyPreset: 'balanced',
+      aiScreenshotDailyCap: 100,
+      aiScreenshotTimeoutSeconds: 20,
+      aiScreenshotModelMode: 'askAI',
+      aiScreenshotSensitiveApps: [
+        '1password',
+        'bitwarden',
+        'dashlane',
+        'keychain access',
+        'lastpass',
+        'proton pass',
+        'keeper password',
+        'authenticator'
+      ]
       }
     },
     localStorage: {
@@ -191,6 +201,7 @@ function fakeElement(options = {}) {
 function createAiSettingsDom({
   keyStatus = { openai: true, google: false, anthropic: false, openrouter: false },
   modelListResult = null,
+  screenshotTestResult = null,
   confirmResult = true,
   customConfirm = null,
   setTimeoutImpl = setTimeout,
@@ -257,7 +268,12 @@ function createAiSettingsDom({
     'settings-ai-screenshot-model-refresh-confirm-button',
     'settings-ai-screenshot-model-refresh-cancel-button',
     'settings-ai-screenshot-model-refresh-meta',
+    'settings-ai-screenshot-sensitive-input',
+    'settings-ai-screenshot-sensitive-add-button',
+    'settings-ai-screenshot-sensitive-list',
     'settings-ai-screenshot-test-button',
+    'settings-ai-screenshot-test-feedback',
+    'settings-ai-screenshot-open-screen-recording-button',
     'ai-loading-spinner',
     'ai-chat-input',
     'ai-send-button',
@@ -294,6 +310,7 @@ function createAiSettingsDom({
   elements['settings-ai-model-refresh-confirm'].classList.add('hidden');
   elements['settings-ai-screenshot-model-picker-menu'].classList.add('hidden');
   elements['settings-ai-screenshot-model-refresh-confirm'].classList.add('hidden');
+  elements['settings-ai-screenshot-open-screen-recording-button'].classList.add('hidden');
   elements['ai-loading-spinner'].classList.add('hidden');
   const saveLabel = elements['settings-ai-key-save-label'];
   elements['settings-ai-key-save-button'].querySelector = selector => (selector === 'span' ? saveLabel : null);
@@ -360,6 +377,14 @@ function createAiSettingsDom({
       if (operation === 'ai.keys.save') {
         keyStatus[payload.provider] = true;
         return { ...keyStatus };
+      }
+      if (operation === 'ai.screenshotSummary.test') {
+        if (typeof screenshotTestResult === 'function') return screenshotTestResult(payload);
+        if (screenshotTestResult instanceof Error) throw screenshotTestResult;
+        return screenshotTestResult || { tested: true };
+      }
+      if (operation === 'system.openScreenRecordingSettings') {
+        return { opened: true };
       }
       return {};
     }
@@ -929,6 +954,7 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   const promptChipMatches = markup.match(/class="ai-prompt-chip"/g) || [];
   const tabGroupBlock = styles.match(/\.sidebar-tab-group\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
   const composerBlock = styles.match(/\.ai-composer\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
+  const unconfiguredHiddenBlock = styles.match(/\.ai-unconfigured-status\.hidden\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
 
   assert.doesNotMatch(markup, /id="ai-key-status"/);
   assert.doesNotMatch(markup, /id="ai-settings-panel"/);
@@ -965,6 +991,8 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-mode"/);
   assert.doesNotMatch(markup, /id="settings-ai-screenshot-model-input"/);
   assert.match(markup, /id="settings-ai-screenshot-test-button"/);
+  assert.match(markup, /id="settings-ai-screenshot-test-feedback"/);
+  assert.match(markup, /id="settings-ai-screenshot-open-screen-recording-button"/);
   assert.match(markup, /compressed screenshots and activity metadata/);
   assert.match(styles, /\.ai-model-picker-menu\.hidden\s*\{[\s\S]*display:\s*none/);
   assert.match(styles, /\.ai-model-refresh-confirm\.hidden\s*\{[\s\S]*display:\s*none/);
@@ -978,13 +1006,14 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   assert.doesNotMatch(markup, /id="ai-provider-select"/);
   assert.doesNotMatch(markup, /ai-day-summary/);
   assert.doesNotMatch(markup, /ai-day-label/);
-  assert.doesNotMatch(markup, /Selected day/);
   assert.doesNotMatch(styles, /\.ai-day-summary/);
   assert.doesNotMatch(styles, /\.ai-day-value/);
   assert.match(markup, /id="ai-new-chat-button"[\s\S]*<span>New<\/span>/);
   assert.doesNotMatch(markup, /id="ai-configure-button"/);
   assert.match(markup, /id="ai-unconfigured-status"[\s\S]*No AI provider configured/);
   assert.match(styles, /\.ai-topbar-actions\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/);
+  assert.match(styles, /\.ai-unconfigured-status\.hidden\s*\{[\s\S]*visibility:\s*hidden/);
+  assert.doesNotMatch(unconfiguredHiddenBlock, /display:\s*none/);
   assert.doesNotMatch(tabGroupBlock, /border:/);
   assert.doesNotMatch(tabGroupBlock, /background:/);
   assert.doesNotMatch(tabGroupBlock, /padding:/);
@@ -1001,6 +1030,91 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
   assert.doesNotMatch(script, /ai-chat-select/);
   assert.match(script, /const intent = classifyAiPromptIntent\(content\)/);
   assert.match(script, /normalizeAiResponse\(response, \{ intent, dayContext, draftActivitySet \}\)/);
+});
+
+test('AI screenshot test feedback stays next to the test action', async () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
+  const testButtonIndex = aiPanel.indexOf('id="settings-ai-screenshot-test-button"');
+  const testFeedbackIndex = aiPanel.indexOf('id="settings-ai-screenshot-test-feedback"');
+  const screenSettingsIndex = aiPanel.indexOf('id="settings-ai-screenshot-open-screen-recording-button"');
+  const providerFeedbackIndex = aiPanel.indexOf('id="settings-ai-feedback"');
+
+  assert.ok(testButtonIndex > -1);
+  assert.ok(testFeedbackIndex > testButtonIndex);
+  assert.ok(screenSettingsIndex > testButtonIndex);
+  assert.ok(providerFeedbackIndex > -1 && providerFeedbackIndex < testButtonIndex);
+
+  const screenRecordingError = new Error('Screen Recording permission is required for screenshot summaries.');
+  const { context, elements, requests } = createAiSettingsDom({ screenshotTestResult: screenRecordingError });
+
+  await context.initAiSidebar();
+  await elements['settings-ai-screenshot-test-button'].click();
+
+  assert.equal(elements['settings-ai-feedback'].textContent, '');
+  assert.match(elements['settings-ai-screenshot-test-feedback'].textContent, /Screen Recording permission/);
+  assert.equal(elements['settings-ai-screenshot-test-feedback'].dataset.tone, 'error');
+  assert.equal(elements['settings-ai-screenshot-open-screen-recording-button'].classList.contains('hidden'), false);
+
+  await elements['settings-ai-screenshot-open-screen-recording-button'].click();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.map(request => request.operation))), [
+    'ai.keys.status',
+    'ai.screenshotSummary.test',
+    'system.openScreenRecordingSettings'
+  ]);
+});
+
+test('AI screenshot test handles missing key and native fallback in screenshot feedback', async () => {
+  const missingKey = createAiSettingsDom({
+    keyStatus: { openai: false, google: false, anthropic: false, openrouter: false }
+  });
+  await missingKey.context.initAiSidebar();
+  await missingKey.elements['settings-ai-screenshot-test-button'].click();
+
+  assert.equal(missingKey.elements['settings-ai-feedback'].textContent, '');
+  assert.equal(missingKey.elements['settings-ai-screenshot-test-feedback'].textContent, 'Save a key for this provider first.');
+  assert.equal(missingKey.elements['settings-ai-screenshot-open-screen-recording-button'].classList.contains('hidden'), true);
+
+  const nonNative = createAiSettingsDom();
+  nonNative.context.OrielData.isNative = false;
+  await nonNative.context.initAiSidebar();
+  await nonNative.elements['settings-ai-screenshot-test-button'].click();
+
+  assert.equal(nonNative.elements['settings-ai-feedback'].textContent, '');
+  assert.match(nonNative.elements['settings-ai-screenshot-test-feedback'].textContent, /requires Oriel\.app/);
+});
+
+test('AI settings labels and screenshot frequency help copy are clear', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
+  const modalBody = markup.slice(markup.indexOf('id="settings-modal-body"'), markup.indexOf('</div>\n\n        </div>\n    </div>\n\n    <!-- MODAL: Create/Edit Time Entry -->'));
+
+  assert.match(aiPanel, /<span>Provider<\/span>[\s\S]*id="settings-ai-ask-provider"/);
+  assert.match(aiPanel, /<span>Provider<\/span>[\s\S]*id="settings-ai-screenshot-provider"/);
+  assert.match(aiPanel, /<span>Model<\/span>[\s\S]*id="settings-ai-screenshot-model-picker-button"/);
+  assert.doesNotMatch(aiPanel, /Ask AI Provider|Screenshot Provider|Screenshot Model/);
+  assert.match(aiPanel, /id="settings-ai-screenshot-frequency-help"/);
+  assert.match(aiPanel, /data-settings-tooltip-title="Frequency presets"/);
+  assert.match(aiPanel, /data-settings-tooltip-list="Low\|120s dwell \/ 30m same-context cooldown&#10;Balanced\|60s dwell \/ 10m same-context cooldown&#10;High\|45s dwell \/ 5m same-context cooldown"/);
+  assert.match(aiPanel, /data-settings-tooltip-note="Frequency only changes dwell and same-context cooldown. Daily cap and timeout stay independent."/);
+  assert.match(aiPanel, /data-settings-tooltip="Daily cap limits how many screenshot summaries can be sent per day\."/);
+  assert.match(aiPanel, /data-settings-tooltip="Timeout limits how long Oriel waits for one provider request\."/);
+  assert.match(markup, /id="settings-floating-tooltip"/);
+  assert.doesNotMatch(modalBody, /class="settings-tooltip"/);
+  assert.match(styles, /\.settings-info-button/);
+  assert.match(styles, /\.settings-floating-tooltip/);
+  assert.match(styles, /\.settings-tooltip-title/);
+  assert.match(styles, /\.settings-tooltip-list/);
+  assert.match(styles, /\.settings-tooltip-row/);
+  assert.match(styles, /\.settings-tooltip-term/);
+  assert.match(styles, /\.settings-tooltip-detail/);
+  assert.match(styles, /\.settings-tooltip-note/);
+  assert.match(fs.readFileSync('js/main.js', 'utf8'), /settingsTooltipList/);
+  assert.match(styles, /\.settings-modal-body\s*\{[\s\S]*overflow-x:\s*hidden/s);
+  assert.match(styles, /\.settings-section-panel\s*\{[\s\S]*min-width:\s*0/s);
+  assert.match(styles, /\.ai-screenshot-controls-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
 });
 
 test('AI provider selection auto-selects exactly one configured provider', async () => {
@@ -1260,6 +1374,7 @@ test('AI model refresh missing-key error stays inside the open picker and clears
   assert.equal(elements['ai-model-picker-menu'].classList.contains('hidden'), false);
   assert.equal(elements['ai-model-refresh-meta'].textContent, 'Save a key for this provider first.');
   assert.equal(elements['ai-model-refresh-meta'].dataset.tone, 'error');
+  assert.equal(elements['ai-model-refresh-meta'].classList.contains('hidden'), false);
   assert.equal(requests.filter(request => request.operation === 'ai.models.list').length, 0);
 
   elements['ai-api-key-input'].value = 'sk-test';
@@ -1267,6 +1382,7 @@ test('AI model refresh missing-key error stays inside the open picker and clears
 
   assert.equal(elements['ai-model-refresh-meta'].textContent, '');
   assert.equal(elements['ai-model-refresh-meta'].dataset.tone, 'muted');
+  assert.equal(elements['ai-model-refresh-meta'].classList.contains('hidden'), true);
 });
 
 test('AI screenshot provider is concrete and can be configured separately from Ask AI provider', async () => {
@@ -1284,6 +1400,26 @@ test('AI screenshot provider is concrete and can be configured separately from A
   assert.equal(context.localStorage.getItem('aiScreenshotProvider'), 'openrouter');
   assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.settings.update').at(-1).payload)), {
     aiScreenshotProvider: 'openrouter'
+  });
+});
+
+test('AI screenshot sensitive exclusions render and persist as screenshot-only settings', async () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const { context, elements, requests } = createAiSettingsDom();
+
+  assert.match(markup, /Sensitive Screenshot Exclusions/);
+  assert.match(markup, /id="settings-ai-screenshot-sensitive-input"/);
+  assert.match(markup, /id="settings-ai-screenshot-sensitive-list"/);
+
+  await context.initAiSidebar();
+  assert.match(elements['settings-ai-screenshot-sensitive-list'].innerHTML, /1password/);
+
+  elements['settings-ai-screenshot-sensitive-input'].value = 'Banking App';
+  await elements['settings-ai-screenshot-sensitive-add-button'].click();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.settings.aiScreenshotSensitiveApps)).at(-1), 'Banking App');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.settings.update').at(-1).payload)), {
+    aiScreenshotSensitiveApps: JSON.parse(JSON.stringify(context.state.settings.aiScreenshotSensitiveApps))
   });
 });
 

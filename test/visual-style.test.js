@@ -119,6 +119,59 @@ test('settings tabs reuse the app tab active treatment', () => {
   assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
 });
 
+test('AI Insights header omits archive controls and workspace separator', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const insightsHeader = html.match(/id="ai-insights-workspace"[\s\S]*?id="ai-insights-card-grid"/)?.[0] || '';
+
+  assert.doesNotMatch(insightsHeader, /ai-insights-summary-date-trigger|ai-insights-range-filter|ai-insights-status-filter/);
+  assert.doesNotMatch(insightsHeader, /Jump to date|Range|Status/);
+  assert.doesNotMatch(insightsHeader, /justify-between[^"]*border-b/);
+});
+
+test('AI Insights detail modal puts bottom spacing inside the scroll content', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const modalPanelClass = html.match(/id="ai-insights-detail-modal"[\s\S]*?<div class="([^"]*\bmodal-panel\b[^"]*)"/)?.[1] || '';
+
+  assert.match(modalPanelClass, /\bmodal-panel--scroll\b/);
+  assert.match(html, /id="ai-insights-detail-body"[^>]*class="[^"]*\bmodal-scroll-content\b[^"]*"/);
+  assert.match(css, /\.ai-insights-detail-body::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 6px/s);
+  assert.doesNotMatch(css.match(/\.ai-insights-detail-body\s*\{[^}]*\}/)?.[0] || '', /padding-bottom:/);
+});
+
+test('AI Insights card previews fade after two readable lines', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const previewRule = css.match(/\.ai-insights-card-summary--fade\s*\{[^}]*\}/)?.[0] || '';
+  const fadeRule = css.match(/\.ai-insights-card-summary--fade::after\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(previewRule, /height:\s*calc\(1\.55em \* 4\)/);
+  assert.match(previewRule, /max-height:\s*calc\(1\.55em \* 4\)/);
+  assert.match(fadeRule, /height:\s*calc\(1\.55em \* 2\)/);
+});
+
+test('settings tooltip is not nested inside the hideable scheduler workspace', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const schedulerIndex = html.indexOf('id="scheduler-workspace"');
+  const tooltipIndex = html.indexOf('id="settings-floating-tooltip"');
+
+  assert.ok(tooltipIndex !== -1);
+  assert.ok(schedulerIndex !== -1);
+  assert.ok(tooltipIndex < schedulerIndex);
+});
+
+test('header sidebar toggle uses real hidden-state styling', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  assert.match(css, /#btn-toggle-work-times\[hidden\][\s\S]*display:\s*none\s*!important/);
+});
+
+test('Statistics workspace header does not draw a separator line', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const statsHeader = html.match(/id="stats-workspace"[\s\S]*?id="stats-presets-container"/)?.[0] || '';
+
+  assert.doesNotMatch(statsHeader, /justify-between[^"]*border-b/);
+});
+
 test('native app chrome leaves only a compact gap after macOS traffic lights', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
 

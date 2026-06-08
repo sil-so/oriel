@@ -56,7 +56,14 @@ final class SQLiteStore {
         case "activities.list":
             return try listActivities(payload: payload)
         case "activityAISummaries.list":
-            return try listActivityAISummaries()
+            return try listActivityAISummaries(payload: payload)
+        case "dailyAISummaries.get":
+            return try dailyAISummary(payload: payload)
+        case "dailyAISummaries.list":
+            return try dailyAISummaries(payload: payload)
+        case "dailyAISummaries.upsert":
+            try upsertDailyAISummary(payload)
+            return try dailyAISummary(payload: payload)
         case "projects.list":
             return try listProjects()
         case "projects.create":
@@ -248,11 +255,12 @@ final class SQLiteStore {
             activities: activities,
             rules: rules,
             exclusions: exclusions,
-            activityAISummaries: archive["activityAISummaries"] as? [[String: Any]] ?? []
+            activityAISummaries: archive["activityAISummaries"] as? [[String: Any]] ?? [],
+            dailyAISummaries: archive["dailyAISummaries"] as? [[String: Any]] ?? []
         )
         let portableSettings = archive["settings"] as? [String: Any] ?? [:]
         try transaction {
-            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "activity_ai_summaries", "activities", "projects", "settings"] {
+            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
                 try execute("DELETE FROM \(table)")
             }
             try insertPortableRecords(records)
@@ -281,6 +289,7 @@ final class SQLiteStore {
         let rules: [[String: Any]]
         let exclusions: [[String: Any]]
         let activityAISummaries: [[String: Any]]
+        let dailyAISummaries: [[String: Any]]
     }
 
     private func validatePortableRecords(
@@ -289,7 +298,8 @@ final class SQLiteStore {
         activities: [[String: Any]],
         rules: [[String: Any]],
         exclusions: [[String: Any]],
-        activityAISummaries: [[String: Any]]
+        activityAISummaries: [[String: Any]],
+        dailyAISummaries: [[String: Any]]
     ) throws -> PortableRecords {
         let normalizedProjects = try projects.map { project -> [String: Any] in
             let id = optionalString(project, key: "id", defaultValue: identifier("project"))
@@ -336,13 +346,15 @@ final class SQLiteStore {
             activityAISummaries,
             activityIDs: activityIDs
         )
+        let normalizedDailyAISummaries = try normalizedDailyAISummaries(dailyAISummaries)
         return PortableRecords(
             projects: normalizedProjects,
             entries: normalizedEntries,
             activities: normalizedActivities,
             rules: normalizedRules,
             exclusions: normalizedExclusions,
-            activityAISummaries: normalizedActivityAISummaries
+            activityAISummaries: normalizedActivityAISummaries,
+            dailyAISummaries: normalizedDailyAISummaries
         )
     }
 
@@ -425,6 +437,45 @@ final class SQLiteStore {
         }
     }
 
+    private func normalizedDailyAISummaries(_ rows: [[String: Any]]) throws -> [[String: Any]] {
+        try rows.map { row in
+            let date = try requiredString(row, key: "date", maxLength: 10)
+            guard isValidDateString(date) else {
+                throw OrielStoreError.invalidRequest("A daily AI summary has an invalid date.")
+            }
+            let status = optionalString(row, key: "status", defaultValue: "failed")
+            guard ["pending", "succeeded", "failed", "empty"].contains(status) else {
+                throw OrielStoreError.invalidRequest("A daily AI summary has an invalid status.")
+            }
+            var normalized: [String: Any] = [
+                "date": date,
+                "status": status,
+                "provider": String(optionalString(row, key: "provider", defaultValue: "").prefix(64)),
+                "model": String(optionalString(row, key: "model", defaultValue: "").prefix(200)),
+                "errorCode": String(optionalString(row, key: "errorCode", defaultValue: "").prefix(100)),
+                "errorMessage": String(optionalString(row, key: "errorMessage", defaultValue: "").prefix(500)),
+                "sourceSummaryCount": max(0, intValue(row["sourceSummaryCount"]) ?? 0)
+            ]
+            if let summary = row["summary"] as? [String: Any] {
+                normalized["summary"] = summary
+            }
+            return normalized
+        }
+    }
+
+    private func dayFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }
+
+    private func isValidDateString(_ value: String) -> Bool {
+        let formatter = dayFormatter()
+        return formatter.date(from: value) != nil
+    }
+
     private func insertPortableRecords(_ records: PortableRecords) throws {
         for project in records.projects {
             try insertProject(project)
@@ -451,6 +502,9 @@ final class SQLiteStore {
         }
         for summary in records.activityAISummaries {
             try upsertActivityAISummary(summary)
+        }
+        for summary in records.dailyAISummaries {
+            try upsertDailyAISummary(summary)
         }
         for rule in records.rules {
             try execute(
@@ -568,6 +622,18 @@ final class SQLiteStore {
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS daily_ai_summaries (
+                date TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                summary_json TEXT,
+                error_code TEXT NOT NULL DEFAULT '',
+                error_message TEXT NOT NULL DEFAULT '',
+                source_summary_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
@@ -576,6 +642,7 @@ final class SQLiteStore {
             CREATE INDEX IF NOT EXISTS entries_range_idx ON time_entries(start_ms, end_ms);
             CREATE INDEX IF NOT EXISTS passive_reviews_range_idx ON passive_reviews(start_ms, end_ms);
             CREATE INDEX IF NOT EXISTS activity_ai_summaries_status_idx ON activity_ai_summaries(status, updated_at);
+            CREATE INDEX IF NOT EXISTS daily_ai_summaries_status_idx ON daily_ai_summaries(status, updated_at);
             """
         )
         try addColumnIfMissing(table: "projects", column: "tasks_json", definition: "TEXT NOT NULL DEFAULT '[]'")
@@ -973,19 +1040,42 @@ final class SQLiteStore {
         )
     }
 
-    private func listActivityAISummaries() throws -> [[String: Any]] {
-        try query(
-            """
-            SELECT activity_id AS activityId, status, provider, model,
-                   summary_json AS summaryJson, error_code AS errorCode,
-                   error_message AS errorMessage, image_width AS imageWidth,
-                   image_height AS imageHeight, compressed_bytes AS compressedBytes,
-                   request_metadata_json AS requestMetadataJson,
-                   zdr_requested AS zdrRequested, created_at AS createdAt, updated_at AS updatedAt
-            FROM activity_ai_summaries
-            ORDER BY updated_at, activity_id
-            """
-        ).map { row in
+    private func listActivityAISummaries(payload: [String: Any] = [:]) throws -> [[String: Any]] {
+        let rows: [[String: Any]]
+        if optionalString(payload, key: "date", defaultValue: "").isEmpty {
+            rows = try query(
+                """
+                SELECT activity_id AS activityId, status, provider, model,
+                       summary_json AS summaryJson, error_code AS errorCode,
+                       error_message AS errorMessage, image_width AS imageWidth,
+                       image_height AS imageHeight, compressed_bytes AS compressedBytes,
+                       request_metadata_json AS requestMetadataJson,
+                       zdr_requested AS zdrRequested, created_at AS createdAt, updated_at AS updatedAt
+                FROM activity_ai_summaries
+                ORDER BY updated_at, activity_id
+                """
+            )
+        } else {
+            let bounds = try timeBounds(payload)
+            rows = try query(
+                """
+                SELECT s.activity_id AS activityId, s.status, s.provider, s.model,
+                       s.summary_json AS summaryJson, s.error_code AS errorCode,
+                       s.error_message AS errorMessage, s.image_width AS imageWidth,
+                       s.image_height AS imageHeight, s.compressed_bytes AS compressedBytes,
+                       s.request_metadata_json AS requestMetadataJson,
+                       s.zdr_requested AS zdrRequested, s.created_at AS createdAt, s.updated_at AS updatedAt,
+                       a.start_ms AS start, a.end_ms AS end, a.app, a.title, a.url,
+                       a.bundle_identifier AS bundleId
+                FROM activity_ai_summaries s
+                JOIN activities a ON a.id = s.activity_id
+                WHERE a.start_ms < ? AND a.end_ms > ?
+                ORDER BY a.start_ms, s.updated_at
+                """,
+                values: [bounds.end, bounds.start]
+            )
+        }
+        return rows.map { row in
             var output = row
             if let summaryJSON = stringValue(row["summaryJson"]),
                let summary = decodedJSONObject(summaryJSON) {
@@ -999,6 +1089,185 @@ final class SQLiteStore {
             output.removeValue(forKey: "summaryJson")
             output.removeValue(forKey: "requestMetadataJson")
             return output
+        }
+    }
+
+    func upsertDailyAISummary(_ payload: [String: Any]) throws {
+        let date = try requiredString(payload, key: "date", maxLength: 10)
+        guard isValidDateString(date) else {
+            throw OrielStoreError.invalidRequest("A daily AI summary requires a valid date.")
+        }
+        let status = optionalString(payload, key: "status", defaultValue: "failed")
+        guard ["pending", "succeeded", "failed", "empty"].contains(status) else {
+            throw OrielStoreError.invalidRequest("Unsupported daily AI summary status.")
+        }
+        let summaryJSON: String?
+        if let summary = payload["summary"] as? [String: Any] {
+            summaryJSON = try encodedJSONObject(summary)
+        } else {
+            summaryJSON = nil
+        }
+        try execute(
+            """
+            INSERT INTO daily_ai_summaries (
+                date, status, provider, model, summary_json, error_code,
+                error_message, source_summary_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(date) DO UPDATE SET
+                status = excluded.status,
+                provider = excluded.provider,
+                model = excluded.model,
+                summary_json = excluded.summary_json,
+                error_code = excluded.error_code,
+                error_message = excluded.error_message,
+                source_summary_count = excluded.source_summary_count,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            values: [
+                date,
+                status,
+                optionalString(payload, key: "provider", defaultValue: ""),
+                optionalString(payload, key: "model", defaultValue: ""),
+                summaryJSON,
+                optionalString(payload, key: "errorCode", defaultValue: ""),
+                String(optionalString(payload, key: "errorMessage", defaultValue: "").prefix(500)),
+                max(0, intValue(payload["sourceSummaryCount"]) ?? 0)
+            ]
+        )
+    }
+
+    private func dailyAISummary(payload: [String: Any]) throws -> [String: Any] {
+        let date = try requiredString(payload, key: "date", maxLength: 10)
+        guard isValidDateString(date) else {
+            throw OrielStoreError.invalidRequest("A daily AI summary requires a valid date.")
+        }
+        let sourceCount = try dailyAISummarySourceCount(for: date)
+        guard let row = try query(
+            """
+            SELECT date, status, provider, model, summary_json AS summaryJson,
+                   error_code AS errorCode, error_message AS errorMessage,
+                   source_summary_count AS sourceSummaryCount,
+                   created_at AS createdAt, updated_at AS updatedAt
+            FROM daily_ai_summaries
+            WHERE date = ?
+            LIMIT 1
+            """,
+            values: [date]
+        ).first else {
+            return [
+                "date": date,
+                "status": sourceCount > 0 ? "ready" : "empty",
+                "sourceSummaryCount": sourceCount
+            ]
+        }
+        var output = row
+        if let summaryJSON = stringValue(row["summaryJson"]),
+           let summary = decodedJSONObject(summaryJSON) {
+            output["summary"] = summary
+        }
+        output.removeValue(forKey: "summaryJson")
+        if intValue(output["sourceSummaryCount"]) == 0 {
+            output["sourceSummaryCount"] = sourceCount
+        }
+        return output
+    }
+
+    private func dailyAISummaries(payload: [String: Any]) throws -> [[String: Any]] {
+        let dates = try dailyAISummaryDateRange(payload)
+        let includeEmpty = boolean(payload["includeEmpty"])
+        guard let startDate = dates.first, let endDate = dates.last else {
+            return []
+        }
+        let storedRows = try query(
+            """
+            SELECT date, status, provider, model, summary_json AS summaryJson,
+                   error_code AS errorCode, error_message AS errorMessage,
+                   source_summary_count AS sourceSummaryCount,
+                   created_at AS createdAt, updated_at AS updatedAt
+            FROM daily_ai_summaries
+            WHERE date >= ? AND date <= ?
+            ORDER BY date DESC
+            """,
+            values: [startDate, endDate]
+        )
+        var storedByDate: [String: [String: Any]] = [:]
+        storedRows.forEach { row in
+            if let date = stringValue(row["date"]) {
+                storedByDate[date] = row
+            }
+        }
+
+        var output: [[String: Any]] = []
+        for date in dates.reversed() {
+            let sourceCount = try dailyAISummarySourceCount(for: date)
+            if let row = storedByDate[date] {
+                var summary = decodedDailyAISummaryRow(row, sourceCount: sourceCount)
+                let status = stringValue(summary["status"]) ?? "empty"
+                if status == "empty" && !includeEmpty && sourceCount == 0 {
+                    continue
+                }
+                if status == "empty" && sourceCount > 0 {
+                    summary["status"] = "ready"
+                }
+                output.append(summary)
+                continue
+            }
+            if sourceCount > 0 {
+                output.append([
+                    "date": date,
+                    "status": "ready",
+                    "sourceSummaryCount": sourceCount
+                ])
+            } else if includeEmpty {
+                output.append([
+                    "date": date,
+                    "status": "empty",
+                    "sourceSummaryCount": 0
+                ])
+            }
+        }
+        return output
+    }
+
+    private func decodedDailyAISummaryRow(_ row: [String: Any], sourceCount: Int) -> [String: Any] {
+        var output = row
+        if let summaryJSON = stringValue(row["summaryJson"]),
+           let summary = decodedJSONObject(summaryJSON) {
+            output["summary"] = summary
+        }
+        output.removeValue(forKey: "summaryJson")
+        if intValue(output["sourceSummaryCount"]) == 0 {
+            output["sourceSummaryCount"] = sourceCount
+        }
+        return output
+    }
+
+    private func dailyAISummarySourceCount(for date: String) throws -> Int {
+        try listActivityAISummaries(payload: ["date": date])
+            .filter { ($0["status"] as? String) == "succeeded" }
+            .count
+    }
+
+    private func dailyAISummaryDateRange(_ payload: [String: Any]) throws -> [String] {
+        let startText = try requiredString(payload, key: "startDate", maxLength: 10)
+        let endText = optionalString(payload, key: "endDate", defaultValue: startText)
+        guard endText.count <= 10 else {
+            throw OrielStoreError.invalidRequest("A valid daily AI summary date range is required.")
+        }
+        let formatter = dayFormatter()
+        guard let startDate = formatter.date(from: startText),
+              let endDate = formatter.date(from: endText),
+              startDate <= endDate else {
+            throw OrielStoreError.invalidRequest("A valid daily AI summary date range is required.")
+        }
+        let calendar = Calendar(identifier: .gregorian)
+        let dayCount = calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0
+        guard dayCount >= 0, dayCount < 366 else {
+            throw OrielStoreError.invalidRequest("Daily AI summary ranges can cover at most 366 days.")
+        }
+        return (0...dayCount).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: startDate).map { formatter.string(from: $0) }
         }
     }
 
@@ -1459,6 +1728,7 @@ final class SQLiteStore {
             "aiScreenshotGoogleModel": "gemini-3.5-flash",
             "aiScreenshotAnthropicModel": "claude-sonnet-4-20250514",
             "aiScreenshotOpenRouterModel": "google/gemini-3.1-flash-lite",
+            "aiScreenshotSensitiveApps": defaultScreenshotSensitiveApps(),
             "titleCleanupRules": defaultTitleCleanupRules()
         ]
         for row in try query("SELECT key, value_json FROM settings") {
@@ -1499,6 +1769,7 @@ final class SQLiteStore {
             "aiScreenshotGoogleModel",
             "aiScreenshotAnthropicModel",
             "aiScreenshotOpenRouterModel",
+            "aiScreenshotSensitiveApps",
             "titleCleanupRules"
         ]
         for (key, value) in payload where accepted.contains(key) {
@@ -1517,6 +1788,8 @@ final class SQLiteStore {
                 settingValue = normalizedScreenshotModelMode(value)
             } else if key == "aiScreenshotProvider" {
                 settingValue = normalizedAIProvider(value)
+            } else if key == "aiScreenshotSensitiveApps" {
+                settingValue = try normalizedStringList(value, maxCount: 80, maxLength: 200)
             } else {
                 settingValue = value
             }
@@ -1643,6 +1916,37 @@ final class SQLiteStore {
         ]
     }
 
+    private func defaultScreenshotSensitiveApps() -> [String] {
+        [
+            "1password",
+            "bitwarden",
+            "dashlane",
+            "keychain access",
+            "lastpass",
+            "proton pass",
+            "keeper password",
+            "authenticator"
+        ]
+    }
+
+    private func normalizedStringList(_ value: Any, maxCount: Int, maxLength: Int) throws -> [String] {
+        guard let items = value as? [Any], items.count <= maxCount else {
+            throw OrielStoreError.invalidRequest("Setting list is invalid.")
+        }
+        var seen = Set<String>()
+        var output: [String] = []
+        for item in items {
+            guard let raw = item as? String else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed.count <= maxLength else { continue }
+            let key = trimmed.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            output.append(trimmed)
+        }
+        return output
+    }
+
     private func normalizedTitleCleanupRules(_ value: Any) throws -> [[String: Any]] {
         guard let rules = value as? [Any], rules.count <= 100 else {
             throw OrielStoreError.invalidRequest("Title cleanup rules must be an array.")
@@ -1746,6 +2050,24 @@ final class SQLiteStore {
                 """
             ),
             "activityAISummaries": try listActivityAISummaries(),
+            "dailyAISummaries": try query(
+                """
+                SELECT date, status, provider, model, summary_json AS summaryJson,
+                       error_code AS errorCode, error_message AS errorMessage,
+                       source_summary_count AS sourceSummaryCount,
+                       created_at AS createdAt, updated_at AS updatedAt
+                FROM daily_ai_summaries
+                ORDER BY date
+                """
+            ).map { row in
+                var output = row
+                if let summaryJSON = stringValue(row["summaryJson"]),
+                   let summary = decodedJSONObject(summaryJSON) {
+                    output["summary"] = summary
+                }
+                output.removeValue(forKey: "summaryJson")
+                return output
+            },
             "rules": try listRules(),
             "exclusions": try listExclusions(),
             "settings": try settings()
@@ -1754,7 +2076,7 @@ final class SQLiteStore {
 
     private func purge() throws {
         try transaction {
-            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "activity_ai_summaries", "activities", "projects", "settings"] {
+            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
                 try execute("DELETE FROM \(table)")
             }
         }
@@ -1801,6 +2123,7 @@ final class SQLiteStore {
             "capture_exclusions",
             "passive_reviews",
             "activity_ai_summaries",
+            "daily_ai_summaries",
             "settings"
         ]
         guard allowed.contains(table) else {

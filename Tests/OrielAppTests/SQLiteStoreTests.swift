@@ -70,6 +70,25 @@ final class SQLiteStoreTests: XCTestCase {
         }
     }
 
+    private func millis(
+        _ year: Int,
+        _ month: Int,
+        _ day: Int,
+        hour: Int = 9,
+        minute: Int = 0
+    ) throws -> Int64 {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = hour
+        components.minute = minute
+        components.second = 0
+        let date = try XCTUnwrap(components.date)
+        return Int64(date.timeIntervalSince1970 * 1000)
+    }
+
     func testFreshDatabaseCreatesSchemaAndSupportsProjectAndEntryCRUD() throws {
         let project = try XCTUnwrap(
             try store.request(
@@ -632,7 +651,8 @@ final class SQLiteStoreTests: XCTestCase {
                     "aiScreenshotDailyCap": 100,
                     "aiScreenshotTimeoutSeconds": 20,
                     "aiScreenshotModelMode": "override",
-                    "aiScreenshotOpenRouterModel": "google/gemini-3.1-flash-lite"
+                    "aiScreenshotOpenRouterModel": "google/gemini-3.1-flash-lite",
+                    "aiScreenshotSensitiveApps": ["Banking App", "com.example.secret"]
                 ]
             ) as? [String: Any]
         )
@@ -653,6 +673,7 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(updated["aiScreenshotTimeoutSeconds"] as? Int, 20)
         XCTAssertEqual(updated["aiScreenshotModelMode"] as? String, "override")
         XCTAssertEqual(updated["aiScreenshotOpenRouterModel"] as? String, "google/gemini-3.1-flash-lite")
+        XCTAssertEqual(updated["aiScreenshotSensitiveApps"] as? [String], ["Banking App", "com.example.secret"])
 
         store = nil
         store = try SQLiteStore(databaseURL: directory.appendingPathComponent("Oriel.sqlite"))
@@ -673,6 +694,7 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(persisted["aiScreenshotTimeoutSeconds"] as? Int, 20)
         XCTAssertEqual(persisted["aiScreenshotModelMode"] as? String, "override")
         XCTAssertEqual(persisted["aiScreenshotOpenRouterModel"] as? String, "google/gemini-3.1-flash-lite")
+        XCTAssertEqual(persisted["aiScreenshotSensitiveApps"] as? [String], ["Banking App", "com.example.secret"])
     }
 
     func testSettingsExposeDefaultAiPreferences() throws {
@@ -690,6 +712,139 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(settings["aiScreenshotDailyCap"] as? Int, 100)
         XCTAssertEqual(settings["aiScreenshotTimeoutSeconds"] as? Int, 20)
         XCTAssertEqual(settings["aiScreenshotModelMode"] as? String, "askAI")
+        XCTAssertEqual(settings["aiScreenshotSensitiveApps"] as? [String], [
+            "1password",
+            "bitwarden",
+            "dashlane",
+            "keychain access",
+            "lastpass",
+            "proton pass",
+            "keeper password",
+            "authenticator"
+        ])
+    }
+
+    func testDailyAISummariesPersistExportAndRestoreWithoutSecretsOrScreenshots() throws {
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-07",
+            "status": "succeeded",
+            "provider": "openai",
+            "model": "gpt-5.2",
+            "summary": [
+                "text": "Focused implementation work.",
+                "highlights": ["Implemented AI settings"],
+                "uncertainties": []
+            ],
+            "sourceSummaryCount": 3
+        ])
+
+        let row = try XCTUnwrap(try store.request(operation: "dailyAISummaries.get", payload: ["date": "2026-06-07"]) as? [String: Any])
+        XCTAssertEqual(row["date"] as? String, "2026-06-07")
+        XCTAssertEqual(row["status"] as? String, "succeeded")
+        XCTAssertEqual(row["sourceSummaryCount"] as? Int64, 3)
+        let summary = try XCTUnwrap(row["summary"] as? [String: Any])
+        XCTAssertEqual(summary["text"] as? String, "Focused implementation work.")
+
+        let archive = try XCTUnwrap(try store.request(operation: "data.export", payload: [:]) as? [String: Any])
+        let encoded = String(data: try JSONSerialization.data(withJSONObject: archive), encoding: .utf8) ?? ""
+        XCTAssertTrue(encoded.contains("dailyAISummaries"))
+        XCTAssertFalse(encoded.contains("apiKey"))
+        XCTAssertFalse(encoded.contains("Authorization"))
+        XCTAssertFalse(encoded.contains("data:image"))
+        XCTAssertFalse(encoded.contains("base64"))
+
+        let restored = try SQLiteStore(databaseURL: directory.appendingPathComponent("RestoredDaily.sqlite"))
+        try restored.restoreArchive(archive)
+        let restoredRow = try XCTUnwrap(try restored.request(operation: "dailyAISummaries.get", payload: ["date": "2026-06-07"]) as? [String: Any])
+        XCTAssertEqual(restoredRow["status"] as? String, "succeeded")
+        XCTAssertEqual((restoredRow["summary"] as? [String: Any])?["text"] as? String, "Focused implementation work.")
+    }
+
+    func testDailyAISummariesListMergesGeneratedFailedAndReadyDays() throws {
+        try store.recordActivity(
+            id: "ready-activity",
+            start: try millis(2026, 6, 8),
+            end: try millis(2026, 6, 8, hour: 9, minute: 20),
+            app: "Codex",
+            title: "AI Insights",
+            url: nil,
+            bundleIdentifier: "com.openai.chat",
+            appPath: "/Applications/Codex.app",
+            interactionState: "handsOn"
+        )
+        try store.upsertActivityAISummary([
+            "activityId": "ready-activity",
+            "status": "succeeded",
+            "provider": "openrouter",
+            "model": "google/gemini-3.1-flash-lite",
+            "summary": [
+                "app": "Codex",
+                "bundle_id": "com.openai.chat",
+                "window_or_page": "AI Insights",
+                "project_or_context": "Oriel",
+                "activity": "Designing AI insights",
+                "category": "engineering",
+                "action": "designing",
+                "objects": ["AI Insights"],
+                "confidence": 0.9,
+                "evidence": ["settings UI"],
+                "uncertainties": [],
+                "cloud_safe_summary": "Designed AI Insights cards.",
+                "sensitivity": "low",
+                "metadata_conflicts": []
+            ]
+        ])
+
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-07",
+            "status": "succeeded",
+            "provider": "openai",
+            "model": "gpt-5.2",
+            "summary": [
+                "text": "Focused implementation work.",
+                "highlights": ["Improved AI Insights"]
+            ],
+            "sourceSummaryCount": 3
+        ])
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-06",
+            "status": "failed",
+            "errorMessage": "Provider unavailable.",
+            "sourceSummaryCount": 2
+        ])
+
+        let rows = try XCTUnwrap(try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": "2026-06-06",
+            "endDate": "2026-06-08"
+        ]) as? [[String: Any]])
+
+        XCTAssertEqual(rows.compactMap { $0["date"] as? String }, ["2026-06-08", "2026-06-07", "2026-06-06"])
+        XCTAssertEqual(rows.first?["status"] as? String, "ready")
+        XCTAssertEqual(rows.first?["sourceSummaryCount"] as? Int, 1)
+        XCTAssertEqual(rows[1]["status"] as? String, "succeeded")
+        XCTAssertEqual((rows[1]["summary"] as? [String: Any])?["text"] as? String, "Focused implementation work.")
+        XCTAssertEqual(rows[2]["status"] as? String, "failed")
+    }
+
+    func testDailyAISummariesListExcludesEmptyByDefaultAndValidatesRange() throws {
+        let rows = try XCTUnwrap(try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": "2026-06-06",
+            "endDate": "2026-06-08"
+        ]) as? [[String: Any]])
+        XCTAssertEqual(rows.count, 0)
+
+        let rowsWithEmpty = try XCTUnwrap(try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": "2026-06-06",
+            "endDate": "2026-06-08",
+            "includeEmpty": true
+        ]) as? [[String: Any]])
+        XCTAssertEqual(rowsWithEmpty.count, 3)
+        XCTAssertTrue(rowsWithEmpty.allSatisfy { ($0["status"] as? String) == "empty" })
+
+        XCTAssertThrowsError(try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": "2026-01-01",
+            "endDate": "2027-02-01"
+        ]))
     }
 
     func testScreenshotSummaryProviderFallsBackToAskAIProvider() throws {
@@ -731,6 +886,30 @@ final class SQLiteStoreTests: XCTestCase {
             TrackingController.screenshotSummaryModel(provider: .google, settings: [:]),
             "gemini-3.5-flash"
         )
+    }
+
+    func testScreenshotSensitiveMatcherUsesScreenshotOnlySettings() throws {
+        XCTAssertTrue(TrackingController.isScreenshotSensitive(
+            app: "Banking App",
+            title: "Dashboard",
+            bundleIdentifier: "com.bank.desktop",
+            appPath: "/Applications/Banking App.app",
+            settings: ["aiScreenshotSensitiveApps": ["Banking App"]]
+        ))
+        XCTAssertTrue(TrackingController.isScreenshotSensitive(
+            app: "Safari",
+            title: "Work",
+            bundleIdentifier: "com.example.secret",
+            appPath: "/Applications/Safari.app",
+            settings: ["aiScreenshotSensitiveApps": ["com.example.secret"]]
+        ))
+        XCTAssertFalse(TrackingController.isScreenshotSensitive(
+            app: "Safari",
+            title: "Client Portal",
+            bundleIdentifier: "com.apple.Safari",
+            appPath: "/Applications/Safari.app",
+            settings: ["aiScreenshotSensitiveApps": ["Banking App"]]
+        ))
     }
 
     func testSettingsExposeDefaultTitleCleanupRules() throws {

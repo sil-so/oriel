@@ -17,7 +17,13 @@ class FakeClassList {
   }
 
   toggle(className, force) {
-    if (force) {
+    if (force === undefined) {
+      if (this.classes.has(className)) {
+        this.classes.delete(className);
+      } else {
+        this.classes.add(className);
+      }
+    } else if (force) {
       this.classes.add(className);
     } else {
       this.classes.delete(className);
@@ -32,18 +38,38 @@ class FakeClassList {
 class FakeElement {
   constructor(id) {
     this.id = id;
+    this.tagName = String(id || '').toUpperCase();
     this.classList = new FakeClassList();
     this.listeners = {};
     this.className = '';
     this.value = '';
     this.checked = false;
-    this.textContent = '';
-    this.innerText = '';
+    this._textContent = '';
+    this._innerText = '';
     this.style = {};
     this.attributes = {};
     this.dataset = {};
+    this.children = [];
     this.disabled = false;
+    this.hidden = false;
     this.focused = false;
+  }
+
+  get textContent() {
+    const childText = (this.children || []).map(child => child.textContent || '').join('');
+    return `${this._textContent || ''}${childText}`;
+  }
+
+  set textContent(value) {
+    this._textContent = String(value || '');
+  }
+
+  get innerText() {
+    return this.textContent || this._innerText || '';
+  }
+
+  set innerText(value) {
+    this._innerText = String(value || '');
   }
 
   setAttribute(name, value) {
@@ -76,8 +102,11 @@ class FakeElement {
 
   appendChild(child) {
     this.child = child;
-    this.children ||= [];
     this.children.push(child);
+  }
+
+  append(...children) {
+    children.forEach(child => this.appendChild(child));
   }
 
   replaceChildren(...children) {
@@ -160,6 +189,26 @@ test('today navigation refreshes current date before jumping to current time', a
   assert.deepEqual(calls, ['display', 'refresh', 'jump', 'close']);
 });
 
+test('top workspace navigation includes AI Insights tab and workspace', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const aiInsightsMarkup = markup.slice(
+    markup.indexOf('id="ai-insights-workspace"'),
+    markup.indexOf('<!-- MODAL: Create/Edit Time Entry -->')
+  );
+
+  assert.match(markup, /id="tab-ai-insights"[\s\S]*AI Insights/);
+  assert.match(markup, /id="ai-insights-workspace"/);
+  assert.match(markup, /id="ai-insights-card-grid"/);
+  assert.doesNotMatch(markup, /id="ai-insights-range-filter"/);
+  assert.doesNotMatch(markup, /id="ai-insights-status-filter"/);
+  assert.doesNotMatch(markup, /id="ai-insights-summary-date-trigger"/);
+  assert.doesNotMatch(aiInsightsMarkup, />Jump to date<|>Range<|>Status</);
+  assert.doesNotMatch(markup, /<input[^>]*class="field"[^>]*id="ai-insights-summary-date"/);
+  assert.doesNotMatch(markup, /id="ai-insights-generate-button"/);
+  assert.doesNotMatch(markup, /id="ai-insights-summary-content"/);
+  assert.match(markup, /id="ai-insights-detail-modal"/);
+});
+
 function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmResult = true } = {}) {
   const elements = new Map();
   const hoverCalls = [];
@@ -175,6 +224,7 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     elTabTimeline: element('tab-timeline'),
     elTabProjects: element('tab-projects'),
     elTabStats: element('tab-stats'),
+    elTabAiInsights: element('tab-ai-insights'),
     elTimelineModeSwitch: element('timeline-mode-switch'),
     elTimelineModeDay: element('timeline-mode-day'),
     elTimelineModeWeek: element('timeline-mode-week'),
@@ -182,6 +232,7 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     elWeekTimelineWorkspace: element('week-timeline-workspace'),
     elProjectsWorkspace: element('projects-workspace'),
     elStatsWorkspace: element('stats-workspace'),
+    elAiInsightsWorkspace: element('ai-insights-workspace'),
     elPopupCloseBtn: element('popup-close'),
     elDateDisplay: element('date-display'),
     elDatePickerInput: element('date-picker-input'),
@@ -207,6 +258,7 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
   [
     'confirm-modal',
     'project-details-modal',
+    'ai-insights-detail-modal',
     'settings-modal',
     'rules-modal',
     'project-modal',
@@ -224,10 +276,13 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
       readyState: 'loading',
       documentElement: { dataset: {} },
       body: element('body'),
-      addEventListener() {},
+      addEventListener(type, listener) {
+        windowListeners[`document:${type}`] ||= [];
+        windowListeners[`document:${type}`].push(listener);
+      },
       getElementById: element,
-      createElement() {
-        return new FakeElement('created');
+      createElement(tag) {
+        return new FakeElement(tag);
       }
     },
     localStorage: {
@@ -264,6 +319,11 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     } : undefined,
     URL,
     cleanTitle: title => title,
+    getFormattedDate(date) {
+      const offset = date.getTimezoneOffset();
+      const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+      return localDate.toISOString().split('T')[0];
+    },
     getActivityIconHTML: () => '',
     alert(message) {
       context.lastAlert = message;
@@ -357,12 +417,28 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     fetchCalls,
     nativeRequests,
     stored,
+    windowListeners,
+    async dispatchDocument(type, event = {}) {
+      for (const listener of windowListeners[`document:${type}`] || []) {
+        await listener(event);
+      }
+    },
     async dispatchWindow(type, event = {}) {
       for (const listener of windowListeners[type] || []) {
         await listener(event);
       }
     }
   };
+}
+
+function findChild(root, predicate) {
+  const stack = [...(root?.children || [])];
+  while (stack.length) {
+    const child = stack.shift();
+    if (predicate(child)) return child;
+    stack.push(...(child.children || []));
+  }
+  return null;
 }
 
 test('opening Projects hides timeline date navigation and closes its open picker', () => {
@@ -372,6 +448,21 @@ test('opening Projects hides timeline date navigation and closes its open picker
 
   assert.equal(element('date-navigation').classList.contains('hidden'), true);
   assert.equal(element('date-picker-popover').classList.contains('hidden'), true);
+});
+
+test('header settings control stays outside hidden date navigation', () => {
+  const markup = fs.readFileSync('index.html', 'utf8');
+  const dateNavigation = markup.slice(
+    markup.indexOf('id="date-navigation"'),
+    markup.indexOf('id="header-actions"')
+  );
+  const headerActions = markup.slice(
+    markup.indexOf('id="header-actions"'),
+    markup.indexOf('</div>\n    </div>\n\n    <!-- Main Content Workspace -->')
+  );
+
+  assert.doesNotMatch(dateNavigation, /id="btn-settings"/);
+  assert.match(headerActions, /id="btn-settings"/);
 });
 
 test('day navigation clears selected activity blocks before loading another day', async () => {
@@ -420,6 +511,283 @@ test('workspace tabs expose semantic selected state rather than rewritten utilit
   assert.equal(dom.elTabTimeline.attributes['aria-selected'], 'false');
 });
 
+test('sidebar collapse control is only visible on the Timeline workspace', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': []
+    }
+  });
+  const toggle = element('btn-toggle-work-times');
+  const settings = element('btn-settings');
+
+  assert.equal(toggle.classList.contains('hidden'), false);
+  assert.equal(toggle.hidden, false);
+  assert.equal(settings.classList.contains('hidden'), false);
+
+  await dom.elTabProjects.click();
+  assert.equal(toggle.classList.contains('hidden'), true);
+  assert.equal(toggle.hidden, true);
+  assert.equal(settings.classList.contains('hidden'), false);
+
+  await dom.elTabStats.click();
+  assert.equal(toggle.classList.contains('hidden'), true);
+  assert.equal(toggle.hidden, true);
+  assert.equal(settings.classList.contains('hidden'), false);
+
+  await dom.elTabAiInsights.click();
+  assert.equal(toggle.classList.contains('hidden'), true);
+  assert.equal(toggle.hidden, true);
+  assert.equal(settings.classList.contains('hidden'), false);
+
+  await dom.elTabTimeline.click();
+  assert.equal(toggle.classList.contains('hidden'), false);
+  assert.equal(toggle.hidden, false);
+  assert.equal(settings.classList.contains('hidden'), false);
+});
+
+test('AI Insights tab switches to the AI insights workspace and loads summary cards', async () => {
+  const { dom, context, element, nativeRequests } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': []
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+
+  assert.equal(context.state.currentView, 'aiInsights');
+  assert.equal(dom.elSchedulerWorkspace.classList.contains('hidden'), true);
+  assert.equal(dom.elProjectsWorkspace.classList.contains('hidden'), true);
+  assert.equal(dom.elStatsWorkspace.classList.contains('hidden'), true);
+  assert.equal(dom.elAiInsightsWorkspace.classList.contains('hidden'), false);
+  assert.equal(dom.elTabAiInsights.classList.contains('app-tab--active'), true);
+  assert.equal(element('date-navigation').classList.contains('hidden'), true);
+  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list']);
+  assert.deepEqual({ ...nativeRequests[0].payload }, {
+    startDate: '2025-05-21',
+    endDate: '2026-05-21',
+    includeEmpty: false
+  });
+});
+
+test('AI Insights renders generated, ready, and failed summary cards without uncertainty text', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-07',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: {
+            text: 'Focused implementation work in Oriel.',
+            highlights: ['Improved AI Insights'],
+            uncertainties: ['metadata mismatch']
+          }
+        },
+        {
+          date: '2026-06-08',
+          status: 'ready',
+          sourceSummaryCount: 7
+        },
+        {
+          date: '2026-06-06',
+          status: 'failed',
+          sourceSummaryCount: 2,
+          errorMessage: 'Provider unavailable.'
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const grid = element('ai-insights-card-grid');
+  assert.equal(grid.children.length, 3);
+  assert.match(grid.textContent, /Sunday, 7 June 2026/);
+  assert.doesNotMatch(grid.textContent, /Sun, 7 Jun 2026/);
+  assert.match(grid.textContent, /Focused implementation work in Oriel/);
+  assert.doesNotMatch(grid.textContent, /Improved AI Insights/);
+  assert.match(grid.textContent, /Generate daily summary/);
+  assert.match(grid.textContent, /Try again/);
+  assert.doesNotMatch(grid.textContent, /Based on \d+ screenshot activity summar/);
+  assert.doesNotMatch(grid.textContent, /Uncertainties|metadata mismatch/);
+});
+
+test('AI Insights ready card generation uses the card date and refreshes the grid', async () => {
+  let generated = false;
+  const { dom, element, nativeRequests } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': () => generated ? [
+        {
+          date: '2026-06-08',
+          status: 'succeeded',
+          sourceSummaryCount: 7,
+          summary: { text: 'Generated recap.', highlights: [] }
+        }
+      ] : [
+        {
+          date: '2026-06-08',
+          status: 'ready',
+          sourceSummaryCount: 7
+        }
+      ],
+      'dailyAISummaries.generate': payload => {
+        generated = true;
+        return {
+          date: payload.date,
+          status: 'succeeded',
+          sourceSummaryCount: 7,
+          summary: { text: 'Generated recap.', highlights: [] }
+        };
+      }
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const readyCard = element('ai-insights-card-grid').children[0];
+  const generateButton = readyCard.children.find(child => child.dataset?.action === 'generate');
+  assert.ok(generateButton);
+
+  await generateButton.click();
+  assert.deepEqual(nativeRequests.map(request => request.operation), [
+    'dailyAISummaries.list',
+    'dailyAISummaries.generate',
+    'dailyAISummaries.list'
+  ]);
+  assert.equal(nativeRequests[1].payload.date, '2026-06-08');
+  assert.match(element('ai-insights-card-grid').textContent, /Generated recap/);
+});
+
+test('AI Insights generated card Open button shows a full summary modal', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-07',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: {
+            text: 'Generated recap.\n\nHighlights:\n- One\n- Two',
+            highlights: ['One', 'Two', 'Three', 'Four', 'Five']
+          }
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const card = element('ai-insights-card-grid').children[0];
+  const openButton = findChild(card, child => child.textContent === 'Open');
+  assert.ok(openButton);
+  assert.equal(element('ai-insights-detail-modal').classList.contains('hidden'), true);
+
+  await openButton.click();
+  assert.equal(element('ai-insights-detail-modal').classList.contains('hidden'), false);
+  assert.equal(element('ai-insights-detail-title').textContent, 'Sunday, 7 June 2026');
+  assert.match(element('ai-insights-detail-body').textContent, /Generated recap/);
+  const markdownList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-card-markdown-list'));
+  assert.ok(markdownList);
+  assert.equal(markdownList.children.length, 2);
+  assert.equal(openButton.textContent, 'Open');
+});
+
+test('AI Insights generated cards use a text-only preview and render markdown lists in the detail modal', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-07',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: {
+            text: 'Focused implementation work.\n\nHighlights:\n- Improved card interactions\n- Rendered recap bullets\n\nAdditional details stayed readable.',
+            highlights: []
+          }
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const card = element('ai-insights-card-grid').children[0];
+  assert.match(card.textContent, /Focused implementation work/);
+  assert.doesNotMatch(card.textContent, /Improved card interactions|Rendered recap bullets|Additional details/);
+  assert.equal(findChild(card, child => child.tagName === 'UL'), null);
+
+  await findChild(card, child => child.textContent === 'Open').click();
+  const markdownList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-card-markdown-list'));
+  assert.ok(markdownList);
+  assert.equal(markdownList.children.length, 2);
+  assert.match(markdownList.textContent, /Improved card interactions/);
+  assert.match(markdownList.textContent, /Rendered recap bullets/);
+  assert.match(element('ai-insights-detail-body').textContent, /Additional details stayed readable/);
+});
+
+test('AI Insights generation buttons show loading state while a request is pending', async () => {
+  let resolveGenerate;
+  let generated = false;
+  const { dom, element, nativeRequests } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': () => generated ? [
+        {
+          date: '2026-06-08',
+          status: 'succeeded',
+          sourceSummaryCount: 7,
+          summary: { text: 'Generated recap.', highlights: [] }
+        }
+      ] : [
+        { date: '2026-06-08', status: 'ready', sourceSummaryCount: 7 }
+      ],
+      'dailyAISummaries.generate': payload => new Promise(resolve => {
+        resolveGenerate = () => {
+          generated = true;
+          resolve({
+            date: payload.date,
+            status: 'succeeded',
+            sourceSummaryCount: 7,
+            summary: { text: 'Generated recap.', highlights: [] }
+          });
+        };
+      })
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const readyCard = element('ai-insights-card-grid').children[0];
+  const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
+  assert.ok(generateButton);
+
+  const clickPromise = generateButton.click();
+  await Promise.resolve();
+
+  const pendingButton = findChild(element('ai-insights-card-grid').children[0], child => child.dataset?.action === 'generate');
+  assert.equal(pendingButton.disabled, true);
+  assert.equal(pendingButton.textContent, 'Generating...');
+  assert.equal(nativeRequests[1].payload.date, '2026-06-08');
+
+  resolveGenerate();
+  await clickPromise;
+  assert.match(element('ai-insights-card-grid').textContent, /Generated recap/);
+});
+
+test('AI Insights refreshes when header date navigation changes while active', async () => {
+  const { dom, element, nativeRequests } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': payload => []
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  nativeRequests.length = 0;
+
+  await element('btn-prev-day').click();
+
+  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list']);
+  assert.deepEqual({ ...nativeRequests[0].payload }, {
+    startDate: '2025-05-20',
+    endDate: '2026-05-20',
+    includeEmpty: false
+  });
+});
+
 test('settings modal reopens with current theme and brand icon preference', async () => {
   const { element } = loadMainControlsContext();
   const themeSelect = element('settings-theme-select');
@@ -453,6 +821,11 @@ test('settings modal exposes section tabs and can open directly to AI settings',
   assert.match(markup, /data-settings-section-panel="ai"[\s\S]*Screenshot Summaries/);
   assert.match(script, /window\.openSettingsModal = openSettingsModal/);
   assert.match(script, /openSettingsModal\(\{ section = 'general' \} = \{\}\)/);
+  assert.match(script, /setSettingsSection\(section\);[\s\S]*bindSettingsTooltips\(\)/);
+  assert.match(script, /hideSettingsTooltip\(\);[\s\S]*setSettingsSection/);
+  assert.match(script, /document\.addEventListener\('pointerover'[\s\S]*showSettingsTooltip/);
+  assert.match(script, /document\.addEventListener\('focusin'[\s\S]*showSettingsTooltip/);
+  assert.doesNotMatch(script, /_settingsTooltipBound/);
   assert.match(aiSettingsScript, /window\.refreshAiSettingsStatus = refreshAiSettingsStatus/);
   assert.match(aiSettingsScript, /window\.getSelectedAiProviderAndModel = getSelectedAiProviderAndModel/);
 });
@@ -464,7 +837,8 @@ test('AI settings section includes OpenRouter and screenshot summary controls', 
   const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
 
   assert.match(markup, /Provider &amp; Key/);
-  assert.match(markup, /Ask AI Model/);
+  assert.match(markup, /Ask AI &amp; AI Insights/);
+  assert.match(markup, /Used for chat in the Ask AI sidebar and generating daily summaries\./);
   assert.match(markup, /id="settings-ai-ask-provider"/);
   assert.match(markup, /data-settings-ai-provider="openrouter"[\s\S]*OpenRouter/);
   assert.match(markup, /id="settings-ai-provider-openrouter-key-state"/);

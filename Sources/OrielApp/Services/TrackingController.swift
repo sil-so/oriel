@@ -439,9 +439,16 @@ final class TrackingController {
     }
 
     private func maybeEnqueueActivitySummary(activityID: String, segment: ActiveSegment, start: Int64, end: Int64) {
-        guard segment.interactionState == .handsOn, !isSensitive(segment) else { return }
+        guard segment.interactionState == .handsOn else { return }
 
         let persistedSettings = (try? store.request(operation: "settings.get", payload: [:]) as? [String: Any]) ?? [:]
+        guard !Self.isScreenshotSensitive(
+            app: segment.app,
+            title: segment.title,
+            bundleIdentifier: segment.bundleIdentifier,
+            appPath: segment.appPath,
+            settings: persistedSettings
+        ) else { return }
         let settings = activitySummarySettings(from: persistedSettings)
         guard settings.enabled else { return }
         let durationSeconds = max(0, Int((end - start) / 1000))
@@ -653,14 +660,15 @@ final class TrackingController {
             .joined(separator: " ")
     }
 
-    private func isSensitive(_ segment: ActiveSegment) -> Bool {
-        let combined = [
-            segment.app,
-            segment.title,
-            segment.bundleIdentifier ?? "",
-            segment.appPath ?? ""
-        ].joined(separator: " ").lowercased()
-        return [
+    static func isScreenshotSensitive(
+        app: String,
+        title: String,
+        bundleIdentifier: String?,
+        appPath: String?,
+        settings: [String: Any]
+    ) -> Bool {
+        let configured = settings["aiScreenshotSensitiveApps"] as? [String]
+        let patterns = configured?.isEmpty == false ? configured! : [
             "1password",
             "bitwarden",
             "dashlane",
@@ -669,7 +677,17 @@ final class TrackingController {
             "proton pass",
             "keeper password",
             "authenticator"
-        ].contains { combined.contains($0) }
+        ]
+        let combined = [
+            app,
+            title,
+            bundleIdentifier ?? "",
+            appPath ?? ""
+        ].joined(separator: " ").lowercased()
+        return patterns
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .contains { combined.contains($0) }
     }
 
     private func storeActivityAISummaryFailure(
