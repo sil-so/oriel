@@ -1,45 +1,109 @@
 # Oriel
 
-Oriel is a privacy-first macOS time tracker. It records foreground app and
-browser activity locally, then helps turn that activity into project time
-entries without sending raw activity history to a hosted service.
+Oriel is a local-first macOS time tracker for people who need accurate project
+time without sending their activity history to a hosted service.
 
-The public source release is focused on the native macOS app path: a SwiftPM
-`Oriel.app` shell with a bundled web interface, local SQLite storage, native
-activity capture, optional Browser Companion support, and local backup/restore.
+It records foreground app and browser activity on the Mac, shows that activity
+in the Activity Stream Timeline and week view, and helps turn the raw record
+into project, task, billable, and reporting entries.
 
-## Features
+> [!NOTE]
+> Oriel is source-build today. Signed and notarized public macOS releases are
+> planned, but not available yet.
 
-- Native macOS foreground app, window title, and document URL capture.
-- Hands-on / hands-off activity states based on recent keyboard, mouse, click,
-  or scroll input.
-- Activity Stream Timeline and week views for reviewing recorded activity,
-  Activity Mix, and logged entries.
-- Project, task, billing, reporting, capture-exclusion, and auto-assignment
-  workflows.
-- Optional Chrome/Brave Browser Companion using Native Messaging.
-- Optional BYOK AI and Logo.dev icon lookups, with keys stored in macOS
-  Keychain.
-- Portable local archive export and restore.
+## Status
+
+| Area | Current state |
+| --- | --- |
+| Supported app path | SwiftPM-built `Oriel.app` |
+| Platform | macOS 14+ |
+| Storage | Local SQLite at `~/Library/Application Support/Oriel/Oriel.sqlite` |
+| Browser support | Optional Chrome/Brave Browser Companion via Native Messaging |
+| Hosted service | None |
+| CI | GitHub Actions for Node and Swift tests |
+| License | MIT |
+
+## What Oriel Does
+
+- Records foreground app, window title, document URL, browser tab, and activity
+  time.
+- Separates hands-on and hands-off activity using recent keyboard, mouse,
+  click, and scroll input.
+- Provides the Activity Stream Timeline, Activity Mix, and week view for
+  reviewing captured work.
+- Converts activity into project time entries with tasks, billable defaults,
+  hourly/fixed-rate project settings, and reporting.
+- Supports auto-assignment rules for app, title, and URL patterns.
+- Supports capture exclusions for sensitive apps, titles, or URLs, including
+  one-time historical cleanup.
+- Exports and restores portable local archives.
+- Offers optional BYOK AI workflows for selected-day chat, entry suggestions,
+  screenshot summaries, and daily insights.
 
 ## Privacy Model
 
-Oriel is local-first. Activity history, projects, time entries, settings, and
-backup archives stay on the user's Mac by default.
+> [!IMPORTANT]
+> Oriel is local-first by default. Activity history, projects, time entries,
+> settings, and archives stay on the user's Mac unless the user enables an
+> optional network feature.
 
-- Native app data: `~/Library/Application Support/Oriel/Oriel.sqlite`
-- Native app caches: `~/Library/Caches/Oriel/`
-- API keys: macOS Keychain
-- Runtime data, build output, screenshots, logs, archives, local SQLite files,
-  and credentials are ignored by git.
+| Feature | Default | What can leave the Mac |
+| --- | --- | --- |
+| Core activity tracking | On after running the app | Nothing by design |
+| Logo.dev icons | Off | Website domains, only when enabled |
+| Ask AI | Off until a provider key is configured | Selected-day context when the user asks |
+| AI screenshot summaries | Off | Compressed screenshots and activity metadata when enabled |
+| AI model refresh | Manual | Provider model-list request when requested |
 
-Logo.dev and AI provider calls are opt-in. Enabling branded website icons sends
-website domains to Logo.dev. Using Ask AI sends selected-day context to the
-configured provider. Enabling AI screenshot summaries sends compressed
-screenshots and activity metadata to the configured provider, but Oriel does not
-store raw screenshots or provider responses.
+Oriel stores API keys in macOS Keychain. It does not store raw screenshots or
+raw AI provider responses. The public source release does not include analytics
+or telemetry.
 
 See [PRIVACY.md](./PRIVACY.md) for the detailed data-handling model.
+
+<details>
+<summary>Optional network features</summary>
+
+Oriel's networked features are opt-in and provider-specific:
+
+- **Logo.dev icons:** sends website domains to Logo.dev when branded website
+  icons are enabled and a publishable key is saved.
+- **Ask AI:** sends the prompt and selected-day context to the configured AI
+  provider when the user submits a question.
+- **AI screenshot summaries:** captures, downscales, and JPEG-compresses a
+  screenshot in memory, then sends it with activity metadata to the selected
+  provider. Oriel stores only validated summary JSON and request metadata needed
+  for local summaries.
+- **AI model refresh:** contacts the selected provider only when the user asks
+  Oriel to refresh available models.
+
+Review each provider's own privacy and data-use terms before enabling these
+features.
+
+</details>
+
+## Architecture
+
+Oriel is a native macOS app with a bundled local web interface.
+
+```text
+Oriel.app
+  -> WKWebView bundled UI
+  -> OrielBridge native request/reply boundary
+  -> SQLiteStore at ~/Library/Application Support/Oriel/Oriel.sqlite
+```
+
+| Path | Responsibility |
+| --- | --- |
+| `Sources/OrielApp` | App shell, WebKit host, bridge, capture, preferences, Keychain, AI, icons, SQLite persistence |
+| `Sources/OrielBrowserBridge` | Native Messaging helper for the optional browser extension |
+| `index.html`, `css/`, `js/` | Bundled frontend UI |
+| `assets/vendor/` | Vendored UI font/icon assets, so normal app use does not rely on CDNs |
+| `server.js` | Loopback-only development fallback, not a production service boundary |
+| `Tests/OrielAppTests/` | Swift tests for native services and persistence |
+| `test/` | Node test suite for frontend, bridge, safety, and compatibility behavior |
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for more detail.
 
 ## Requirements
 
@@ -61,11 +125,13 @@ npm test
 ```
 
 `./script/build_and_run.sh` builds `OrielApp` and `OrielBrowserBridge`, stages a
-signed local `build/Oriel.app`, stops stale local Oriel app/helper processes,
-and opens the rebuilt app. Use `./script/build_and_run.sh --verify` to build
-and stage without launching.
+local `build/Oriel.app`, signs it for local execution, stops stale local
+app/helper processes, and opens the rebuilt app.
 
-## Browser Companion
+Use `./script/build_and_run.sh --verify` to build and stage without launching.
+
+<details>
+<summary>Browser Companion developer setup</summary>
 
 The Browser Companion is currently a developer setup for unpacked Chrome/Brave
 extension testing.
@@ -77,45 +143,49 @@ extension testing.
 5. In Oriel Preferences, open Developer Browser Companion and enable the
    identifier.
 
-A future public release should use a Chrome Web Store extension with a finalized
-extension identifier.
+A Chrome Web Store extension with a finalized identifier is planned.
 
-## Project Layout
+</details>
 
-```text
-Sources/OrielApp/          Native app host, bridge, capture, services, SQLite
-Sources/OrielBrowserBridge Native Messaging helper
-Tests/OrielAppTests/       Swift tests for native services and persistence
-assets/brand/              App-used brand assets
-assets/vendor/             Vendored UI font/icon assets
-css/                       Frontend styles
-extension/                 Optional Browser Companion source
-js/                        Bundled frontend application code
-script/                    Build and asset helper scripts
-test/                      Node test suite
-```
+## Verification
 
-The native app is the supported path. The Node HTTP runtime remains in the tree
-as a local development fallback for the bundled web UI and compatibility tests;
-it is loopback-only and is not a production service boundary.
-
-## Tests
+For most changes, run:
 
 ```bash
+git diff --check
 npm test
 swift test
-./script/build_and_run.sh
 ```
 
 Run `npm run build:assets` after changing Tailwind input, vendored frontend
-asset generation, or package dependencies.
+assets, or package dependencies.
+
+Run `./script/build_and_run.sh` after app changes when you need to verify the
+running local app matches the source.
+
+## Maintainer Surface
+
+Oriel records local activity data, so privacy and security review are part of
+normal maintenance.
+
+| Area | Current coverage |
+| --- | --- |
+| Public CI | Node and Swift tests on GitHub Actions |
+| Contribution flow | [CONTRIBUTING.md](./CONTRIBUTING.md), issue templates, PR template |
+| Privacy model | [PRIVACY.md](./PRIVACY.md), `.gitignore` protections for runtime/private artifacts |
+| Security reporting | [SECURITY.md](./SECURITY.md) |
+| High-risk code paths | Capture, exclusions, SQLite storage, portable archives, Keychain, Native Messaging, AI, Logo.dev, screenshots, packaging |
+
+Do not include real activity history, full browser URLs, screenshots with
+private data, credentials, local SQLite files, logs, archives, signing material,
+or private local paths in issues, PRs, tests, fixtures, or documentation.
 
 ## Roadmap
 
 - Replace remaining transitional Node fallback paths with native-only flows.
 - Publish the Browser Companion through the Chrome Web Store.
-- Add mature signed/notarized macOS distribution.
-- Add public CI and code scanning.
+- Add signed/notarized macOS distribution.
+- Expand public CI and code scanning.
 
 ## Contributing
 
