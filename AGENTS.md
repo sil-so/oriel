@@ -49,4 +49,8 @@ maintainable, and easy to review.
 - Keep public interfaces small and behavior explicit.
 - Update docs when setup, public behavior, privacy behavior, or contribution
   workflow changes.
+- For UI design-system work, treat `PRODUCT.md`,
+  `docs/design-system.md`, and `docs/ui-consistency-audit.md` as the source of
+  truth. Preserve the neutral dark `graphite` direction, avoid new UI
+  frameworks, and keep screenshots/private activity artifacts out of commits.
 - Keep generated build products and scratch artifacts out of commits.
