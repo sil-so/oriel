@@ -193,6 +193,7 @@
                             <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">URL / Host</span>
                             <a href="#" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:underline truncate" id="popup-url">https://github.com</a>
                         </div>
+                        <div id="popup-single-children-container" class="hidden"></div>
                     </div>
 
                     <!-- Multi details layout -->
@@ -326,6 +327,18 @@
                         <div class="work-breakdown-row text-[11px] text-gray-400">
                             <span>Non-Billable</span>
                             <span id="stat-nonbillable">0h 0m</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="unlogged-work-review surface-panel p-4 flex flex-col gap-3" id="unlogged-work-review">
+                    <div class="unlogged-work-review-header">
+                        <h3 class="font-bold text-[13px] uppercase tracking-wider text-gray-400">Unlogged Work</h3>
+                        <span class="duration-pill unlogged-work-total" id="unlogged-work-review-total">0s</span>
+                    </div>
+                    <div class="unlogged-work-list app-scrollbar-safe flex flex-col gap-2" id="unlogged-work-review-list">
+                        <div class="empty-state p-3 text-[11px]">
+                            All recorded source work is covered.
                         </div>
                     </div>
                 </div>

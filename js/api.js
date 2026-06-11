@@ -244,6 +244,7 @@ async function refreshData() {
         if (window.renderMemoryAidActivities) renderMemoryAidActivities();
         if (window.renderLoggedTimeEntries) renderLoggedTimeEntries();
         if (window.recalculateStatistics) recalculateStatistics();
+        if (window.renderUnloggedRecordedWorkReview) renderUnloggedRecordedWorkReview();
         
         if (state.currentView === 'projects' && window.renderProjectsPage) {
             renderProjectsPage();

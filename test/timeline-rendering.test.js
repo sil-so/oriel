@@ -314,6 +314,7 @@ function renderMemoryAidHtml({ activities, timelineActivities, zoom, hideEmptyAc
   };
 
   context.renderMemoryAidActivities();
+  renderMemoryAidHtml.lastContext = context;
   return renderedHtml;
 }
 
@@ -324,11 +325,17 @@ function extractActivityStyles(html) {
       const heightPxMatch = match[2].match(/height:\s*([0-9.]+)px/);
       const topCalcMatch = match[2].match(/top:\s*calc\(var\(--row-height\) \* ([0-9.]+) \+ 2px\)/);
       const heightCalcMatch = match[2].match(/height:\s*calc\(var\(--row-height\) \* ([0-9.]+) - 3px\)/);
+      const leftMatch = match[2].match(/left:\s*([^;]+);/);
+      const widthMatch = match[2].match(/width:\s*([^;]+);/);
+      const rightMatch = match[2].match(/right:\s*([^;]+);/);
       return {
         className: match[1],
         style: match[2],
         top: topPxMatch ? Number(topPxMatch[1]) : (topCalcMatch ? Number(topCalcMatch[1]) * 40 + 2 : null),
         height: heightPxMatch ? Number(heightPxMatch[1]) : (heightCalcMatch ? Number(heightCalcMatch[1]) * 40 - 3 : null),
+        left: leftMatch ? leftMatch[1].trim() : null,
+        width: widthMatch ? widthMatch[1].trim() : null,
+        right: rightMatch ? rightMatch[1].trim() : null,
         startCell: Number(match[3]),
         span: Number(match[4])
       };
@@ -482,6 +489,23 @@ function assertStyleMatchesRowGeometry(style, expected, message = '') {
   assert.equal((style.height + 3) % 40, 0, message ? `${message} height is row aligned` : undefined);
 }
 
+function expectedExactGeometry({ dateStart, start, end, zoom }) {
+  const rowDurationMs = zoom * 60 * 1000;
+  const startRow = Math.max(0, (start - dateStart) / rowDurationMs);
+  const endRow = Math.max(startRow, (end - dateStart) / rowDurationMs);
+
+  return {
+    top: startRow * 40 + 2,
+    height: Math.max(1, (endRow - startRow) * 40 - 3)
+  };
+}
+
+function assertStyleNearlyMatchesGeometry(style, expected, message = '') {
+  const prefix = message ? `${message} ` : '';
+  assert.ok(Math.abs(style.top - expected.top) < 0.01, `${prefix}top expected ${expected.top}, got ${style.top}`);
+  assert.ok(Math.abs(style.height - expected.height) < 0.01, `${prefix}height expected ${expected.height}, got ${style.height}`);
+}
+
 function assertNoOverlappingBlockGeometry(styles, message = '') {
   const sortedStyles = [...styles].sort((left, right) => left.top - right.top || left.height - right.height);
 
@@ -502,6 +526,12 @@ function extractGroupedEntryBounds(html) {
     start: Number(match[1]),
     end: Number(match[2])
   };
+}
+
+function extractGroupedEntryIds(html) {
+  const match = html.match(/data-group-ids="([^"]+)"/);
+  assert.ok(match, 'Expected grouped entry IDs in rendered HTML');
+  return JSON.parse(decodeURIComponent(match[1]));
 }
 
 function extractFirstTimeEntryBlockHtml(html) {
@@ -812,20 +842,39 @@ function extractActivityOverlaps(html, title) {
 
   const blockStart = html.lastIndexOf('<div class="activity-block', titleIndex);
   const blockEnd = html.indexOf('<button class="activity-quick-add', titleIndex);
-  const overlapsMatch = html.slice(blockStart, blockEnd).match(/data-overlaps="([^"]+)"/);
-  assert.ok(overlapsMatch, `Expected overlaps for ${title}`);
-  return JSON.parse(decodeURIComponent(overlapsMatch[1]));
+  const blockHtml = html.slice(blockStart, blockEnd);
+  const overlapsMatch = blockHtml.match(/data-overlaps="([^"]+)"/);
+  if (overlapsMatch) {
+    return JSON.parse(decodeURIComponent(overlapsMatch[1]));
+  }
+
+  const overlapKeyMatch = blockHtml.match(/data-overlap-key="([^"]+)"/);
+  assert.ok(overlapKeyMatch, `Expected overlaps for ${title}`);
+  return renderMemoryAidHtml.lastContext.getActivityBlockDetailOverlaps({
+    dataset: { overlapKey: overlapKeyMatch[1] }
+  });
 }
 
 function countActivityIcon(html, app) {
   return [...html.matchAll(new RegExp(`data-icon="${app}"`, 'g'))].length;
 }
 
-function renderActivityBlockChromeHtml({ app = 'Codex', title = 'Codex', url = '', overlaps, startCell = 153, span = 3, cleanTitle = title => title }) {
+function renderActivityBlockChromeHtml({
+  app = 'Codex',
+  title = 'Codex',
+  url = '',
+  overlaps,
+  startCell = 153,
+  span = 3,
+  cleanTitle = title => title,
+  zoom = 5,
+  blockOverrides = {},
+  iconFactory = null
+}) {
   const context = loadTimelineContext();
-  context.state.zoom = 5;
+  context.state.zoom = zoom;
   context.cleanTitle = cleanTitle;
-  context.getActivityIconHTML = (iconApp) => `<span class="fake-icon" data-icon="${iconApp}"></span>`;
+  context.getActivityIconHTML = iconFactory || ((iconApp) => `<span class="fake-icon" data-icon="${iconApp}"></span>`);
   return context.createActivityBlockHTML({
     startCell,
     span,
@@ -834,22 +883,63 @@ function renderActivityBlockChromeHtml({ app = 'Codex', title = 'Codex', url = '
     url,
     appPath: '',
     bundleId: '',
-    duration: span * 5 * 60 * 1000,
-    overlaps
+    duration: span * zoom * 60 * 1000,
+    overlaps,
+    ...blockOverrides
   });
 }
 
-function renderMultipleActivitiesPopup({ overlaps, app = 'Brave Browser', title = 'Brave Browser', url = '', startCell = 118, span = 3, cleanTitle = title => title }) {
+function renderMultipleActivitiesPopup({
+  overlaps,
+  app = 'Brave Browser',
+  title = 'Brave Browser',
+  url = '',
+  startCell = 118,
+  span = 3,
+  cleanTitle = title => title,
+  zoom = 5,
+  datasetOverrides = {}
+}) {
   const context = loadTimelineContext();
+  context.state.zoom = zoom;
   let renderedMultiList = '';
+  let renderedSingleChildren = '';
   let modalArgs = null;
-  const createClassList = () => ({
-    add() {},
-    remove() {},
-    contains() {
-      return false;
-    }
-  });
+  const popupRows = [];
+  const createClassList = (initialClasses = []) => {
+    const classes = new Set(initialClasses);
+    return {
+      add: (...classNames) => classNames.forEach(className => classes.add(className)),
+      remove: (...classNames) => classNames.forEach(className => classes.delete(className)),
+      contains: className => classes.has(className),
+      toggle(className, force) {
+        const shouldAdd = typeof force === 'boolean' ? force : !classes.has(className);
+        if (shouldAdd) {
+          classes.add(className);
+        } else {
+          classes.delete(className);
+        }
+        return shouldAdd;
+      }
+    };
+  };
+  const createButton = initialClasses => {
+    const listeners = {};
+    const icon = { className: '' };
+    return {
+      classList: createClassList(initialClasses),
+      addEventListener(type, listener) {
+        listeners[type] = listener;
+      },
+      querySelector(selector) {
+        return selector === 'i' ? icon : null;
+      },
+      setAttribute() {},
+      click() {
+        listeners.click?.({ stopPropagation() {}, preventDefault() {} });
+      }
+    };
+  };
 
   context.DOM.elPopupDuration = { innerText: '', title: '' };
   context.DOM.elPopupRange = { innerText: '' };
@@ -858,18 +948,80 @@ function renderMultipleActivitiesPopup({ overlaps, app = 'Brave Browser', title 
   context.DOM.elPopupTitle = { innerText: '' };
   context.cleanTitle = cleanTitle;
   context.DOM.elPopupSingleDetails = { classList: createClassList(), querySelector: () => null };
+  context.DOM.elPopupSingleChildrenContainer = {
+    classList: createClassList(['hidden']),
+    set innerHTML(value) {
+      renderedSingleChildren = value;
+      popupRows.length = 0;
+      for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"(?:[^>]*data-popup-child-index="(\d+)")?/g)) {
+        const nextRowIndex = value.indexOf('data-popup-overlap-index="', match.index + 1);
+        const rowHtml = value.slice(match.index, nextRowIndex === -1 ? value.length : nextRowIndex);
+        const selectButton = rowHtml.includes('popup-activity-select')
+          ? createButton(['popup-activity-select', 'activity-checkbox'])
+          : null;
+        const quickAddButton = rowHtml.includes('popup-activity-quick-add')
+          ? createButton(['popup-activity-quick-add', 'activity-quick-add'])
+          : null;
+        popupRows.push({
+          dataset: {
+            popupOverlapIndex: match[1],
+            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] })
+          },
+          classList: createClassList(['popup-activity-row']),
+          querySelector(selector) {
+            if (selector === '.popup-activity-select') return selectButton;
+            if (selector === '.popup-activity-quick-add') return quickAddButton;
+            return null;
+          }
+        });
+      }
+    },
+    get innerHTML() {
+      return renderedSingleChildren;
+    },
+    querySelectorAll(selector) {
+      return selector === '[data-popup-overlap-index]' ? popupRows : [];
+    }
+  };
   context.DOM.elPopupMultiDetails = { classList: createClassList() };
   context.DOM.elPopupUrlContainer = { classList: createClassList() };
   context.DOM.elPopupUrl = {};
   context.DOM.elPopupMultiListContainer = {
     set innerHTML(value) {
       renderedMultiList = value;
+      popupRows.length = 0;
+      for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"(?:[^>]*data-popup-child-index="(\d+)")?/g)) {
+        const nextRowIndex = value.indexOf('data-popup-overlap-index="', match.index + 1);
+        const rowHtml = value.slice(match.index, nextRowIndex === -1 ? value.length : nextRowIndex);
+        const selectButton = rowHtml.includes('popup-activity-select')
+          ? createButton(['popup-activity-select', 'activity-checkbox'])
+          : null;
+        const quickAddButton = rowHtml.includes('popup-activity-quick-add')
+          ? createButton(['popup-activity-quick-add', 'activity-quick-add'])
+          : null;
+        const expandButton = rowHtml.includes('popup-activity-expand')
+          ? createButton(['popup-activity-expand'])
+          : null;
+        popupRows.push({
+          dataset: {
+            popupOverlapIndex: match[1],
+            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] })
+          },
+          classList: createClassList(['popup-activity-row']),
+          querySelector(selector) {
+            if (selector === '.popup-activity-select') return selectButton;
+            if (selector === '.popup-activity-quick-add') return quickAddButton;
+            if (selector === '.popup-activity-expand') return expandButton;
+            return null;
+          }
+        });
+      }
     },
     get innerHTML() {
       return renderedMultiList;
     },
-    querySelectorAll() {
-      return [];
+    querySelectorAll(selector) {
+      return selector === '[data-popup-overlap-index]' ? popupRows : [];
     }
   };
   context.DOM.elPopupActivityMixContainer = { classList: createClassList(), setAttribute() {}, removeAttribute() {} };
@@ -891,7 +1043,8 @@ function renderMultipleActivitiesPopup({ overlaps, app = 'Brave Browser', title 
       url,
       appPath: '',
       bundleId: '',
-      overlaps: encodeURIComponent(JSON.stringify(overlaps))
+      overlaps: encodeURIComponent(JSON.stringify(overlaps)),
+      ...datasetOverrides
     }
   });
 
@@ -900,8 +1053,14 @@ function renderMultipleActivitiesPopup({ overlaps, app = 'Brave Browser', title 
     get renderedMultiList() {
       return renderedMultiList;
     },
+    get renderedSingleChildren() {
+      return renderedSingleChildren;
+    },
     get modalArgs() {
       return modalArgs;
+    },
+    get popupRows() {
+      return popupRows;
     }
   };
 }
@@ -911,6 +1070,12 @@ test('cleanTitle strips Brave Base profile suffixes', () => {
 
   assert.equal(context.cleanTitle('Facebook - Brave - Base'), 'Facebook');
   assert.equal(context.cleanTitle('facebook - brave - base'), 'facebook');
+});
+
+test('frontend API base is relative for native bridge and private audit servers', () => {
+  const context = loadTitleCleaningContext();
+
+  assert.equal(context.API_BASE, '/api');
 });
 
 test('cleanTitle applies default editable cleanup rules with app and URL scopes', () => {
@@ -1561,7 +1726,7 @@ test('activity-stream assignments project onto current zoom rows with matching s
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['23 min']);
 });
 
-test('auto-assigned captures project to matching secondary row without expanding to owner block envelope', () => {
+test('auto-assigned captures use exact assignment duration at one-minute zoom', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }];
   const orielStart = dateStart + (22 * 60 + 30) * 60 * 1000;
@@ -1569,7 +1734,7 @@ test('auto-assigned captures project to matching secondary row without expanding
   const codexStart = orielStart + 28 * 1000;
   const codexEnd = codexStart + 61 * 1000;
   const html = renderLoggedTimeEntriesHtml({
-    zoom: 5,
+    zoom: 1,
     projects,
     activities: [
       {
@@ -1596,11 +1761,11 @@ test('auto-assigned captures project to matching secondary row without expanding
 
   const styles = extractEntryStyles(html);
   assert.equal(styles.length, 1);
-  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
     dateStart,
-    start: orielStart,
-    end: orielStart + 5 * 60 * 1000,
-    zoom: 5
+    start: codexStart,
+    end: codexEnd,
+    zoom: 1
   }));
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min']);
 });
@@ -1675,7 +1840,7 @@ test('same project auto-rule entries merge across adjacent display rows', () => 
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
 });
 
-test('near-contiguous auto-rule capture fragments render as one assigned block', () => {
+test('auto-rule capture fragments at five-minute zoom render as a row summary', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
   const baseStart = dateStart + (10 * 60 + 45) * 60 * 1000 + 43 * 1000;
@@ -1696,14 +1861,14 @@ test('near-contiguous auto-rule capture fragments render as one assigned block',
   assert.equal(styles.length, 1);
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
-    start: dateStart + (10 * 60 + 45) * 60 * 1000,
-    end: dateStart + (11 * 60) * 60 * 1000,
+    start: ranges[0][0],
+    end: ranges.at(-1)[1],
     zoom: 5
-  }));
+  }), 'auto-rule five-minute summary');
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['11 min']);
 });
 
-test('auto-rule row aggregation merges adjacent visible rows split by hidden boundary fragments', () => {
+test('auto-rule coarse summaries merge when visible row summaries touch across hidden source gaps', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
   const firstStart = dateStart + (13 * 60 + 20) * 60 * 1000;
@@ -1746,11 +1911,11 @@ test('auto-rule row aggregation merges adjacent visible rows split by hidden bou
   assert.equal(styles.length, 1);
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
-    start: dateStart + (13 * 60 + 20) * 60 * 1000,
-    end: dateStart + (13 * 60 + 45) * 60 * 1000,
+    start: firstStart,
+    end: laterSameRowEnd,
     zoom: 5
-  }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['16 min']);
+  }), 'touching coarse auto-rule summary');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
 });
 
 test('auto-rule projection skips one-minute rows without matching breakdown activity', () => {
@@ -1799,13 +1964,12 @@ test('auto-rule projection skips one-minute rows without matching breakdown acti
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min', '2 min']);
 });
 
-test('auto-rule projection skips hidden secondary rows before a visible owner group', () => {
+test('auto-rule exact fragments stay split across non-short gaps', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
   const firstHiddenStart = dateStart + (22 * 60 + 36) * 60 * 1000 + 45 * 1000;
   const firstOwnerEnd = dateStart + (22 * 60 + 37) * 60 * 1000 + 55 * 1000;
   const bridgeHiddenStart = dateStart + (22 * 60 + 38) * 60 * 1000 + 40 * 1000;
-  const visibleOwnerStart = dateStart + (22 * 60 + 39) * 60 * 1000;
   const visibleOwnerEnd = dateStart + (22 * 60 + 44) * 60 * 1000;
   const html = renderLoggedTimeEntriesHtml({
     zoom: 1,
@@ -1839,14 +2003,20 @@ test('auto-rule projection skips hidden secondary rows before a visible owner gr
   });
   const styles = extractEntryStyles(html);
 
-  assert.equal(styles.length, 1);
-  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+  assert.equal(styles.length, 2);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
     dateStart,
-    start: visibleOwnerStart,
+    start: firstHiddenStart,
+    end: firstOwnerEnd,
+    zoom: 1
+  }), 'first auto-rule fragment');
+  assertStyleNearlyMatchesGeometry(styles[1], expectedExactGeometry({
+    dateStart,
+    start: bridgeHiddenStart,
     end: visibleOwnerEnd,
     zoom: 1
-  }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min']);
+  }), 'second auto-rule fragment');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min', '5 min']);
 });
 
 test('auto-rule projection does not merge a tiny later secondary row into a visible group', () => {
@@ -1882,8 +2052,8 @@ test('auto-rule projection does not merge a tiny later secondary row into a visi
   assert.equal(styles.length, 1);
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
-    start: dateStart + (14 * 60 + 30) * 60 * 1000,
-    end: dateStart + (14 * 60 + 35) * 60 * 1000,
+    start: codexStart,
+    end: codexEnd,
     zoom: 5
   }));
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['4 min']);
@@ -1920,8 +2090,8 @@ test('auto-rule secondary projection starts at the matching cell instead of the 
   assert.equal(styles.length, 1);
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
-    start: dateStart + 22 * 60 * 60 * 1000,
-    end: dateStart + (22 * 60 + 5) * 60 * 1000,
+    start: codexStart,
+    end: codexEnd,
     zoom: 5
   }));
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
@@ -1934,7 +2104,7 @@ test('auto-rule projected fragments stay hidden until their visible group reache
   const shortEnd = shortStart + 59 * 1000;
   const visibleStart = dateStart + (16 * 60 + 20) * 60 * 1000;
   const visibleFirstEnd = visibleStart + 30 * 1000;
-  const visibleSecondStart = visibleStart + 2 * 60 * 1000;
+  const visibleSecondStart = visibleFirstEnd + 10 * 1000;
   const visibleSecondEnd = visibleSecondStart + 31 * 1000;
   const shortHtml = renderLoggedTimeEntriesHtml({
     zoom: 5,
@@ -1956,7 +2126,14 @@ test('auto-rule projected fragments stay hidden until their visible group reache
   });
 
   assert.equal(extractEntryStyles(shortHtml).length, 0);
-  assert.equal(extractEntryStyles(visibleHtml).length, 1);
+  const visibleStyles = extractEntryStyles(visibleHtml);
+  assert.equal(visibleStyles.length, 1);
+  assertStyleMatchesRowGeometry(visibleStyles[0], expectedRowGeometry({
+    dateStart,
+    start: visibleStart,
+    end: visibleSecondEnd,
+    zoom: 5
+  }), 'visible auto-rule summary');
   assert.deepEqual(extractTimeEntryDurationLabels(visibleHtml), ['1 min']);
 });
 
@@ -1978,7 +2155,7 @@ test('auto-rule secondary snippets stay hidden until their row group reaches one
   const hiddenEnd = hiddenStart + 59 * 1000;
   const visibleFirstStart = visibleRowStart + 60 * 1000;
   const visibleFirstEnd = visibleFirstStart + 30 * 1000;
-  const visibleSecondStart = visibleRowStart + 3 * 60 * 1000;
+  const visibleSecondStart = visibleFirstEnd + 10 * 1000;
   const visibleSecondEnd = visibleSecondStart + 31 * 1000;
   const hiddenHtml = renderLoggedTimeEntriesHtml({
     zoom: 5,
@@ -2006,13 +2183,14 @@ test('auto-rule secondary snippets stay hidden until their row group reaches one
   });
 
   assert.equal(extractEntryStyles(hiddenHtml).length, 0);
-  assert.equal(extractEntryStyles(visibleHtml).length, 1);
-  assertStyleMatchesRowGeometry(extractEntryStyles(visibleHtml)[0], expectedRowGeometry({
+  const visibleStyles = extractEntryStyles(visibleHtml);
+  assert.equal(visibleStyles.length, 1);
+  assertStyleMatchesRowGeometry(visibleStyles[0], expectedRowGeometry({
     dateStart,
-    start: visibleRowStart,
-    end: visibleRowStart + 5 * 60 * 1000,
+    start: visibleFirstStart,
+    end: visibleSecondEnd,
     zoom: 5
-  }));
+  }), 'visible secondary auto-rule summary');
   assert.deepEqual(extractTimeEntryDurationLabels(visibleHtml), ['1 min']);
 });
 
@@ -2647,7 +2825,7 @@ test('weak native summary assignments project to dominant same-app document rows
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
 });
 
-test('native popup summary assignments render same-app selected duration from real Figma-shaped rows', () => {
+test('native popup summary assignments render the saved manual entry duration', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const atMs = (hours, minutes, seconds = 0, ms = 0) => (
     dateStart + (((hours * 60 + minutes) * 60 + seconds) * 1000) + ms
@@ -2847,7 +3025,7 @@ test('native popup summary assignments render same-app selected duration from re
     end: rangeEnd,
     zoom: 10
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['30 min']);
 });
 
 test('cross-zoom assignment blocks use standard styling and never overlap at any zoom level', () => {
@@ -3848,7 +4026,7 @@ test('legacy activity-stream assignment envelopes render on display rows at ever
   }
 });
 
-test('manual summary assignments with stale auto-rule flags render selected assigned duration', () => {
+test('manual summary assignments with stale auto-rule flags render saved manual duration', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
   const rangeStart = at(21, 40);
@@ -3920,7 +4098,7 @@ test('manual summary assignments with stale auto-rule flags render selected assi
 
   const html = renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom: 10, activities });
 
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['30 min']);
 });
 
 test('activity-stream assignment block without description renders project on the primary row', () => {
@@ -4220,7 +4398,7 @@ test('similar selection includes mixed rows where the selected activity is secon
   assert.equal(blocks[2].classList.contains('selected'), false);
 });
 
-test('recorded activity duration is clipped to the visible block range at each zoom level', () => {
+test('recorded activity duration preserves exact source duration at one-minute zoom', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const title = '(1) IQOS Iluma Review - YouTube';
   const activities = [
@@ -4243,8 +4421,1269 @@ test('recorded activity duration is clipped to the visible block range at each z
   const oneMinuteHtml = renderMemoryAidHtml({ activities, zoom: 1 });
   const fiveMinuteHtml = renderMemoryAidHtml({ activities, zoom: 5 });
 
-  assert.equal(extractActivityDuration(oneMinuteHtml, title), '2 min');
+  assert.equal(extractActivityDuration(oneMinuteHtml, title), '3 min');
   assert.equal(extractActivityDuration(fiveMinuteHtml, title), '2 min');
+});
+
+test('activity stream uses exact geometry only at one-minute zoom', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const start = dateStart + (18 * 60 + 30) * 60 * 1000 + 33 * 1000;
+  const end = start + 90 * 1000;
+  const activity = codexActivity(start, end);
+
+  const oneMinuteHtml = renderMemoryAidHtml({
+    zoom: 1,
+    activities: [activity],
+    timelineActivities: [activity]
+  });
+  const fiveMinuteHtml = renderMemoryAidHtml({
+    zoom: 5,
+    activities: [activity],
+    timelineActivities: [activity]
+  });
+  const tenMinuteHtml = renderMemoryAidHtml({
+    zoom: 10,
+    activities: [activity],
+    timelineActivities: [activity]
+  });
+  const oneMinuteStyles = extractActivityStyles(oneMinuteHtml);
+  const fiveMinuteStyles = extractActivityStyles(fiveMinuteHtml);
+  const tenMinuteStyles = extractActivityStyles(tenMinuteHtml);
+
+  assert.equal(oneMinuteStyles.length, 1);
+  assert.equal(fiveMinuteStyles.length, 1);
+  assert.equal(tenMinuteStyles.length, 1);
+  assertStyleNearlyMatchesGeometry(oneMinuteStyles[0], expectedExactGeometry({
+    dateStart,
+    start,
+    end,
+    zoom: 1
+  }), 'one-minute foreground run');
+  assertStyleMatchesRowGeometry(fiveMinuteStyles[0], expectedRowGeometry({
+    dateStart,
+    start,
+    end,
+    zoom: 5
+  }), 'five-minute foreground run');
+  assert.doesNotMatch(fiveMinuteStyles[0].className, /activity-block--tick/);
+  assertStyleMatchesRowGeometry(tenMinuteStyles[0], expectedRowGeometry({
+    dateStart,
+    start,
+    end,
+    zoom: 10
+  }), 'ten-minute foreground run');
+  assert.doesNotMatch(tenMinuteStyles[0].className, /activity-block--tick/);
+});
+
+test('same-app fragments interrupted by short foreground switches render one readable exact session', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const firstStart = dateStart + 10 * 60 * 60 * 1000;
+  const firstEnd = firstStart + 65 * 1000;
+  const firstInterruptionEnd = firstEnd + 10 * 1000;
+  const secondEnd = firstInterruptionEnd + 70 * 1000;
+  const secondInterruptionEnd = secondEnd + 10 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: firstEnd,
+      end: firstInterruptionEnd,
+      duration: 10 * 1000
+    },
+    codexActivity(firstInterruptionEnd, secondEnd),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: secondEnd,
+      end: secondInterruptionEnd,
+      duration: 10 * 1000
+    },
+    codexActivity(secondInterruptionEnd, secondInterruptionEnd + 25 * 1000)
+  ];
+  const html = renderMemoryAidHtml({
+    zoom: 1,
+    activities,
+    timelineActivities: activities
+  });
+  const styles = extractActivityStyles(html);
+  const codexStyles = styles.filter(style => style.className.includes('activity-block'));
+  const thirdEnd = secondInterruptionEnd + 25 * 1000;
+
+  assert.equal(styles.length, 1);
+  assertNoOverlappingBlockGeometry(styles, 'foreground activity blocks');
+  assertStyleNearlyMatchesGeometry(codexStyles[0], expectedExactGeometry({
+    dateStart,
+    start: firstStart,
+    end: thirdEnd,
+    zoom: 1
+  }), 'Codex session');
+  assert.equal([...html.matchAll(/data-title="Codex"/g)].length, 1);
+  assert.match(html, /data-active-duration-ms="160000"/);
+});
+
+test('alternating sub-minute foreground fragments do not render titleless Activity Stream lanes', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const base = dateStart + (11 * 60 + 18) * 60 * 1000;
+  const activities = [
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: base + 32 * 1000,
+      end: base + 77 * 1000,
+      duration: 45 * 1000
+    },
+    codexActivity(base + 77 * 1000, base + 84 * 1000),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: base + 84 * 1000,
+      end: base + 99 * 1000,
+      duration: 15 * 1000
+    },
+    codexActivity(base + 99 * 1000, base + 153 * 1000)
+  ];
+
+  const html = renderMemoryAidHtml({
+    zoom: 1,
+    activities,
+    timelineActivities: activities
+  });
+  const styles = extractActivityStyles(html);
+
+  assert.equal(styles.length, 0);
+  assertNoOverlappingBlockGeometry(styles, 'alternating foreground activity');
+  for (const style of styles) {
+    assert.equal(style.left, null);
+    assert.equal(style.width, null);
+    assert.equal(style.right, null);
+  }
+});
+
+test('short standalone activity fragments stay hidden instead of rendering titleless strips', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const start = dateStart + 11 * 60 * 60 * 1000;
+  const activities = [
+    {
+      start,
+      end: start + 59 * 1000,
+      app: 'Short App',
+      title: 'Short App',
+      url: ''
+    },
+    codexActivity(start + 2 * 60 * 1000, start + 2 * 60 * 1000 + 30 * 1000),
+    codexActivity(start + 2 * 60 * 1000 + 40 * 1000, start + 2 * 60 * 1000 + 71 * 1000),
+    codexActivity(start + 2 * 60 * 1000 + 80 * 1000, start + 2 * 60 * 1000 + 105 * 1000)
+  ];
+
+  const html = renderMemoryAidHtml({
+    zoom: 1,
+    activities,
+    timelineActivities: activities
+  });
+
+  assert.equal(extractActivityStyles(html).length, 1);
+  assert.doesNotMatch(html, /data-title="Short App"/);
+  assert.match(html, /data-title="Codex"/);
+});
+
+test('dense sub-minute Activity Stream fragments summarize at coarse zoom instead of rendering tick bars', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const base = dateStart + 13 * 60 * 60 * 1000;
+  const activities = [];
+
+  for (let index = 0; index < 24; index++) {
+    const fragmentStart = base + index * 30 * 1000;
+    activities.push(codexActivity(fragmentStart, fragmentStart + 20 * 1000));
+    activities.push({
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: fragmentStart + 20 * 1000,
+      end: fragmentStart + 30 * 1000,
+      duration: 10 * 1000
+    });
+  }
+
+  const html = renderMemoryAidHtml({
+    zoom: 15,
+    activities,
+    timelineActivities: activities
+  });
+  const styles = extractActivityStyles(html);
+
+  assert.equal(styles.length, 1);
+  assert.doesNotMatch(html, /activity-block--tick/);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: base,
+    end: base + 15 * 60 * 1000,
+    zoom: 15
+  }));
+});
+
+test('coarse Activity Stream same-app rows split when source activity is not continuous', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const firstStart = dateStart + 13 * 60 * 60 * 1000;
+  const firstEnd = firstStart + 20 * 60 * 1000;
+  const secondStart = dateStart + (14 * 60 + 35) * 60 * 1000;
+  const secondEnd = secondStart + 20 * 60 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    codexActivity(secondStart, secondEnd)
+  ];
+  const html = renderMemoryAidHtml({
+    zoom: 60,
+    activities,
+    timelineActivities: activities
+  });
+  const styles = extractActivityStyles(html);
+
+  assert.equal(styles.length, 2);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: firstStart,
+    end: firstEnd,
+    zoom: 60
+  }), 'first coarse activity row');
+  assertStyleMatchesRowGeometry(styles[1], expectedRowGeometry({
+    dateStart,
+    start: secondStart,
+    end: secondEnd,
+    zoom: 60
+  }), 'second coarse activity row');
+  assert.deepEqual(
+    [...html.matchAll(/data-active-duration-ms="([^"]+)"/g)].map(match => Number(match[1])),
+    [20 * 60 * 1000, 20 * 60 * 1000]
+  );
+});
+
+test('activity popup assigns exact foreground source duration instead of elapsed interruption envelope', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const firstStart = dateStart + (18 * 60 + 33) * 60 * 1000 + 10 * 1000;
+  const firstEnd = firstStart + 90 * 1000;
+  const interruptionEnd = firstEnd + 15 * 1000;
+  const secondEnd = interruptionEnd + 90 * 1000;
+  const activeDurationMs = 180 * 1000;
+  const elapsedDurationMs = secondEnd - firstStart;
+  const popup = renderMultipleActivitiesPopup({
+    app: 'Codex',
+    title: 'Codex',
+    startCell: 1113,
+    span: 4,
+    overlaps: [
+      codexActivity(firstStart, firstEnd),
+      {
+        app: 'Brave Browser',
+        title: 'Reference interruption',
+        url: 'https://example.com/reference',
+        start: firstEnd,
+        end: interruptionEnd,
+        duration: interruptionEnd - firstEnd
+      },
+      codexActivity(interruptionEnd, secondEnd)
+    ],
+    datasetOverrides: {
+      startMs: String(firstStart),
+      endMs: String(secondEnd),
+      activeDurationMs: String(activeDurationMs),
+      elapsedDurationMs: String(elapsedDurationMs),
+      interruptionCount: '1'
+    }
+  });
+
+  assert.equal(popup.context.DOM.elPopupDuration.innerText, '3 min');
+  assert.equal(popup.context.DOM.elPopupDuration.title, 'Active 3 min · elapsed 3 min · 1 interruption');
+  assert.equal(popup.context.DOM.elPopupRange.innerText, '18:33 – 18:36');
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+  assert.equal(popup.modalArgs[0], firstStart);
+  assert.equal(popup.modalArgs[1], secondEnd);
+  assert.equal(popup.modalArgs[6][0].app, 'Codex');
+  assert.equal(popup.modalArgs[6][0].duration, activeDurationMs);
+  assert.equal(popup.modalArgs[6][0].assignedDurationMs, activeDurationMs);
+  assert.notEqual(popup.modalArgs[6][0].duration, elapsedDurationMs);
+});
+
+test('auto-rule time entries aggregate short-gap exact fragments without counting interruptions', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstStart = dateStart + (18 * 60 + 33) * 60 * 1000 + 10 * 1000;
+  const firstEnd = firstStart + 70 * 1000;
+  const secondStart = firstEnd + 10 * 1000;
+  const secondEnd = secondStart + 65 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: firstEnd,
+      end: secondStart,
+      duration: secondStart - firstEnd
+    },
+    codexActivity(secondStart, secondEnd)
+  ];
+  const timeEntries = [
+    makeAutoRuleEntry({ id: 'entry-auto-1', start: firstStart, end: firstEnd }),
+    makeAutoRuleEntry({ id: 'entry-auto-2', start: secondStart, end: secondEnd })
+  ];
+
+  context.state.activities = activities;
+  context.state.timeEntries = timeEntries;
+  context.state.projects = [project];
+  const renderItems = context.buildLoggedTimeEntryRenderItems(timeEntries, 1, dateStart);
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(renderItems.length, 1);
+  assert.equal(renderItems[0].start, firstStart);
+  assert.equal(renderItems[0].end, secondEnd);
+  assert.equal(renderItems[0].durationMs, 135 * 1000);
+  assert.equal(styles.length, 1);
+  assertNoOverlappingBlockGeometry(styles, 'auto-rule session');
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: firstStart,
+    end: secondEnd,
+    zoom: 1
+  }), 'auto-rule session');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('one-minute auto-rule entries merge near-continuous same-source capture fragments', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstStart = dateStart + (10 * 60 + 12) * 60 * 1000 + 5 * 1000;
+  const firstEnd = firstStart + 45 * 1000;
+  const secondStart = firstEnd + 1000;
+  const secondEnd = secondStart + 45 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    codexActivity(secondStart, secondEnd)
+  ];
+  const timeEntries = [
+    makeAutoRuleEntry({ id: 'entry-auto-near-1', start: firstStart, end: firstEnd }),
+    makeAutoRuleEntry({ id: 'entry-auto-near-2', start: secondStart, end: secondEnd })
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: firstStart,
+    end: secondEnd,
+    zoom: 1
+  }), 'near-continuous auto-rule capture');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('auto-rule time entries render sub-minute exact fragments when session total reaches one minute', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstStart = dateStart + (15 * 60 + 5) * 60 * 1000;
+  const firstEnd = firstStart + 20 * 1000;
+  const secondStart = firstEnd + 10 * 1000;
+  const secondEnd = secondStart + 59 * 1000;
+  const thirdStart = secondEnd + 10 * 1000;
+  const thirdEnd = thirdStart + 60 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: firstEnd,
+      end: secondStart,
+      duration: secondStart - firstEnd
+    },
+    codexActivity(secondStart, secondEnd),
+    {
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: secondEnd,
+      end: thirdStart,
+      duration: thirdStart - secondEnd
+    },
+    codexActivity(thirdStart, thirdEnd)
+  ];
+  const timeEntries = [
+    makeAutoRuleEntry({ id: 'entry-auto-hidden-1', start: firstStart, end: firstEnd }),
+    makeAutoRuleEntry({ id: 'entry-auto-hidden-2', start: secondStart, end: secondEnd }),
+    makeAutoRuleEntry({ id: 'entry-auto-visible', start: thirdStart, end: thirdEnd })
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: firstStart,
+    end: thirdEnd,
+    zoom: 1
+  }), 'readable auto-rule session');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('source-backed Time Entries align with matching Activity Stream geometry at active zoom levels', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const scenarios = [
+    {
+      zoom: 1,
+      activityStart: dateStart + (10 * 60 + 12) * 60 * 1000 + 5 * 1000,
+      activityEnd: dateStart + (10 * 60 + 14) * 60 * 1000 + 5 * 1000,
+      fragments: [
+        [dateStart + (10 * 60 + 12) * 60 * 1000 + 5 * 1000, dateStart + (10 * 60 + 14) * 60 * 1000 + 5 * 1000]
+      ]
+    },
+    {
+      zoom: 10,
+      activityStart: dateStart + (20 * 60 + 30) * 60 * 1000,
+      activityEnd: dateStart + (21 * 60 + 10) * 60 * 1000,
+      fragments: [
+        [dateStart + (20 * 60 + 31) * 60 * 1000, dateStart + (20 * 60 + 36) * 60 * 1000],
+        [dateStart + (20 * 60 + 42) * 60 * 1000, dateStart + (20 * 60 + 46) * 60 * 1000],
+        [dateStart + (20 * 60 + 52) * 60 * 1000, dateStart + (20 * 60 + 55) * 60 * 1000],
+        [dateStart + (21 * 60 + 2) * 60 * 1000, dateStart + (21 * 60 + 4) * 60 * 1000]
+      ]
+    },
+    {
+      zoom: 15,
+      activityStart: dateStart + (18 * 60 + 30) * 60 * 1000,
+      activityEnd: dateStart + (19 * 60 + 15) * 60 * 1000,
+      fragments: [
+        [dateStart + (18 * 60 + 34) * 60 * 1000, dateStart + (18 * 60 + 39) * 60 * 1000],
+        [dateStart + (18 * 60 + 49) * 60 * 1000, dateStart + (18 * 60 + 54) * 60 * 1000],
+        [dateStart + (19 * 60 + 4) * 60 * 1000, dateStart + (19 * 60 + 7) * 60 * 1000]
+      ]
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const activities = [codexActivity(scenario.activityStart, scenario.activityEnd)];
+    const timeEntries = scenario.fragments.map(([start, end], index) => makeAutoRuleEntry({
+      id: `entry-align-${scenario.zoom}-${index}`,
+      start,
+      end,
+      projectId: project.id
+    }));
+    const activityHtml = renderMemoryAidHtml({
+      zoom: scenario.zoom,
+      activities,
+      timelineActivities: activities
+    });
+    const entryHtml = renderLoggedTimeEntriesHtml({
+      zoom: scenario.zoom,
+      projects: [project],
+      activities,
+      timeEntries
+    });
+    const [activityStyle] = extractActivityStyles(activityHtml);
+    const [entryStyle] = extractEntryStyles(entryHtml);
+
+    assert.equal(extractActivityStyles(activityHtml).length, 1, `activity blocks at zoom ${scenario.zoom}`);
+    assert.equal(extractEntryStyles(entryHtml).length, 1, `time entry blocks at zoom ${scenario.zoom}`);
+    assert.ok(Math.abs(entryStyle.top - activityStyle.top) < 0.01, `top at zoom ${scenario.zoom}`);
+    assert.ok(Math.abs(entryStyle.height - activityStyle.height) < 0.01, `height at zoom ${scenario.zoom}`);
+    if (timeEntries.length > 1) {
+      assert.deepEqual(extractGroupedEntryIds(entryHtml), timeEntries.map(entry => entry.id));
+    }
+  }
+});
+
+test('same-project auto-rule entries merge when visible rows touch despite exact source gaps', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const activityStart = dateStart + (20 * 60 + 30) * 60 * 1000;
+  const activityEnd = dateStart + (21 * 60 + 10) * 60 * 1000;
+  const fragments = [
+    [dateStart + (20 * 60 + 31) * 60 * 1000, dateStart + (20 * 60 + 36) * 60 * 1000],
+    [dateStart + (20 * 60 + 42) * 60 * 1000, dateStart + (20 * 60 + 46) * 60 * 1000],
+    [dateStart + (20 * 60 + 52) * 60 * 1000, dateStart + (20 * 60 + 55) * 60 * 1000],
+    [dateStart + (21 * 60 + 2) * 60 * 1000, dateStart + (21 * 60 + 4) * 60 * 1000]
+  ];
+  const activities = [codexActivity(activityStart, activityEnd)];
+  const timeEntries = fragments.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-touch-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 10,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: activityStart,
+    end: activityEnd,
+    zoom: 10
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
+  assert.deepEqual(extractGroupedEntryIds(html), timeEntries.map(entry => entry.id));
+});
+
+test('same-project source-backed entries do not merge across a visible empty row', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstStart = dateStart + 9 * 60 * 60 * 1000;
+  const firstEnd = firstStart + 5 * 60 * 1000;
+  const secondStart = dateStart + (9 * 60 + 35) * 60 * 1000;
+  const secondEnd = secondStart + 5 * 60 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    {
+      app: 'Brave Browser',
+      title: 'Reference',
+      url: 'https://example.com/reference',
+      start: firstEnd,
+      end: secondStart,
+      duration: secondStart - firstEnd
+    },
+    codexActivity(secondStart, secondEnd)
+  ];
+  const timeEntries = [
+    makeAutoRuleEntry({ id: 'entry-auto-row-1', start: firstStart, end: firstEnd }),
+    makeAutoRuleEntry({ id: 'entry-auto-row-2', start: secondStart, end: secondEnd })
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 2);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: firstStart,
+    end: firstEnd,
+    zoom: 15
+  }), 'first coarse source row');
+  assertStyleMatchesRowGeometry(styles[1], expectedRowGeometry({
+    dateStart,
+    start: secondStart,
+    end: secondEnd,
+    zoom: 15
+  }), 'second coarse source row');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min', '5 min']);
+});
+
+test('dense sub-minute auto-rule fragments summarize at coarse zoom instead of rendering tiny bars', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const base = dateStart + 13 * 60 * 60 * 1000;
+  const activities = [];
+  const timeEntries = [];
+
+  for (let index = 0; index < 24; index++) {
+    const fragmentStart = base + index * 30 * 1000;
+    const fragmentEnd = fragmentStart + 20 * 1000;
+    activities.push(codexActivity(fragmentStart, fragmentEnd));
+    activities.push({
+      app: 'Oriel',
+      title: 'Oriel',
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel',
+      start: fragmentEnd,
+      end: fragmentStart + 30 * 1000,
+      duration: fragmentStart + 30 * 1000 - fragmentEnd
+    });
+    timeEntries.push(makeAutoRuleEntry({
+      id: `entry-auto-dense-${index}`,
+      start: fragmentStart,
+      end: fragmentEnd,
+      projectId: project.id
+    }));
+  }
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assert.doesNotMatch(styles[0].className, /time-entry-block--tiny/);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: base,
+    end: base + 15 * 60 * 1000,
+    zoom: 15
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['8 min']);
+});
+
+test('manual Activity Stream assignment renders as its saved range instead of current row projection', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const start = dateStart + (14 * 60 + 35) * 60 * 1000;
+  const end = dateStart + (14 * 60 + 50) * 60 * 1000;
+  const activities = [
+    {
+      app: 'Brave Browser',
+      title: 'Daily AI Recap Prompt',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start,
+      end,
+      duration: end - start,
+      url: 'https://chatgpt.com/'
+    }
+  ];
+  const timeEntry = {
+    id: 'entry-manual-summary',
+    start,
+    end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...activities[0],
+      assignedDurationMs: 789 * 1000,
+      assignmentStart: start,
+      assignmentEnd: end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 5
+    }]
+  };
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries: [timeEntry]
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start,
+    end,
+    zoom: 1
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+});
+
+test('manual and auto-rule entries for the same project merge visually while preserving grouped metadata', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const manualStart = dateStart + (14 * 60 + 35) * 60 * 1000;
+  const manualEnd = dateStart + (14 * 60 + 50) * 60 * 1000;
+  const autoStart = dateStart + (14 * 60 + 49) * 60 * 1000 + 56 * 1000;
+  const autoEnd = dateStart + (14 * 60 + 51) * 60 * 1000 + 58 * 1000;
+  const manualEntry = {
+    id: 'entry-manual',
+    start: manualStart,
+    end: manualEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: []
+  };
+  const autoEntry = makeAutoRuleEntry({
+    id: 'entry-auto-overlap',
+    start: autoStart,
+    end: autoEnd,
+    projectId: project.id
+  });
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities: [codexActivity(autoStart, autoEnd)],
+    timeEntries: [manualEntry, autoEntry]
+  });
+  const styles = extractEntryStyles(html);
+  const groupedBounds = extractGroupedEntryBounds(html);
+
+  assert.equal(styles.length, 1);
+  assert.equal(styles[0].left, null);
+  assert.equal(styles[0].width, null);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['17 min']);
+  assert.match(html, /data-group-ids=/);
+  assert.equal(groupedBounds.start, manualStart);
+  assert.equal(groupedBounds.end, autoEnd);
+});
+
+test('long time entry blocks render one floating label without repeated title rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 60,
+    projects: [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }],
+    timeEntries: [{
+      id: 'entry-long',
+      start: dateStart + 9 * 60 * 60 * 1000,
+      end: dateStart + 17 * 60 * 60 * 1000,
+      projectId: 'project-1',
+      description: ''
+    }]
+  });
+  const blockHtml = extractFirstTimeEntryBlockHtml(html);
+
+  assert.match(blockHtml, /time-entry-main--floating/);
+  assert.doesNotMatch(blockHtml, /time-entry-main--repeat/);
+  assert.doesNotMatch(blockHtml, /aria-hidden="true"/);
+  assert.equal(extractTimeEntryDurationLabels(blockHtml).length, 1);
+  assert.match(blockHtml, /480 min/);
+});
+
+test('floating time entry label offset tracks the visible scroll position inside a long block', () => {
+  const context = loadTimelineContext();
+  const block = new FakeElement('entry-long');
+  const label = new FakeElement('entry-label');
+  const scrollPane = {
+    scrollTop: 320,
+    clientHeight: 360,
+    addEventListener() {}
+  };
+
+  block.className = 'time-entry-block';
+  block.dataset = {};
+  block.offsetTop = 200;
+  block.offsetHeight = 480;
+  label.className = 'time-entry-main time-entry-main--floating';
+  label.offsetHeight = 24;
+  block.querySelector = selector => selector === '.time-entry-main--floating' ? label : null;
+  context.DOM.elTimeEntriesScroll = scrollPane;
+  context.DOM.elItemsTimeEntries = {
+    querySelectorAll(selector) {
+      return selector === '.time-entry-block' ? [block] : [];
+    }
+  };
+
+  context.updateFloatingTimeEntryLabels();
+
+  assert.equal(block.style['--time-entry-label-offset'], '126px');
+});
+
+test('unlogged recorded work groups Codex activity without saved source snapshots', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const codexStart = dateStart + 10 * 60 * 60 * 1000;
+  const braveStart = dateStart + 11 * 60 * 60 * 1000;
+  const codex = codexActivity(codexStart, codexStart + 20 * 60 * 1000);
+  const brave = {
+    app: 'Brave Browser',
+    title: 'Reference',
+    url: 'https://example.com/reference',
+    start: braveStart,
+    end: braveStart + 15 * 60 * 1000,
+    duration: 15 * 60 * 1000
+  };
+  const timeEntries = [{
+    id: 'entry-brave',
+    start: brave.start,
+    end: brave.end,
+    projectId: 'project-1',
+    activities: [{
+      ...brave,
+      assignedDurationMs: brave.duration,
+      assignmentStart: brave.start,
+      assignmentEnd: brave.end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary'
+    }]
+  }];
+
+  const groups = context.buildUnloggedActivityGroups({
+    activities: [codex, brave],
+    timeEntries,
+    dateStartOfDay: dateStart
+  });
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].app, 'Codex');
+  assert.equal(groups[0].durationMs, 20 * 60 * 1000);
+});
+
+test('unlogged backfill preview skips already logged fragments and preserves selected source snapshots', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const start = dateStart + 13 * 60 * 60 * 1000;
+  const activity = codexActivity(start, start + 30 * 60 * 1000);
+  const timeEntries = [{
+    id: 'entry-codex-partial',
+    start,
+    end: start + 10 * 60 * 1000,
+    projectId: 'project-1',
+    activities: [{
+      ...activity,
+      end: start + 10 * 60 * 1000,
+      duration: 10 * 60 * 1000,
+      assignedDurationMs: 10 * 60 * 1000,
+      assignmentStart: start,
+      assignmentEnd: start + 10 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary'
+    }]
+  }];
+  const groups = context.buildUnloggedActivityGroups({
+    activities: [activity],
+    timeEntries,
+    dateStartOfDay: dateStart
+  });
+  const payloadActivities = context.buildUnloggedBackfillActivities(groups, [groups[0].fragments[0].id]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].durationMs, 20 * 60 * 1000);
+  assert.equal(payloadActivities.length, 1);
+  assert.equal(payloadActivities[0].start, start + 10 * 60 * 1000);
+  assert.equal(payloadActivities[0].end, start + 30 * 60 * 1000);
+  assert.equal(payloadActivities[0].assignedDurationMs, 20 * 60 * 1000);
+  assert.equal(payloadActivities[0].assignmentSource, 'activity-stream');
+  assert.equal(payloadActivities[0].assignmentModel, 'activity-stream-summary');
+});
+
+test('unlogged work review renders all groups with compact non-wrapping total text', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const durationsMinutes = [60, 50, 45, 40, 35, 34, 34];
+  const activities = durationsMinutes.map((minutes, index) => {
+    const start = dateStart + (8 * 60 + index * 45) * 60 * 1000;
+    return {
+      app: `App ${index + 1}`,
+      title: `Unlogged Work ${index + 1}`,
+      url: '',
+      start,
+      end: start + minutes * 60 * 1000,
+      duration: minutes * 60 * 1000
+    };
+  });
+  const container = new FakeElement('unlogged-work-review-list');
+  const total = new FakeElement('unlogged-work-review-total');
+  const panel = new FakeElement('unlogged-work-review');
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = [];
+  context.document = {
+    getElementById(id) {
+      return {
+        'unlogged-work-review': panel,
+        'unlogged-work-review-list': container,
+        'unlogged-work-review-total': total
+      }[id] || null;
+    }
+  };
+
+  context.renderUnloggedRecordedWorkReview();
+
+  assert.equal(total.innerText, '4h 58m');
+  assert.equal((container.innerHTML.match(/class="unlogged-work-row"/g) || []).length, 7);
+});
+
+test('unlogged work review hides zero-second and sub-minute groups while keeping cumulative short work actionable', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const actionableStart = dateStart + 9 * 60 * 60 * 1000;
+  const cumulativeStart = dateStart + 10 * 60 * 60 * 1000;
+  const hiddenShortStart = dateStart + 11 * 60 * 60 * 1000;
+  const tinyStart = dateStart + 12 * 60 * 60 * 1000;
+  const activities = [
+    {
+      app: 'Codex',
+      title: 'Long Reviewable Work',
+      url: '',
+      start: actionableStart,
+      end: actionableStart + 2 * 60 * 1000,
+      duration: 2 * 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Cumulative Short Work',
+      url: 'https://example.com/cumulative',
+      start: cumulativeStart,
+      end: cumulativeStart + 40 * 1000,
+      duration: 40 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Cumulative Short Work',
+      url: 'https://example.com/cumulative',
+      start: cumulativeStart + 45 * 1000,
+      end: cumulativeStart + 85 * 1000,
+      duration: 40 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Single Short Work',
+      url: 'https://example.com/short',
+      start: hiddenShortStart,
+      end: hiddenShortStart + 45 * 1000,
+      duration: 45 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Half Second Work',
+      url: 'https://example.com/tiny',
+      start: tinyStart,
+      end: tinyStart + 500,
+      duration: 500
+    }
+  ];
+  const container = new FakeElement('unlogged-work-review-list');
+  const total = new FakeElement('unlogged-work-review-total');
+  const panel = new FakeElement('unlogged-work-review');
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = [];
+  context.document = {
+    getElementById(id) {
+      return {
+        'unlogged-work-review': panel,
+        'unlogged-work-review-list': container,
+        'unlogged-work-review-total': total
+      }[id] || null;
+    }
+  };
+
+  const rawGroups = context.buildUnloggedActivityGroups({
+    activities,
+    timeEntries: [],
+    dateStartOfDay: dateStart
+  });
+  context.renderUnloggedRecordedWorkReview();
+  const payloadActivities = context.buildUnloggedBackfillActivities(context.state.unloggedActivityGroups);
+
+  assert.equal(rawGroups.length, 4);
+  assert.equal((container.innerHTML.match(/class="unlogged-work-row"/g) || []).length, 2);
+  assert.match(container.innerHTML, /Long Reviewable Work/);
+  assert.match(container.innerHTML, /Cumulative Short Work/);
+  assert.doesNotMatch(container.innerHTML, /Single Short Work/);
+  assert.doesNotMatch(container.innerHTML, /Half Second Work/);
+  assert.doesNotMatch(container.innerHTML, />0s</);
+  assert.match(container.innerHTML, /2 short fragments hidden/);
+  assert.equal(total.innerText, '3m');
+  assert.equal(context.state.unloggedActivityGroups.length, 2);
+  assert.equal(payloadActivities.length, 3);
+  assert.equal(payloadActivities.reduce((sum, activity) => sum + activity.duration, 0), 200 * 1000);
+  assert.equal(payloadActivities.some(activity => activity.title === 'Single Short Work'), false);
+  assert.equal(payloadActivities.some(activity => activity.title === 'Half Second Work'), false);
+});
+
+test('unlogged work review toggles bottom fade while overflowed list has more rows below', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const activities = Array.from({ length: 8 }, (_value, index) => {
+    const start = dateStart + (9 * 60 + index * 20) * 60 * 1000;
+    return {
+      app: `Review App ${index + 1}`,
+      title: `Review Row ${index + 1}`,
+      url: '',
+      start,
+      end: start + 10 * 60 * 1000,
+      duration: 10 * 60 * 1000
+    };
+  });
+  const container = new FakeElement('unlogged-work-review-list');
+  const total = new FakeElement('unlogged-work-review-total');
+  const panel = new FakeElement('unlogged-work-review');
+
+  container.clientHeight = 180;
+  container.scrollHeight = 420;
+  container.scrollTop = 0;
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = [];
+  context.document = {
+    getElementById(id) {
+      return {
+        'unlogged-work-review': panel,
+        'unlogged-work-review-list': container,
+        'unlogged-work-review-total': total
+      }[id] || null;
+    }
+  };
+
+  context.renderUnloggedRecordedWorkReview();
+  assert.equal(panel.classList.contains('unlogged-work-review--has-more'), true);
+
+  container.scrollTop = 240;
+  container.dispatchEvent({ type: 'scroll' });
+  assert.equal(panel.classList.contains('unlogged-work-review--has-more'), false);
+});
+
+test('day timeline render model reuses exact Activity Stream sessions across renderers', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const activities = [
+    codexActivity(dateStart + 9 * 60 * 60 * 1000, dateStart + (9 * 60 + 12) * 60 * 1000),
+    {
+      app: 'Brave Browser',
+      title: 'Reference',
+      url: 'https://example.com/reference',
+      start: dateStart + (9 * 60 + 13) * 60 * 1000,
+      end: dateStart + (9 * 60 + 17) * 60 * 1000,
+      duration: 4 * 60 * 1000
+    },
+    codexActivity(dateStart + (9 * 60 + 18) * 60 * 1000, dateStart + (9 * 60 + 31) * 60 * 1000)
+  ];
+  const timeEntries = [
+    makeAutoRuleEntry({
+      id: 'entry-model-1',
+      start: activities[0].start,
+      end: activities[0].end,
+      projectId: project.id
+    }),
+    makeAutoRuleEntry({
+      id: 'entry-model-2',
+      start: activities[2].start,
+      end: activities[2].end,
+      projectId: project.id
+    })
+  ];
+  let gridHtml = '';
+  let activityHtml = '';
+  let entryHtml = '';
+
+  context.__orielTimelineDiagnostics = { activitySessionBuilds: 0 };
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 1;
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = timeEntries;
+  context.state.projects = [project];
+  context.state.settings.hideEmptyActivityRows = true;
+  context.DOM.elGridMemoryAid = { set innerHTML(value) { gridHtml = value; }, get innerHTML() { return gridHtml; } };
+  context.DOM.elGridTimeEntries = { set innerHTML(value) { gridHtml = value; }, get innerHTML() { return gridHtml; } };
+  context.DOM.elItemsMemoryAid = {
+    style: {},
+    set innerHTML(value) { activityHtml = value; },
+    get innerHTML() { return activityHtml; },
+    querySelectorAll() { return []; }
+  };
+  context.DOM.elItemsTimeEntries = {
+    style: {},
+    set innerHTML(value) { entryHtml = value; },
+    get innerHTML() { return entryHtml; },
+    querySelectorAll() { return []; }
+  };
+
+  context.renderTimelineGrids();
+  context.renderMemoryAidActivities();
+  context.renderLoggedTimeEntries();
+  const firstModel = context.getDayTimelineRenderModel({ dateStartOfDay: dateStart, zoom: 1 });
+  const secondModel = context.getDayTimelineRenderModel({ dateStartOfDay: dateStart, zoom: 1 });
+
+  assert.strictEqual(firstModel, secondModel);
+  assert.equal(context.__orielTimelineDiagnostics.activitySessionBuilds, 1);
+  assert.ok(activityHtml.includes('activity-block'));
+  assert.ok(entryHtml.includes('time-entry-block'));
+
+  context.state.zoom = 5;
+  const changedZoomModel = context.getDayTimelineRenderModel({ dateStartOfDay: dateStart, zoom: 5 });
+  assert.notStrictEqual(changedZoomModel, firstModel);
+});
+
+test('exact Activity Stream blocks keep popup detail overlaps out of DOM payloads', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const ownershipActivity = codexActivity(dateStart + 10 * 60 * 60 * 1000, dateStart + (10 * 60 + 2) * 60 * 1000);
+  const visibleActivities = [
+    codexActivity(ownershipActivity.start, ownershipActivity.start + 45 * 1000),
+    {
+      app: 'Brave Browser',
+      title: 'Short interruption',
+      url: 'https://example.com/interrupt',
+      start: ownershipActivity.start + 45 * 1000,
+      end: ownershipActivity.start + 75 * 1000,
+      duration: 30 * 1000
+    },
+    codexActivity(ownershipActivity.start + 75 * 1000, ownershipActivity.end)
+  ];
+  let renderedHtml = '';
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 1;
+  context.state.activities = visibleActivities;
+  context.state.timelineActivities = [ownershipActivity];
+  context.state.timeEntries = [];
+  context.state.projects = [];
+  context.state.settings.hideEmptyActivityRows = false;
+  context.DOM.elItemsMemoryAid = {
+    style: {},
+    set innerHTML(value) { renderedHtml = value; },
+    get innerHTML() { return renderedHtml; },
+    querySelectorAll() { return []; }
+  };
+
+  context.renderMemoryAidActivities();
+  const keyMatch = renderedHtml.match(/data-overlap-key="([^"]+)"/);
+
+  assert.ok(keyMatch, 'expected exact block detail key');
+  assert.doesNotMatch(renderedHtml, /data-overlaps="/);
+  const overlaps = context.getActivityBlockDetailOverlaps({
+    dataset: {
+      overlapKey: keyMatch[1],
+      startMs: String(ownershipActivity.start),
+      endMs: String(ownershipActivity.end),
+      app: 'Codex',
+      title: 'Codex',
+      url: '',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex'
+    }
+  });
+
+  assert.equal(overlaps.length, 2);
+  assert.ok(overlaps.some(overlap => overlap.app === 'Brave Browser'));
+});
+
+test('unlogged work coverage indexes logged source ranges by activity key', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const codexStart = dateStart + 10 * 60 * 60 * 1000;
+  const codex = codexActivity(codexStart, codexStart + 10 * 60 * 1000);
+  const loggedEntries = Array.from({ length: 80 }, (_value, index) => {
+    const start = dateStart + (11 * 60 + index) * 60 * 1000;
+    const app = `Other App ${index}`;
+    return {
+      id: `entry-other-${index}`,
+      start,
+      end: start + 60 * 1000,
+      projectId: 'project-1',
+      activities: [{
+        app,
+        title: app,
+        start,
+        end: start + 60 * 1000,
+        duration: 60 * 1000,
+        assignedDurationMs: 60 * 1000,
+        assignmentStart: start,
+        assignmentEnd: start + 60 * 1000,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary'
+      }]
+    };
+  });
+
+  loggedEntries.push({
+    id: 'entry-codex-partial',
+    start: codex.start,
+    end: codex.start + 5 * 60 * 1000,
+    projectId: 'project-1',
+    activities: [{
+      ...codex,
+      end: codex.start + 5 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      assignedDurationMs: 5 * 60 * 1000,
+      assignmentStart: codex.start,
+      assignmentEnd: codex.start + 5 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary'
+    }]
+  });
+
+  context.__orielTimelineDiagnostics = { unloggedCandidateRangeChecks: 0 };
+  const groups = context.buildUnloggedActivityGroups({
+    activities: [codex],
+    timeEntries: loggedEntries,
+    dateStartOfDay: dateStart
+  });
+  const payloadActivities = context.buildUnloggedBackfillActivities(groups);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].durationMs, 5 * 60 * 1000);
+  assert.equal(payloadActivities.length, 1);
+  assert.equal(context.__orielTimelineDiagnostics.unloggedCandidateRangeChecks, 1);
+});
+
+test('floating Time Entry label updates coalesce repeated scroll events into one frame', () => {
+  const context = loadTimelineContext();
+  const listeners = {};
+  const animationFrames = [];
+  const block = new FakeElement('entry-long');
+  const label = new FakeElement('entry-label');
+  const scrollPane = {
+    scrollTop: 0,
+    clientHeight: 360,
+    addEventListener(type, listener) {
+      listeners[type] ||= [];
+      listeners[type].push(listener);
+    }
+  };
+
+  block.className = 'time-entry-block';
+  block.dataset = {};
+  block.offsetTop = 100;
+  block.offsetHeight = 480;
+  label.className = 'time-entry-main time-entry-main--floating';
+  label.offsetHeight = 24;
+  block.querySelector = selector => selector === '.time-entry-main--floating' ? label : null;
+  context.window.requestAnimationFrame = callback => {
+    animationFrames.push(callback);
+    return animationFrames.length;
+  };
+  context.DOM.elTimeEntriesScroll = scrollPane;
+  context.DOM.elItemsTimeEntries = {
+    querySelectorAll(selector) {
+      return selector === '.time-entry-block' ? [block] : [];
+    }
+  };
+
+  context.bindFloatingTimeEntryLabelUpdates();
+  assert.equal(listeners.scroll.length, 1);
+  scrollPane.scrollTop = 180;
+  listeners.scroll[0]();
+  scrollPane.scrollTop = 260;
+  listeners.scroll[0]();
+  scrollPane.scrollTop = 320;
+  listeners.scroll[0]();
+
+  assert.equal(animationFrames.length, 1);
+  assert.equal(block.style['--time-entry-label-offset'], undefined);
+  animationFrames.shift()();
+  assert.equal(block.style['--time-entry-label-offset'], '226px');
 });
 
 test('sub-minute dominant interruptions stay hidden in Activity Stream while one-minute rows render', () => {
@@ -4282,7 +5721,212 @@ test('sub-minute dominant interruptions stay hidden in Activity Stream while one
   assert.equal(extractActivitySpan(html, 'One Minute Oriel Local Time Tracker'), 1);
 });
 
-test('recorded activity popup clips overlap durations to the visible selected block range', () => {
+test('one-minute Activity Stream sessions aggregate same-app fragments across short gaps', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const start = dateStart + (12 * 60 + 2) * 60 * 1000;
+  const firstCodex = codexActivity(start, start + 20 * 1000);
+  const firstOriel = {
+    app: 'Oriel',
+    title: 'Oriel',
+    start: firstCodex.end,
+    end: firstCodex.end + 3 * 1000,
+    duration: 3 * 1000
+  };
+  const secondCodex = codexActivity(firstOriel.end, firstOriel.end + 25 * 1000);
+  const secondOriel = {
+    app: 'Oriel',
+    title: 'Oriel',
+    start: secondCodex.end,
+    end: secondCodex.end + 4 * 1000,
+    duration: 4 * 1000
+  };
+  const thirdCodex = codexActivity(secondOriel.end, secondOriel.end + 30 * 1000);
+  const shortScrap = {
+    app: 'Short App',
+    title: 'Short App',
+    start: thirdCodex.end + 5 * 60 * 1000,
+    end: thirdCodex.end + 5 * 60 * 1000 + 20 * 1000,
+    duration: 20 * 1000
+  };
+  const activities = [firstCodex, firstOriel, secondCodex, secondOriel, thirdCodex, shortScrap];
+  const sessions = context.buildActivityStreamSessions({
+    dateStartOfDay: dateStart,
+    activities,
+    detailActivities: activities
+  });
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].app, 'Codex');
+  assert.equal(sessions[0].start, firstCodex.start);
+  assert.equal(sessions[0].end, thirdCodex.end);
+  assert.equal(sessions[0].activeDurationMs, 75 * 1000);
+  assert.equal(sessions[0].duration, 75 * 1000);
+  assert.equal(sessions[0].interruptionCount, 2);
+  assert.equal(sessions[0].sources.length, 3);
+});
+
+test('one-minute Activity Stream keeps assigned sessions through competing short visible interruptions', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 5, 11).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const orielActivity = (start, end) => ({
+    app: 'Oriel',
+    title: 'Oriel',
+    start,
+    end,
+    duration: end - start
+  });
+
+  const codexFragments = [
+    codexActivity(at(13, 45, 54), at(13, 46, 18)),
+    codexActivity(at(13, 46, 45), at(13, 46, 55)),
+    codexActivity(at(13, 46, 55.5), at(13, 47, 4)),
+    codexActivity(at(13, 47, 6), at(13, 47, 8)),
+    codexActivity(at(13, 47, 16), at(13, 47, 20)),
+    codexActivity(at(13, 47, 27), at(13, 47, 29)),
+    codexActivity(at(13, 47, 30), at(13, 47, 34)),
+    codexActivity(at(13, 47, 35), at(13, 47, 37)),
+    codexActivity(at(13, 47, 37.5), at(13, 47, 41)),
+    codexActivity(at(13, 47, 44), at(13, 47, 51)),
+    codexActivity(at(13, 47, 58), at(13, 48, 4)),
+    codexActivity(at(13, 48, 4.5), at(13, 48, 14)),
+    codexActivity(at(13, 48, 20), at(13, 48, 58))
+  ];
+  const interruptions = [
+    orielActivity(at(13, 44, 23), at(13, 45, 42)),
+    {
+      app: 'Shottr',
+      title: 'Shottr',
+      start: at(13, 45, 42),
+      end: at(13, 45, 51),
+      duration: at(13, 45, 51) - at(13, 45, 42)
+    },
+    orielActivity(at(13, 45, 51), at(13, 45, 54)),
+    orielActivity(at(13, 46, 18), at(13, 46, 45)),
+    orielActivity(at(13, 46, 55), at(13, 46, 55.5)),
+    orielActivity(at(13, 47, 4), at(13, 47, 6)),
+    orielActivity(at(13, 47, 8), at(13, 47, 16)),
+    orielActivity(at(13, 47, 20), at(13, 47, 27)),
+    orielActivity(at(13, 47, 29), at(13, 47, 30)),
+    orielActivity(at(13, 47, 34), at(13, 47, 35)),
+    orielActivity(at(13, 47, 37), at(13, 47, 37.5)),
+    orielActivity(at(13, 47, 41), at(13, 47, 44)),
+    orielActivity(at(13, 47, 51), at(13, 47, 58)),
+    orielActivity(at(13, 48, 4), at(13, 48, 4.5)),
+    orielActivity(at(13, 48, 14), at(13, 48, 20)),
+    orielActivity(at(13, 48, 58), at(13, 49, 57))
+  ];
+  const activities = [...codexFragments, ...interruptions]
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const entry = {
+    id: 'entry-codex-assigned-fragments',
+    start: codexFragments[0].start,
+    end: codexFragments.at(-1).end,
+    projectId: 'project-1',
+    createdBy: 'auto-rule',
+    autoRuleId: 'rule-codex',
+    activities: codexFragments.map(fragment => ({
+      ...fragment,
+      assignedDurationMs: fragment.duration,
+      assignmentStart: fragment.start,
+      assignmentEnd: fragment.end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      assignmentDisplayZoom: 1,
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-codex'
+    }))
+  };
+
+  const sessions = context.buildActivityStreamSessions({
+    dateStartOfDay: dateStart,
+    activities,
+    detailActivities: activities,
+    timeEntries: [entry]
+  });
+
+  const visibleCodexFragments = codexFragments.slice(1);
+  const codexSession = sessions.find(session => session.app === 'Codex'
+    && session.start === visibleCodexFragments[0].start
+    && session.end === codexFragments.at(-1).end);
+
+  assert.ok(codexSession);
+  assert.ok(codexSession.activeDurationMs >= 94 * 1000);
+  assert.equal(codexSession.duration, codexSession.activeDurationMs);
+  assert.equal(codexSession.sources.length, visibleCodexFragments.length);
+  assert.ok(codexSession.interruptionCount >= 10);
+});
+
+test('auto-rule time entries render the same aggregated exact session as Activity Stream', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const start = dateStart + (12 * 60 + 2) * 60 * 1000;
+  const firstCodex = codexActivity(start, start + 20 * 1000);
+  const firstOriel = {
+    app: 'Oriel',
+    title: 'Oriel',
+    start: firstCodex.end,
+    end: firstCodex.end + 3 * 1000,
+    duration: 3 * 1000
+  };
+  const secondCodex = codexActivity(firstOriel.end, firstOriel.end + 25 * 1000);
+  const secondOriel = {
+    app: 'Oriel',
+    title: 'Oriel',
+    start: secondCodex.end,
+    end: secondCodex.end + 4 * 1000,
+    duration: 4 * 1000
+  };
+  const thirdCodex = codexActivity(secondOriel.end, secondOriel.end + 30 * 1000);
+  const codexFragments = [firstCodex, secondCodex, thirdCodex];
+  const entry = {
+    id: 'entry-codex-fragments',
+    start: firstCodex.start,
+    end: thirdCodex.end,
+    projectId: project.id,
+    createdBy: 'auto-rule',
+    autoRuleId: 'rule-codex',
+    description: '',
+    activities: codexFragments.map(fragment => ({
+      ...fragment,
+      assignedDurationMs: fragment.duration,
+      assignmentStart: fragment.start,
+      assignmentEnd: fragment.end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      assignmentDisplayZoom: 1,
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-codex'
+    }))
+  };
+  const activities = [firstCodex, firstOriel, secondCodex, secondOriel, thirdCodex];
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 1;
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.projects = [project];
+
+  const sessions = context.buildActivityStreamSessions({
+    dateStartOfDay: dateStart,
+    activities,
+    detailActivities: activities
+  });
+  const entryItems = context.buildLoggedTimeEntryRenderItems([entry], 1, dateStart);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(entryItems.length, 1);
+  assert.equal(entryItems[0].start, sessions[0].start);
+  assert.equal(entryItems[0].end, sessions[0].end);
+  assert.equal(entryItems[0].displayStart, sessions[0].start);
+  assert.equal(entryItems[0].displayEnd, sessions[0].end);
+  assert.equal(entryItems[0].durationMs, sessions[0].duration);
+  assert.equal(entryItems[0].durationMs, 75 * 1000);
+});
+
+test('recorded activity session details exclude fragments outside the exact session range', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const precedingOriel = {
     start: dateStart + (14 * 60 + 4) * 60 * 1000 + 52 * 1000,
@@ -4307,16 +5951,23 @@ test('recorded activity popup clips overlap durations to the visible selected bl
   };
 
   const html = renderMemoryAidHtml({
-    zoom: 5,
+    zoom: 1,
     activities: [precedingOriel, referenceApp],
     timelineActivities: [precedingOriel, referenceApp, subsequentOriel]
   });
   const overlaps = extractActivityOverlaps(html, 'Reference App');
   const orielOverlap = overlaps.find(activity => activity.title === 'Oriel Local Time Tracker');
+  const styles = extractActivityStyles(html);
 
-  assert.equal(extractActivitySpan(html, 'Reference App'), 1);
+  assert.equal(extractActivitySpan(html, 'Reference App'), 6);
   assert.equal(extractActivityDuration(html, 'Reference App'), '5 min');
-  assert.equal(orielOverlap.duration, 8 * 1000);
+  assert.equal(orielOverlap, undefined);
+  assertStyleNearlyMatchesGeometry(styles.find(style => style.span === 6), expectedExactGeometry({
+    dateStart,
+    start: referenceApp.start,
+    end: referenceApp.end,
+    zoom: 1
+  }));
 });
 
 test('refresh keeps short activities in state while Activity Stream rendering hides them', async () => {
@@ -4575,7 +6226,7 @@ test('Activity Mix info icon explains the concept without a repeated heading or 
   assert.doesNotMatch(tooltip.innerHTML, /2 min|8 min/);
 });
 
-test('Multiple Activities popup prefers a page-specific browser source title over a weak host title', () => {
+test('Multiple Activities popup renders browser activity as a host session with page children', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 118 * 5 * 60 * 1000;
   const popup = renderMultipleActivitiesPopup({
@@ -4606,16 +6257,81 @@ test('Multiple Activities popup prefers a page-specific browser source title ove
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>Context Switching Simplification<\/span>/);
-  assert.doesNotMatch(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedMultiList, /font-semibold[^>]*>Context Switching Simplification<\/span>/);
+  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
-  assert.doesNotMatch(popup.renderedMultiList, /title="chatgpt\.com">chatgpt\.com<\/span>/);
-  assert.match(popup.renderedMultiList, /<span class="font-bold[^"]*" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
+  assert.match(popup.renderedMultiList, /<span class="font-semibold[^"]*" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
   assert.match(popup.renderedMultiList, /<i class="ph ph-arrow-square-out/);
-  assert.doesNotMatch(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/"/);
+  assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/"/);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 2);
+  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
+    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
+  }));
 });
 
-test('Multiple Activities popup labels same-host browser rows by dominant source title', () => {
+test('single host session with page children opens as one expanded session popup', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 12 * 60 * 60 * 1000;
+  const popup = renderMultipleActivitiesPopup({
+    zoom: 1,
+    startCell: 12 * 60,
+    span: 3,
+    app: 'Brave Browser',
+    title: 'bol.com',
+    url: 'https://www.bol.com/',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'BRASQ Verlengsnoer 5 meter Wit - Verlengkabel met randaarde | bol',
+        url: 'https://www.bol.com/nl/nl/p/brasq-verlengsnoer',
+        start: blockStart,
+        end: blockStart + 65 * 1000,
+        duration: 65 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'bol | Bestellen',
+        url: 'https://www.bol.com/nl/nl/checkout/',
+        start: blockStart + 65 * 1000,
+        end: blockStart + 124 * 1000,
+        duration: 59 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'bol | Winkelwagen',
+        url: 'https://www.bol.com/nl/nl/winkelwagen/',
+        start: blockStart + 124 * 1000,
+        end: blockStart + 179 * 1000,
+        duration: 55 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'bol.com');
+  assert.equal(popup.context.DOM.elPopupTitle.innerText, 'Brave Browser');
+  assert.equal(popup.renderedMultiList, '');
+  assert.match(popup.renderedSingleChildren, /popup-activity-children/);
+  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedSingleChildren, /BRASQ Verlengsnoer 5 meter Wit/);
+  assert.match(popup.renderedSingleChildren, /bol \| Bestellen/);
+  assert.match(popup.renderedSingleChildren, /bol \| Winkelwagen/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /title="Brave Browser">Brave Browser<\/span>/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-select/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-quick-add/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /border-l|border-b|bg-\[#25272c\]|duration-pill/);
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  assert.equal(popup.modalArgs[6][0].title, 'bol.com');
+  assert.equal(popup.modalArgs[6][0].sources.length, 3);
+});
+
+test('Multiple Activities popup collapses same-host browser rows into assignable children', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const startCell = 183;
   const blockStart = dateStart + startCell * 5 * 60 * 1000;
@@ -4648,10 +6364,19 @@ test('Multiple Activities popup labels same-host browser rows by dominant source
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>User Activity Analysis<\/span>/);
-  assert.doesNotMatch(popup.renderedMultiList, /font-bold[^>]*>Meal Ingredients List<\/span>/);
-  assert.match(popup.renderedMultiList, /<span class="font-bold[^"]*" title="User Activity Analysis">User Activity Analysis<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/activity"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
-  assert.doesNotMatch(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/meal"/);
+  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedMultiList, /font-semibold[^>]*>Meal Ingredients List<\/span>/);
+  assert.match(popup.renderedMultiList, /font-semibold[^>]*>User Activity Analysis<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row hidden"[\s\S]*?text-gray-500[^>]*title="Brave Browser">Brave Browser<\/span>/);
+  assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com"/);
+  assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/meal"/);
+  assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/activity"/);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 2);
+  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
+    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
+  }));
 });
 
 test('Multiple Activities popup falls back to host when browser titles are URL-like', () => {
@@ -4687,7 +6412,7 @@ test('Multiple Activities popup falls back to host when browser titles are URL-l
 
   assert.match(popup.renderedMultiList, /font-bold[^>]*>app\.ynab\.com<\/span>/);
   assert.doesNotMatch(popup.renderedMultiList, /title="app\.ynab\.com\/5f53b33e|>app\.ynab\.com\/5f53b33e/);
-  assert.match(popup.renderedMultiList, /href="https:\/\/app\.ynab\.com\/5f53b33e-a5f5-46fd-a8d8-bf8885fa5c8f\/budget"/);
+  assert.match(popup.renderedMultiList, /href="https:\/\/app\.ynab\.com"/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
 });
 
@@ -4718,7 +6443,7 @@ test('Activity Stream browser subtitles show only the app while preserving URL d
   assert.match(html, /data-url="https:\/\/www\.facebook\.com\/home"/);
 });
 
-test('same-host browser activity opens the single details popup with URL visible', () => {
+test('same-host browser activity with different page titles opens one expanded session popup', () => {
   const titleCleaner = loadTitleCleaningContext().cleanTitle;
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 118 * 5 * 60 * 1000;
@@ -4744,10 +6469,15 @@ test('same-host browser activity opens the single details popup with URL visible
     ]
   });
 
-  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Client Portal');
-  assert.equal(popup.context.DOM.elPopupTitle.innerText, 'Brave Browser');
-  assert.equal(popup.context.DOM.elPopupUrl.innerText, 'https://client.example.com/dashboard');
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'client.example.com');
   assert.equal(popup.renderedMultiList, '');
+  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedSingleChildren, /Client Portal/);
+  assert.match(popup.renderedSingleChildren, /Client Portal Settings/);
+  assert.match(popup.renderedSingleChildren, /href="https:\/\/client\.example\.com\/dashboard"/);
+  assert.match(popup.renderedSingleChildren, /href="https:\/\/client\.example\.com\/settings"/);
+  assert.equal((popup.renderedSingleChildren.match(/data-popup-child-index/g) || []).length, 2);
 });
 
 test('Multiple Activities popup host fallback strips leading www from browser labels', () => {
@@ -4842,11 +6572,13 @@ test('Multiple Activities popup display labels do not rewrite assignment payload
 
   const browserAssignment = popup.modalArgs[6].find(activity => activity.app === 'Brave Browser');
   assert.equal(browserAssignment.title, 'chatgpt.com');
-  assert.equal(browserAssignment.url, 'https://chatgpt.com/');
+  assert.equal(browserAssignment.url, 'https://chatgpt.com');
   assert.equal(browserAssignment.assignmentModel, 'activity-stream-summary');
+  assert.ok(browserAssignment.sources.some(source => source.url === 'https://chatgpt.com/'));
+  assert.ok(browserAssignment.sources.some(source => source.url === 'https://chatgpt.com/c/123'));
 });
 
-test('single visible activity with hidden short rows opens single details and assigns only visible row', () => {
+test('single visible activity hides unrelated short source rows from popup detail', () => {
   const context = loadTimelineContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   let renderedMultiList = '';
@@ -4928,6 +6660,7 @@ test('single visible activity with hidden short rows opens single details and as
   assert.equal(context.DOM.elPopupAppName.innerText, 'Codex');
   assert.equal(context.DOM.elPopupTitle.innerText, 'Codex');
   assert.equal(renderedMultiList, '');
+  assert.doesNotMatch(renderedMultiList, /Other activity/);
   assert.doesNotMatch(renderedMultiList, /Oriel/);
   assert.doesNotMatch(renderedMultiList, /SoundCloud/);
 
@@ -4985,6 +6718,41 @@ test('single sub-minute Activity Stream details popup still shows seconds', () =
   });
 
   assert.equal(context.DOM.elPopupDuration.innerText, '23s');
+});
+
+test('activity details popup labels positive subsecond page children as one second', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const popup = renderMultipleActivitiesPopup({
+    startCell: 0,
+    span: 1,
+    app: 'Brave Browser',
+    title: 'vinted.nl',
+    url: 'https://www.vinted.nl/',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+        url: 'https://www.vinted.nl/member/signup/select_type',
+        start: dateStart,
+        end: dateStart + 60 * 1000,
+        duration: 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'vinted.nl',
+        url: 'https://www.vinted.nl/',
+        start: dateStart + 60 * 1000,
+        end: dateStart + 60 * 1000 + 400,
+        duration: 400
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'vinted.nl');
+  assert.equal(popup.renderedMultiList, '');
+  assert.match(popup.renderedSingleChildren, /Word lid en verkoop tweedehands kleding/);
+  assert.match(popup.renderedSingleChildren, />1s<\/span>/);
+  assert.doesNotMatch(popup.renderedSingleChildren, />0s<\/span>/);
 });
 
 test('Multiple Activities block duration matches popup-visible breakdown duration', () => {
@@ -5734,7 +7502,7 @@ test('multiple activity popover aligns app names separately without dash separat
   assert.equal(renderedMultiList.includes('—'), false);
   assert.match(renderedMultiList, /<div class="flex items-center gap-1 min-w-0 flex-1">\s*<span class="font-bold text-gray-200 truncate min-w-0"/);
   assert.match(renderedMultiList, /<span class="text-gray-400 text-right truncate shrink-0 max-w-\[42%\]"/);
-  assert.equal((renderedMultiList.match(/popup-activity-external-link/g) || []).length, 1);
+  assert.equal((renderedMultiList.match(/popup-activity-external-link/g) || []).length, 2);
 });
 
 test('multiple activity popover moves Activity Mix text to the footer', () => {
@@ -6016,11 +7784,20 @@ test('multiple activity popover selection stays local and assigns selected rows'
     set innerHTML(value) {
       renderedMultiList = value;
       popupRows.length = 0;
-      for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"/g)) {
-        const selectButton = createButton(['popup-activity-select', 'activity-checkbox']);
-        const quickAddButton = createButton(['popup-activity-quick-add', 'activity-quick-add']);
+      for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"(?:[^>]*data-popup-child-index="(\d+)")?/g)) {
+        const nextRowIndex = value.indexOf('data-popup-overlap-index="', match.index + 1);
+        const rowHtml = value.slice(match.index, nextRowIndex === -1 ? value.length : nextRowIndex);
+        const selectButton = rowHtml.includes('popup-activity-select')
+          ? createButton(['popup-activity-select', 'activity-checkbox'])
+          : null;
+        const quickAddButton = rowHtml.includes('popup-activity-quick-add')
+          ? createButton(['popup-activity-quick-add', 'activity-quick-add'])
+          : null;
         popupRows.push({
-          dataset: { popupOverlapIndex: match[1] },
+          dataset: {
+            popupOverlapIndex: match[1],
+            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] })
+          },
           classList: createClassList(['popup-activity-row']),
           querySelector(selector) {
             if (selector === '.popup-activity-select') return selectButton;
@@ -6055,9 +7832,10 @@ test('multiple activity popover selection stays local and assigns selected rows'
 
   assert.match(renderedMultiList, /popup-activity-select/);
   assert.match(renderedMultiList, /popup-activity-quick-add/);
-  assert.equal(popupRows.length, 2);
+  const topLevelPopupRows = popupRows.filter(row => row.dataset.popupChildIndex === undefined);
+  assert.equal(topLevelPopupRows.length, 2);
 
-  popupRows[1].querySelector('.popup-activity-select').click();
+  topLevelPopupRows[1].querySelector('.popup-activity-select').click();
 
   assert.equal(context.state.selectedActivities.size, 0);
   assert.equal(block.classList.contains('selected'), false);
@@ -6199,7 +7977,516 @@ test('recorded activity breakdown merges visually similar activities into one ro
     }
   });
 
-  assert.equal((renderedMultiList.match(/class="flex items-center justify-between/g) || []).length, 2);
+  assert.equal((renderedMultiList.match(/data-popup-overlap-index="\d+"\s*\n\s*data-popup-similarity-key/g) || []).length, 2);
   assert.match(renderedMultiList, /3 min/);
   assert.match(renderedMultiList, /Oriel/);
+});
+
+test('recorded activity popup renders different same-host page titles as session children', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 14 * 60 * 60 * 1000;
+  let renderedMultiList = '';
+
+  context.DOM.elPopupDuration = { innerText: '', title: '' };
+  context.DOM.elPopupRange = { innerText: '' };
+  context.DOM.elPopupIconContainer = { innerHTML: '' };
+  context.DOM.elPopupAppName = { innerText: '' };
+  context.DOM.elPopupSingleDetails = { classList: { add() {}, remove() {} }, querySelector: () => null };
+  context.DOM.elPopupMultiDetails = { classList: { add() {}, remove() {} } };
+  context.DOM.elPopupUrlContainer = { classList: { add() {}, remove() {} } };
+  context.DOM.elPopupUrl = {};
+  context.DOM.elPopupMultiListContainer = {
+    set innerHTML(value) {
+      renderedMultiList = value;
+    },
+    get innerHTML() {
+      return renderedMultiList;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  context.DOM.elPopupAssignBtn = {};
+  context.DOM.elActivityDetailsPopup = {
+    style: {},
+    classList: { remove() {} }
+  };
+
+  context.showActivityDetailsPopup({
+    dataset: {
+      startCell: '168',
+      span: '1',
+      app: 'Brave Browser',
+      title: 'Multiple Activities',
+      url: '',
+      appPath: '',
+      bundleId: '',
+      overlaps: encodeURIComponent(JSON.stringify([
+        {
+          app: 'Brave Browser',
+          title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+          url: 'https://www.youtube.com/watch?v=rainy',
+          duration: 60 * 1000,
+          start: blockStart,
+          end: blockStart + 60 * 1000
+        },
+        {
+          app: 'Brave Browser',
+          title: 'Apple Mac mini 1 model A2348 | Vinted',
+          url: 'https://www.vinted.nl/items/apple-mac-mini',
+          duration: 60 * 1000,
+          start: blockStart + 60 * 1000,
+          end: blockStart + 2 * 60 * 1000
+        },
+        {
+          app: 'Brave Browser',
+          title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+          url: 'https://www.vinted.nl/member/signup/select_type',
+          duration: 2 * 60 * 1000,
+          start: blockStart + 2 * 60 * 1000,
+          end: blockStart + 4 * 60 * 1000
+        },
+        {
+          app: 'Brave Browser',
+          title: 'Transient Vinted Tab | Vinted',
+          url: 'https://www.vinted.nl/help/transient',
+          duration: 45 * 1000,
+          start: blockStart + 4 * 60 * 1000,
+          end: blockStart + 4 * 60 * 1000 + 45 * 1000
+        }
+      ]))
+    }
+  });
+
+  assert.match(renderedMultiList, /font-bold[^>]*>vinted\.nl<\/span>/);
+  assert.match(renderedMultiList, /popup-activity-expand/);
+  assert.match(renderedMultiList, /popup-activity-child-row hidden/);
+  assert.match(renderedMultiList, /Apple Mac mini 1 model A2348 \| Vinted/);
+  assert.match(renderedMultiList, /Word lid en verkoop tweedehands kleding zonder kosten \| Vinted/);
+  assert.match(renderedMultiList, /Transient Vinted Tab/);
+  assert.equal((renderedMultiList.match(/data-popup-child-index/g) || []).length, 4);
+});
+
+test('recorded activity popup aggregates sub-minute context rows without dropping assignment sources', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 14 * 60 * 60 * 1000;
+  const popup = renderMultipleActivitiesPopup({
+    startCell: '168',
+    span: '1',
+    app: 'Brave Browser',
+    title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+    url: 'https://www.youtube.com/watch?v=rainy',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+        url: 'https://www.youtube.com/watch?v=rainy',
+        duration: 61 * 1000,
+        start: blockStart,
+        end: blockStart + 61 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+        url: 'https://www.vinted.nl/member/signup/select_type',
+        duration: 12 * 1000,
+        start: blockStart + 61 * 1000,
+        end: blockStart + 73 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Vinted | Een app, alles tweedehands',
+        url: 'https://www.vinted.nl/',
+        duration: 40 * 1000,
+        start: blockStart + 73 * 1000,
+        end: blockStart + 113 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Artikelen | Vinted',
+        url: 'https://www.vinted.nl/catalog',
+        duration: 16 * 1000,
+        start: blockStart + 113 * 1000,
+        end: blockStart + 129 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Apple Mac mini 1 model A2348 | Vinted',
+        url: 'https://www.vinted.nl/items/apple-mac-mini',
+        duration: 52 * 1000,
+        start: blockStart + 129 * 1000,
+        end: blockStart + 181 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'vinted.nl',
+        url: 'https://www.vinted.nl/member/signup/select_type?state=first',
+        duration: 1000,
+        start: blockStart + 181 * 1000,
+        end: blockStart + 182 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'vinted.nl',
+        url: 'https://www.vinted.nl/member/signup/select_type?state=second',
+        duration: 2 * 1000,
+        start: blockStart + 182 * 1000,
+        end: blockStart + 184 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Multiple Activities');
+  assert.equal(popup.context.DOM.elPopupDuration.innerText, '3 min');
+  assert.match(popup.renderedMultiList, /coulou&#39;s vinyl cafe \(no\. 4\) - rainy day selections/);
+  assert.match(popup.renderedMultiList, /vinted\.nl/);
+  assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedMultiList, /Word lid en verkoop tweedehands kleding/);
+  assert.match(popup.renderedMultiList, /Apple Mac mini 1 model A2348/);
+  assert.doesNotMatch(popup.renderedMultiList, /Sub-minute fragments hidden/);
+  assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
+  assert.match(popup.renderedMultiList, />3s<\/span>/);
+  assert.equal((popup.renderedMultiList.match(/title="vinted\.nl">vinted\.nl<\/span>/g) || []).length, 2);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 6);
+  assert.ok(popup.renderedMultiList.indexOf('Apple Mac mini 1 model A2348') < popup.renderedMultiList.indexOf('Vinted | Een app, alles tweedehands'));
+  assert.ok(popup.renderedMultiList.indexOf('Vinted | Een app, alles tweedehands') < popup.renderedMultiList.indexOf('Artikelen | Vinted'));
+  assert.ok(popup.renderedMultiList.indexOf('Artikelen | Vinted') < popup.renderedMultiList.indexOf('Word lid en verkoop tweedehands kleding'));
+  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
+    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
+  }));
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 2);
+  assert.equal(popup.modalArgs[6][1].title, 'vinted.nl');
+  assert.equal(popup.modalArgs[6][1].sources.length, 6);
+});
+
+test('one-minute visible Vinted block with short page fragments opens a session popup', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + (14 * 60 + 2) * 60 * 1000;
+  const popup = renderMultipleActivitiesPopup({
+    zoom: 1,
+    startCell: 14 * 60 + 2,
+    span: 2,
+    app: 'Brave Browser',
+    title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+    url: 'https://www.vinted.nl/member/signup/select_type',
+    datasetOverrides: {
+      startMs: String(blockStart),
+      endMs: String(blockStart + 2 * 60 * 1000),
+      activeDurationMs: String(2 * 60 * 1000)
+    },
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+        url: 'https://www.vinted.nl/member/signup/select_type',
+        duration: 12 * 1000,
+        start: blockStart,
+        end: blockStart + 12 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Vinted | Een app, alles tweedehands',
+        url: 'https://www.vinted.nl/',
+        duration: 40 * 1000,
+        start: blockStart + 12 * 1000,
+        end: blockStart + 52 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Artikelen | Vinted',
+        url: 'https://www.vinted.nl/catalog',
+        duration: 16 * 1000,
+        start: blockStart + 52 * 1000,
+        end: blockStart + 68 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Apple Mac mini 1 model A2348 | Vinted',
+        url: 'https://www.vinted.nl/items/apple-mac-mini',
+        duration: 52 * 1000,
+        start: blockStart + 68 * 1000,
+        end: blockStart + 120 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'vinted.nl');
+  assert.equal(popup.context.DOM.elPopupDuration.innerText, '2 min');
+  assert.equal(popup.renderedMultiList, '');
+  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
+  assert.match(popup.renderedSingleChildren, /Word lid en verkoop tweedehands kleding/);
+  assert.match(popup.renderedSingleChildren, /Apple Mac mini 1 model A2348/);
+  assert.equal((popup.renderedSingleChildren.match(/data-popup-child-index/g) || []).length, 4);
+  assert.ok(popup.renderedSingleChildren.indexOf('Apple Mac mini 1 model A2348') < popup.renderedSingleChildren.indexOf('Vinted | Een app, alles tweedehands'));
+  assert.ok(popup.renderedSingleChildren.indexOf('Vinted | Een app, alles tweedehands') < popup.renderedSingleChildren.indexOf('Artikelen | Vinted'));
+  assert.ok(popup.renderedSingleChildren.indexOf('Artikelen | Vinted') < popup.renderedSingleChildren.indexOf('Word lid en verkoop tweedehands kleding'));
+  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
+    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
+  }));
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  assert.equal(popup.modalArgs[6][0].title, 'vinted.nl');
+  assert.equal(popup.modalArgs[6][0].duration, 2 * 60 * 1000);
+  assert.equal(popup.modalArgs[6][0].sources.length, 4);
+});
+
+test('coarse block secondary badge and popup both include contextual short Vinted work', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 14 * 60 * 60 * 1000;
+  const overlaps = [
+    {
+      app: 'Brave Browser',
+      title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+      url: 'https://www.youtube.com/watch?v=rainy',
+      duration: 61 * 1000,
+      start: blockStart,
+      end: blockStart + 61 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted',
+      url: 'https://www.vinted.nl/member/signup/select_type',
+      duration: 12 * 1000,
+      start: blockStart + 61 * 1000,
+      end: blockStart + 73 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Vinted | Een app, alles tweedehands',
+      url: 'https://www.vinted.nl/',
+      duration: 40 * 1000,
+      start: blockStart + 73 * 1000,
+      end: blockStart + 113 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Artikelen | Vinted',
+      url: 'https://www.vinted.nl/catalog',
+      duration: 16 * 1000,
+      start: blockStart + 113 * 1000,
+      end: blockStart + 129 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Apple Mac mini 1 model A2348 | Vinted',
+      url: 'https://www.vinted.nl/items/apple-mac-mini',
+      duration: 52 * 1000,
+      start: blockStart + 129 * 1000,
+      end: blockStart + 181 * 1000
+    },
+    {
+      app: 'Fastmail',
+      title: 'Inbox',
+      url: '',
+      duration: 20 * 1000,
+      start: blockStart + 181 * 1000,
+      end: blockStart + 201 * 1000
+    }
+  ];
+  const iconHtml = renderActivityBlockChromeHtml({
+    startCell: 14 * 12,
+    span: 1,
+    app: 'Brave Browser',
+    title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+    url: 'https://www.youtube.com/watch?v=rainy',
+    overlaps,
+    iconFactory: (iconApp, iconUrl, iconTitle) => (
+      `<span class="fake-icon" data-icon="${iconApp}" data-url="${iconUrl}" data-title="${iconTitle}"></span>`
+    )
+  });
+  const popup = renderMultipleActivitiesPopup({
+    startCell: 14 * 12,
+    span: 1,
+    app: 'Brave Browser',
+    title: "coulou's vinyl cafe (no. 4) - rainy day selections",
+    url: 'https://www.youtube.com/watch?v=rainy',
+    overlaps
+  });
+
+  assert.match(iconHtml, /data-url="https:\/\/vinted\.nl"/);
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Multiple Activities');
+  assert.match(popup.renderedMultiList, /coulou&#39;s vinyl cafe \(no\. 4\) - rainy day selections/);
+  assert.match(popup.renderedMultiList, /vinted\.nl/);
+  assert.match(popup.renderedMultiList, />2 min</);
+  assert.match(popup.renderedMultiList, /Apple Mac mini 1 model A2348/);
+  assert.match(popup.renderedMultiList, /Word lid en verkoop tweedehands kleding/);
+  assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
+  assert.doesNotMatch(popup.renderedMultiList, /Inbox/);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 5);
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 2);
+  assert.equal(popup.modalArgs[6][0].title, 'youtube.com');
+  assert.equal(popup.modalArgs[6][0].sources.length, 1);
+  assert.equal(popup.modalArgs[6][1].title, 'vinted.nl');
+  assert.equal(popup.modalArgs[6][1].sources.length, 4);
+});
+
+test('popup sessions aggregate page children and omit short unrelated scraps', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 14 * 60 * 60 * 1000;
+  const popup = renderMultipleActivitiesPopup({
+    startCell: 14 * 12,
+    span: 2,
+    app: 'Brave Browser',
+    title: 'mediamarkt.nl',
+    url: 'https://www.mediamarkt.nl/',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'mediamarkt.nl',
+        url: 'https://www.mediamarkt.nl/',
+        duration: 4 * 60 * 1000,
+        start: blockStart,
+        end: blockStart + 4 * 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'KOENIC KIP 352925 Double Induction Plate Induktionskookplaat',
+        url: 'https://www.mediamarkt.nl/nl/product/_koenic-kip-352925-1.html',
+        duration: 28 * 1000,
+        start: blockStart + 4 * 60 * 1000,
+        end: blockStart + 4 * 60 * 1000 + 28 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'KOENIC KIP 352925 Double Induction Plate Induktionskookplaat',
+        url: 'https://www.mediamarkt.nl/nl/product/_koenic-kip-352925-1.html',
+        duration: 32 * 1000,
+        start: blockStart + 4 * 60 * 1000 + 28 * 1000,
+        end: blockStart + 5 * 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Zero duration page',
+        url: 'https://www.mediamarkt.nl/zero',
+        duration: 0,
+        start: blockStart + 5 * 60 * 1000,
+        end: blockStart + 5 * 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'New Tab',
+        url: 'chrome://newtab/',
+        duration: 1000,
+        start: blockStart + 5 * 60 * 1000,
+        end: blockStart + 5 * 60 * 1000 + 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'duckduckgo.com',
+        url: 'https://duckduckgo.com/',
+        duration: 1000,
+        start: blockStart + 5 * 60 * 1000 + 1000,
+        end: blockStart + 5 * 60 * 1000 + 2000
+      },
+      {
+        app: 'Brave Browser',
+        title: '4049011211568 at DuckDuckGo',
+        url: 'https://duckduckgo.com/?q=4049011211568',
+        duration: 61 * 1000,
+        start: blockStart + 5 * 60 * 1000 + 2000,
+        end: blockStart + 6 * 60 * 1000 + 3000
+      },
+      {
+        app: 'Codex',
+        title: 'Codex',
+        duration: 10 * 1000,
+        start: blockStart + 6 * 60 * 1000 + 3000,
+        end: blockStart + 6 * 60 * 1000 + 13 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'ebay.de',
+        url: 'https://www.ebay.de/',
+        duration: 1000,
+        start: blockStart + 6 * 60 * 1000 + 13 * 1000,
+        end: blockStart + 6 * 60 * 1000 + 14 * 1000
+      }
+    ]
+  });
+
+  assert.match(popup.renderedMultiList, /font-bold[^>]*>mediamarkt\.nl<\/span>/);
+  assert.match(popup.renderedMultiList, /font-bold[^>]*>duckduckgo\.com<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
+  assert.doesNotMatch(popup.renderedMultiList, /New Tab/);
+  assert.doesNotMatch(popup.renderedMultiList, /Codex/);
+  assert.doesNotMatch(popup.renderedMultiList, /ebay\.de/);
+  assert.doesNotMatch(popup.renderedMultiList, /Zero duration page/);
+  assert.match(popup.renderedMultiList, /KOENIC KIP 352925 Double Induction Plate/);
+  assert.match(popup.renderedMultiList, /4049011211568 at DuckDuckGo/);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 4);
+  assert.ok(popup.renderedMultiList.indexOf('mediamarkt.nl') < popup.renderedMultiList.indexOf('KOENIC KIP 352925'));
+  assert.ok(popup.renderedMultiList.indexOf('4049011211568 at DuckDuckGo') < popup.renderedMultiList.lastIndexOf('duckduckgo.com'));
+  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
+    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
+  }));
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 2);
+  assert.equal(popup.modalArgs[6][0].title, 'mediamarkt.nl');
+  assert.equal(popup.modalArgs[6][0].sources.length, 3);
+  assert.equal(popup.modalArgs[6][1].title, 'duckduckgo.com');
+  assert.equal(popup.modalArgs[6][1].sources.length, 2);
+});
+
+test('bulk assignment modal renders aggregate rows while selected activities preserve exact fragments', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 14, 40).getTime();
+  const first = {
+    app: 'Brave Browser',
+    title: "coulou's cafe trumpet meditations (no. 71)",
+    url: 'https://www.youtube.com/watch?v=trumpet',
+    start: startMs,
+    end: startMs + 20 * 1000,
+    duration: 20 * 1000,
+    assignedDurationMs: 20 * 1000,
+    assignmentSource: 'activity-stream',
+    modalAggregateGroupKey: 'brave-browser-youtube-trumpet'
+  };
+  const second = {
+    app: 'Brave Browser',
+    title: "coulou's cafe trumpet meditations (no. 71)",
+    url: 'https://www.youtube.com/watch?v=trumpet',
+    start: startMs + 60 * 1000,
+    end: startMs + 100 * 1000,
+    duration: 40 * 1000,
+    assignedDurationMs: 40 * 1000,
+    assignmentSource: 'activity-stream',
+    modalAggregateGroupKey: 'brave-browser-youtube-trumpet'
+  };
+  const third = {
+    app: 'Brave Browser',
+    title: "coulou's cafe trumpet meditations (no. 71)",
+    url: 'https://www.youtube.com/watch?v=trumpet',
+    start: startMs + 2 * 60 * 1000,
+    end: startMs + 3 * 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentSource: 'activity-stream',
+    modalAggregateGroupKey: 'brave-browser-youtube-trumpet'
+  };
+
+  context.openTimeEntryModal(startMs, startMs + 3 * 60 * 1000, '', null, null, true, [first, second, third]);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 1);
+  assert.doesNotMatch(listHtml, />0 min</);
+  assert.match(listHtml, />2 min</);
+  assert.equal(context.getSelectedModalActivities().length, 3);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '2 min');
+
+  context.setModalActivityIncluded(0, false);
+
+  assert.equal(context.getSelectedModalActivities().length, 0);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '0 min');
 });
