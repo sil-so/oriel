@@ -1,14 +1,10 @@
 // Render background timeline grid lines
 function renderTimelineGrids() {
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-    const activityCells = getCurrentDayTimelineActivityCells(dateStartOfDay, state.zoom);
-    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(state.timeEntries || [], state.zoom, dateStartOfDay);
-    const rowLayout = buildDayTimelineRowLayout({
+    const rowLayout = getDayTimelineRenderModel({
         dateStartOfDay,
-        zoom: state.zoom,
-        activityCells,
-        timeEntryRenderItems
-    });
+        zoom: state.zoom
+    }).rowLayout;
     let html = '';
     
     for (let displayRow = 0; displayRow < rowLayout.displayRowCount; displayRow++) {
@@ -48,9 +44,27 @@ const ACTIVITY_MIX_HANDS_ON_TOOLTIP_DESCRIPTION = 'Recent keyboard, mouse, click
 const ACTIVITY_MIX_HANDS_OFF_TOOLTIP_DESCRIPTION = 'Foreground time without recent input, such as reading, watching, or listening.';
 const ACTIVITY_MIX_INFO_HELP = 'Shows how much of this recorded foreground time included recent keyboard, mouse, click, or scroll input within 30 seconds. Hands-off still counts when the app stayed in front while you read, watched, or listened.';
 const ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS = 60 * 1000;
+const ACTIVITY_STREAM_SESSION_MERGE_GAP_MS = 15 * 1000;
+const ACTIVITY_STREAM_MIN_VISIBLE_SESSION_DURATION_MS = 60 * 1000;
+const ACTIVITY_STREAM_MIN_EXACT_FRAGMENT_DURATION_MS = 60 * 1000;
 const LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS = 60 * 1000;
+const UNLOGGED_WORK_MIN_REVIEW_FRAGMENT_DURATION_MS = 1000;
+const UNLOGGED_WORK_MIN_REVIEW_GROUP_DURATION_MS = 60 * 1000;
+const TIME_ENTRY_FLOATING_LABEL_MIN_HEIGHT_PX = 120;
+const TIME_ENTRY_FLOATING_LABEL_PADDING_PX = 6;
 const POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS = 60 * 1000;
 let visibleActivityCellsCache = null;
+let floatingTimeEntryLabelScrollPane = null;
+let floatingTimeEntryLabelFramePending = false;
+let floatingTimeEntryLabelBlocks = [];
+let dayTimelineRenderModelCache = null;
+
+function incrementTimelineDiagnostic(name, amount = 1) {
+    const diagnostics = window?.__orielTimelineDiagnostics;
+    if (!diagnostics || !name) return;
+
+    diagnostics[name] = (Number(diagnostics[name]) || 0) + amount;
+}
 
 function isHideEmptyActivityRowsEnabled() {
     return Boolean(state?.settings?.hideEmptyActivityRows);
@@ -66,6 +80,10 @@ function getTimelineRowDurationMs(zoom) {
 
 function getTimelineTotalRows(zoom) {
     return Math.floor(1440 / Math.max(1, Number(zoom) || 1));
+}
+
+function shouldRenderExactActivityStreamSessions(zoom) {
+    return Math.max(1, Number(zoom) || 1) === 1;
 }
 
 function buildFullDayTimelineRowLayout(dateStartOfDay, zoom) {
@@ -112,6 +130,7 @@ function buildDayTimelineRowLayout({
     dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0),
     zoom = state.zoom,
     activityCells = null,
+    activitySessions = null,
     timeEntryRenderItems = null,
     hideEmptyRows = isHideEmptyActivityRowsEnabled()
 } = {}) {
@@ -123,15 +142,25 @@ function buildDayTimelineRowLayout({
 
     const cells = Array.isArray(activityCells)
         ? activityCells
-        : getCurrentDayTimelineActivityCells(dateStartOfDay, renderZoom);
+        : null;
+    const sessions = Array.isArray(activitySessions)
+        ? activitySessions
+        : null;
     const renderItems = Array.isArray(timeEntryRenderItems)
         ? timeEntryRenderItems
         : buildLoggedTimeEntryRenderItems(state.timeEntries || [], renderZoom, dateStartOfDay);
     const keepRows = new Set();
 
-    cells.forEach((cell, index) => {
-        if (cell) keepRows.add(index);
-    });
+    if (sessions) {
+        sessions.forEach(session => {
+            addSourceRowsForRange(keepRows, getTimelineDisplayRowRange(session.start, session.end, dateStartOfDay, renderZoom), totalRows);
+        });
+    } else {
+        const fallbackCells = cells || getCurrentDayTimelineActivityCells(dateStartOfDay, renderZoom);
+        fallbackCells.forEach((cell, index) => {
+            if (cell) keepRows.add(index);
+        });
+    }
 
     renderItems.forEach(item => {
         const range = Number.isFinite(item?.displayStart) && Number.isFinite(item?.displayEnd) && item.displayEnd > item.displayStart
@@ -159,6 +188,123 @@ function buildDayTimelineRowLayout({
         displayRowBySourceRow,
         hideEmptyRows: true
     };
+}
+
+function getDayTimelineRenderModel({
+    dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0),
+    zoom = state.zoom,
+    hideEmptyRows = isHideEmptyActivityRowsEnabled()
+} = {}) {
+    const renderZoom = Math.max(1, Number(zoom) || 1);
+    const dayStart = Number.isFinite(dateStartOfDay)
+        ? dateStartOfDay
+        : new Date(state.currentDate).setHours(0,0,0,0);
+    const ownershipActivities = Array.isArray(state.timelineActivities)
+        ? state.timelineActivities
+        : state.activities;
+    const visibleActivities = Array.isArray(state.activities)
+        ? state.activities
+        : ownershipActivities;
+    const timeEntries = Array.isArray(state.timeEntries) ? state.timeEntries : [];
+    const signature = {
+        dateStartOfDay: dayStart,
+        zoom: renderZoom,
+        hideEmptyRows: Boolean(hideEmptyRows),
+        ownershipActivities,
+        visibleActivities,
+        timeEntries,
+        ownershipSignature: getTimelineActivityListSignature(ownershipActivities),
+        visibleSignature: ownershipActivities === visibleActivities
+            ? 'same'
+            : getTimelineActivityListSignature(visibleActivities),
+        timeEntrySignature: getTimelineTimeEntryListSignature(timeEntries)
+    };
+
+    if (dayTimelineRenderModelCache
+        && dayTimelineRenderModelCache.dateStartOfDay === signature.dateStartOfDay
+        && dayTimelineRenderModelCache.zoom === signature.zoom
+        && dayTimelineRenderModelCache.hideEmptyRows === signature.hideEmptyRows
+        && dayTimelineRenderModelCache.ownershipActivities === signature.ownershipActivities
+        && dayTimelineRenderModelCache.visibleActivities === signature.visibleActivities
+        && dayTimelineRenderModelCache.timeEntries === signature.timeEntries
+        && dayTimelineRenderModelCache.ownershipSignature === signature.ownershipSignature
+        && dayTimelineRenderModelCache.visibleSignature === signature.visibleSignature
+        && dayTimelineRenderModelCache.timeEntrySignature === signature.timeEntrySignature) {
+        incrementTimelineDiagnostic('dayRenderModelCacheHits');
+        return dayTimelineRenderModelCache.model;
+    }
+
+    incrementTimelineDiagnostic('dayRenderModelBuilds');
+    const activityBlockDetails = new Map();
+    const useActivitySessions = shouldRenderExactActivityStreamSessions(renderZoom);
+    const activitySessions = useActivitySessions
+        ? buildActivityStreamSessions({
+            dateStartOfDay: dayStart,
+            activities: ownershipActivities,
+            detailActivities: visibleActivities,
+            timeEntries
+        })
+        : null;
+    const activityCells = useActivitySessions
+        ? null
+        : buildVisibleActivityCells({
+            dateStartOfDay: dayStart,
+            zoom: renderZoom,
+            ownershipActivities,
+            visibleActivities
+        });
+    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(timeEntries, renderZoom, dayStart);
+    const rowLayout = buildDayTimelineRowLayout({
+        dateStartOfDay: dayStart,
+        zoom: renderZoom,
+        activityCells,
+        activitySessions,
+        timeEntryRenderItems,
+        hideEmptyRows
+    });
+
+    rowLayout.activityBlockDetails = activityBlockDetails;
+    const model = {
+        dateStartOfDay: dayStart,
+        zoom: renderZoom,
+        hideEmptyRows: Boolean(hideEmptyRows),
+        useActivitySessions,
+        activitySessions,
+        activityCells,
+        timeEntryRenderItems,
+        rowLayout,
+        activityBlockDetails
+    };
+
+    dayTimelineRenderModelCache = {
+        ...signature,
+        model
+    };
+    return model;
+}
+
+function shouldUseCurrentDayTimelineRenderModel(options = {}) {
+    if (options?.sourceRows
+        || Array.isArray(options?.activityCells)
+        || Array.isArray(options?.activitySessions)
+        || Array.isArray(options?.timeEntryRenderItems)
+        || options?.useCachedModel === false) {
+        return false;
+    }
+
+    const dateStartOfDay = Number.isFinite(options?.dateStartOfDay)
+        ? options.dateStartOfDay
+        : new Date(state.currentDate).setHours(0,0,0,0);
+    const currentDateStart = new Date(state.currentDate).setHours(0,0,0,0);
+    return dateStartOfDay === currentDateStart;
+}
+
+function getTimelineRowLayout(options = {}) {
+    if (options?.sourceRows) return options;
+    if (shouldUseCurrentDayTimelineRenderModel(options)) {
+        return getDayTimelineRenderModel(options).rowLayout;
+    }
+    return buildDayTimelineRowLayout(options);
 }
 
 function getDisplayRowInsertionForSourceRow(layout, sourceRow) {
@@ -223,7 +369,7 @@ function getDisplayRowRangeForSourceRange(layout, startRow, endRow) {
 
 function getTimelineDisplayRangeGeometry(start, end, dateStartOfDay, zoom, layout = null) {
     const sourceRange = getTimelineDisplayRowRange(start, end, dateStartOfDay, zoom);
-    const rowLayout = layout || buildDayTimelineRowLayout({ dateStartOfDay, zoom });
+    const rowLayout = layout || getTimelineRowLayout({ dateStartOfDay, zoom });
     const displayRange = getDisplayRowRangeForSourceRange(rowLayout, sourceRange.startRow, sourceRange.endRow);
     return {
         ...sourceRange,
@@ -235,10 +381,20 @@ function getTimelineDisplayRangeGeometry(start, end, dateStartOfDay, zoom, layou
     };
 }
 
+function getTimelineExactDisplayRangeGeometry(start, end, dateStartOfDay, zoom, layout = null) {
+    const rowLayout = layout || getTimelineRowLayout({ dateStartOfDay, zoom });
+    const startTop = getTimelineDisplayTopForTime(start, rowLayout);
+    const endTop = getTimelineDisplayTopForTime(end, rowLayout);
+    return {
+        top: Math.max(0, startTop + 2),
+        height: Math.max(1, endTop - startTop - 3)
+    };
+}
+
 function getTimelineDisplayTopForTime(timeMs, options = {}) {
     const layout = options?.sourceRows
         ? options
-        : buildDayTimelineRowLayout(options);
+        : getTimelineRowLayout(options);
     const rowDurationMs = layout.rowDurationMs || getTimelineRowDurationMs(layout.zoom);
     const sourceRowFloat = Math.max(0, (Number(timeMs) - layout.dateStartOfDay) / rowDurationMs);
     const sourceRow = Math.min(layout.totalSourceRows - 1, Math.floor(sourceRowFloat));
@@ -257,7 +413,7 @@ function getTimelineDisplayTopForTime(timeMs, options = {}) {
 function getTimelineTimeForDisplayTop(displayTop, options = {}) {
     const layout = options?.sourceRows
         ? options
-        : buildDayTimelineRowLayout(options);
+        : getTimelineRowLayout(options);
     const displayRowFloat = Math.max(0, Number(displayTop) / 40);
     const displayRow = Math.floor(displayRowFloat);
     const rowFraction = displayRowFloat - displayRow;
@@ -568,6 +724,66 @@ function getActivityListCacheSignature(activities) {
     ].join(':');
 }
 
+function hashTimelineSignatureValue(hash, value) {
+    const text = normalizeActivityText(value);
+    let nextHash = hash >>> 0;
+    for (let index = 0; index < text.length; index++) {
+        nextHash = ((nextHash * 33) ^ text.charCodeAt(index)) >>> 0;
+    }
+    return nextHash >>> 0;
+}
+
+function getTimelineActivityListSignature(activities) {
+    if (!Array.isArray(activities) || activities.length === 0) return '0';
+
+    let hash = activities.length >>> 0;
+    activities.forEach(activity => {
+        hash = hashTimelineSignatureValue(hash, activity?.start);
+        hash = hashTimelineSignatureValue(hash, activity?.end);
+        hash = hashTimelineSignatureValue(hash, activity?.duration);
+        hash = hashTimelineSignatureValue(hash, activity?.app);
+        hash = hashTimelineSignatureValue(hash, activity?.title);
+        hash = hashTimelineSignatureValue(hash, activity?.url);
+        hash = hashTimelineSignatureValue(hash, activity?.appPath);
+        hash = hashTimelineSignatureValue(hash, activity?.bundleId);
+    });
+    return `${activities.length}:${hash}`;
+}
+
+function getTimelineTimeEntryListSignature(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return '0';
+
+    let hash = entries.length >>> 0;
+    entries.forEach(entry => {
+        hash = hashTimelineSignatureValue(hash, entry?.id);
+        hash = hashTimelineSignatureValue(hash, entry?.start);
+        hash = hashTimelineSignatureValue(hash, entry?.end);
+        hash = hashTimelineSignatureValue(hash, entry?.projectId);
+        hash = hashTimelineSignatureValue(hash, entry?.taskId);
+        hash = hashTimelineSignatureValue(hash, entry?.createdBy);
+        hash = hashTimelineSignatureValue(hash, entry?.autoRuleId);
+
+        const activities = Array.isArray(entry?.activities) ? entry.activities : [];
+        hash = hashTimelineSignatureValue(hash, activities.length);
+        activities.forEach(activity => {
+            hash = hashTimelineSignatureValue(hash, activity?.start);
+            hash = hashTimelineSignatureValue(hash, activity?.end);
+            hash = hashTimelineSignatureValue(hash, activity?.duration);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentStart);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentEnd);
+            hash = hashTimelineSignatureValue(hash, activity?.assignedDurationMs);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentSource);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentModel);
+            hash = hashTimelineSignatureValue(hash, activity?.app);
+            hash = hashTimelineSignatureValue(hash, activity?.title);
+            hash = hashTimelineSignatureValue(hash, activity?.url);
+            hash = hashTimelineSignatureValue(hash, activity?.appPath);
+            hash = hashTimelineSignatureValue(hash, activity?.bundleId);
+        });
+    });
+    return `${entries.length}:${hash}`;
+}
+
 function buildVisibleActivityCells({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
     const totalCells = Math.floor(1440 / zoom);
     const ownershipList = Array.isArray(ownershipActivities) ? ownershipActivities : [];
@@ -665,6 +881,278 @@ function buildVisibleActivityCells({ dateStartOfDay, zoom, ownershipActivities, 
     };
 
     return cellActivities;
+}
+
+function getMergedActivityRangeDurationMs(ranges) {
+    const sortedRanges = (Array.isArray(ranges) ? ranges : [])
+        .map(range => ({
+            start: Number(range?.start),
+            end: Number(range?.end)
+        }))
+        .filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+        .sort((left, right) => left.start - right.start || left.end - right.end);
+
+    let total = 0;
+    let current = null;
+    for (const range of sortedRanges) {
+        if (!current || range.start > current.end) {
+            if (current) total += current.end - current.start;
+            current = { ...range };
+            continue;
+        }
+
+        current.end = Math.max(current.end, range.end);
+    }
+
+    if (current) total += current.end - current.start;
+    return total;
+}
+
+function getActivityStreamSessionKey(activity) {
+    return getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
+}
+
+function getActivityStreamSourceOverlaps(block, detailActivities) {
+    const details = Array.isArray(detailActivities) && detailActivities.length > 0
+        ? detailActivities
+        : block.sources;
+    const overlaps = details
+        .map(activity => getActivityOverlapInRange(activity, block.start, block.end))
+        .filter(Boolean);
+
+    return overlaps.length > 0 ? overlaps : block.sources.map(source => ({ ...source }));
+}
+
+function getAssignedActivityStreamRange(activity) {
+    const start = Number(activity?.assignmentStart ?? activity?.start);
+    const end = Number(activity?.assignmentEnd ?? activity?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+
+    const duration = Number(activity?.assignedDurationMs);
+    return {
+        start,
+        end,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : end - start
+    };
+}
+
+function buildAssignedActivityStreamRangeIndex(timeEntries) {
+    const index = new Map();
+
+    (Array.isArray(timeEntries) ? timeEntries : []).forEach(entry => {
+        getActivityStreamAssignmentActivities(entry).forEach(activity => {
+            const key = getActivityStreamSessionKey(activity);
+            const range = getAssignedActivityStreamRange(activity);
+            if (!key || !range || range.duration <= 0) return;
+
+            if (!index.has(key)) index.set(key, []);
+            index.get(key).push(range);
+        });
+    });
+
+    return index;
+}
+
+function getAssignedActivityStreamOverlapMs(source, assignedRangeIndex) {
+    if (!assignedRangeIndex || assignedRangeIndex.size === 0) return 0;
+
+    const key = source?.similarityKey || getActivityStreamSessionKey(source);
+    const ranges = key ? assignedRangeIndex.get(key) : null;
+    if (!Array.isArray(ranges) || ranges.length === 0) return 0;
+
+    return ranges.reduce((total, range) => {
+        const start = Math.max(source.start, range.start);
+        const end = Math.min(source.end, range.end);
+        return end > start ? total + (end - start) : total;
+    }, 0);
+}
+
+function createActivityStreamForegroundBlock(source, detailActivities) {
+    const duration = getActivitySourceDuration(source, source.start, source.end);
+    const block = {
+        app: source.app || '',
+        title: getActivityDisplayTitle(source) || source.title || '',
+        url: source.url || '',
+        appPath: source.appPath || '',
+        bundleId: source.bundleId || '',
+        similarityKey: source.similarityKey,
+        summaryKey: source.summaryKey,
+        start: source.start,
+        end: source.end,
+        activeDurationMs: duration,
+        elapsedDurationMs: source.end - source.start,
+        duration,
+        assignedDurationMs: Number(source.assignedDurationMs) || 0,
+        interruptionCount: 0,
+        sources: [source],
+        activityMix: source.activityMix || emptyActivityMix()
+    };
+    return block;
+}
+
+function mergeAdjacentActivityStreamForegroundBlock(block, source, detailActivities) {
+    const additionalActiveDurationMs = Math.max(0, source.end - Math.max(source.start, block.end));
+    block.end = Math.max(block.end, source.end);
+    block.sources.push(source);
+    block.activeDurationMs += additionalActiveDurationMs;
+    block.assignedDurationMs += Number(source.assignedDurationMs) || 0;
+    block.elapsedDurationMs = block.end - block.start;
+    block.duration = block.activeDurationMs;
+    block.activityMix = addTimelineActivityMix(block.activityMix || emptyActivityMix(), source.activityMix || emptyActivityMix());
+    return block;
+}
+
+function shouldTreatSourceAsAssignedSessionInterruption(currentBlock, source, mergeGapMs, minVisibleDurationMs) {
+    if (!currentBlock || !source) return false;
+    if (currentBlock.similarityKey === source.similarityKey) return false;
+    if (source.start > currentBlock.end + mergeGapMs) return false;
+    if ((Number(currentBlock.assignedDurationMs) || 0) <= 0) return false;
+    if ((Number(source.assignedDurationMs) || 0) > 0) return false;
+
+    return getActivitySourceDuration(source, source.start, source.end) < minVisibleDurationMs;
+}
+
+function collectVisibleActivityStreamSourceIndexes(sources, mergeGapMs, minVisibleDurationMs) {
+    const byKey = new Map();
+    for (const source of sources) {
+        if (!source.similarityKey) continue;
+        if (!byKey.has(source.similarityKey)) byKey.set(source.similarityKey, []);
+        byKey.get(source.similarityKey).push(source);
+    }
+
+    const visibleIndexes = new Set();
+    for (const keySources of byKey.values()) {
+        keySources.sort((left, right) => left.start - right.start || left.end - right.end);
+
+        let current = [];
+        let currentEnd = null;
+        const flushCurrent = () => {
+            if (current.length === 0) return;
+            if (getMergedActivityRangeDurationMs(current) >= minVisibleDurationMs) {
+                current.forEach(source => visibleIndexes.add(source.sourceIndex));
+            }
+            current = [];
+            currentEnd = null;
+        };
+
+        for (const source of keySources) {
+            if (current.length === 0 || source.start <= currentEnd + mergeGapMs) {
+                current.push(source);
+                currentEnd = Number.isFinite(currentEnd) ? Math.max(currentEnd, source.end) : source.end;
+                continue;
+            }
+
+            flushCurrent();
+            current.push(source);
+            currentEnd = source.end;
+        }
+
+        flushCurrent();
+    }
+
+    return visibleIndexes;
+}
+
+function buildActivityStreamSessions({
+    dateStartOfDay,
+    activities,
+    detailActivities = null,
+    timeEntries = null,
+    mergeGapMs = ACTIVITY_STREAM_SESSION_MERGE_GAP_MS,
+    minVisibleDurationMs = ACTIVITY_STREAM_MIN_VISIBLE_SESSION_DURATION_MS,
+    minExactFragmentDurationMs = ACTIVITY_STREAM_MIN_EXACT_FRAGMENT_DURATION_MS
+} = {}) {
+    const dayStart = Number.isFinite(dateStartOfDay)
+        ? dateStartOfDay
+        : new Date(state.currentDate).setHours(0,0,0,0);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const list = Array.isArray(activities) ? activities : [];
+    const detailList = Array.isArray(detailActivities) ? detailActivities : list;
+    const assignedRangeIndex = buildAssignedActivityStreamRangeIndex(timeEntries);
+    const sources = [];
+
+    incrementTimelineDiagnostic('activitySessionBuilds');
+
+    list.forEach((activity, sourceIndex) => {
+        const source = getActivityOverlapInRange(activity, dayStart, dayEnd);
+        if (!source) return;
+
+        const key = getActivityStreamSessionKey(source);
+        if (!key) return;
+
+        const normalizedSource = {
+            ...source,
+            sourceIndex,
+            similarityKey: key,
+            summaryKey: getActivitySummaryKey(source),
+            title: getActivityDisplayTitle(source) || source.title || '',
+            duration: getActivitySourceDuration(source, source.start, source.end),
+            activityMix: getActivityMixInRange(source, source.start, source.end)
+        };
+        normalizedSource.assignedDurationMs = getAssignedActivityStreamOverlapMs(normalizedSource, assignedRangeIndex);
+        if (normalizedSource.duration > 0) sources.push(normalizedSource);
+    });
+
+    sources.sort((left, right) => left.start - right.start || left.end - right.end || left.sourceIndex - right.sourceIndex);
+    const visibleIndexes = collectVisibleActivityStreamSourceIndexes(sources, mergeGapMs, minVisibleDurationMs);
+    const blocks = [];
+    let currentBlock = null;
+
+    const flushCurrent = () => {
+        if (!currentBlock) return;
+        if ((currentBlock.activeDurationMs || 0) >= minExactFragmentDurationMs) {
+            currentBlock.overlaps = getActivityStreamSourceOverlaps(currentBlock, detailList);
+            blocks.push(currentBlock);
+        }
+        currentBlock = null;
+    };
+
+    for (const source of sources) {
+        if (!visibleIndexes.has(source.sourceIndex)) {
+            if (currentBlock && source.start <= currentBlock.end + mergeGapMs) {
+                if (source.similarityKey !== currentBlock.similarityKey) {
+                    currentBlock.interruptionCount = (Number(currentBlock.interruptionCount) || 0) + 1;
+                }
+            } else {
+                flushCurrent();
+            }
+            continue;
+        }
+
+        if (shouldTreatSourceAsAssignedSessionInterruption(currentBlock, source, mergeGapMs, minVisibleDurationMs)) {
+            currentBlock.interruptionCount = (Number(currentBlock.interruptionCount) || 0) + 1;
+            continue;
+        }
+
+        const canMergeWithCurrent = currentBlock
+            && currentBlock.similarityKey === source.similarityKey
+            && source.start <= currentBlock.end + mergeGapMs;
+
+        if (canMergeWithCurrent) {
+            mergeAdjacentActivityStreamForegroundBlock(currentBlock, source, detailList);
+            continue;
+        }
+
+        flushCurrent();
+        currentBlock = createActivityStreamForegroundBlock(source, detailList);
+    }
+
+    flushCurrent();
+    return blocks;
+}
+
+function getCurrentDayTimelineActivitySessions(dateStartOfDay) {
+    const ownershipActivities = Array.isArray(state.timelineActivities)
+        ? state.timelineActivities
+        : state.activities;
+    const visibleActivities = Array.isArray(state.activities)
+        ? state.activities
+        : ownershipActivities;
+    return buildActivityStreamSessions({
+        dateStartOfDay,
+        activities: ownershipActivities,
+        detailActivities: visibleActivities
+    });
 }
 
 function getActivityDurationForSummaryWithinRange(activities, summaryKey, rangeStart, rangeEnd) {
@@ -861,36 +1349,387 @@ function buildActivityStreamSummaryAssignmentActivities(activities, rangeStart, 
         .filter(Boolean);
 }
 
-// Merges raw activities into a grid structure and renders Activity Stream blocks
-function renderMemoryAidActivities() {
-    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-    const ownershipActivities = Array.isArray(state.timelineActivities)
-        ? state.timelineActivities
-        : state.activities;
-    const cellActivities = buildVisibleActivityCells({
-        dateStartOfDay,
-        zoom: state.zoom,
-        ownershipActivities,
-        visibleActivities: state.activities
-    });
-    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(state.timeEntries || [], state.zoom, dateStartOfDay);
-    const rowLayout = buildDayTimelineRowLayout({
-        dateStartOfDay,
-        zoom: state.zoom,
-        activityCells: cellActivities,
-        timeEntryRenderItems
-    });
-    const totalCells = cellActivities.length;
+function getMatchingActivitySourceRanges(overlaps, summaryKey) {
+    return (Array.isArray(overlaps) ? overlaps : [])
+        .filter(overlap => getActivitySummaryKey(overlap) === summaryKey)
+        .map(overlap => ({
+            start: Number(overlap?.start),
+            end: Number(overlap?.end)
+        }))
+        .filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+        .sort((left, right) => left.start - right.start || left.end - right.end);
+}
 
-    // Step 2: Merge adjacent similar cells to make beautiful unified activity blocks
+function hasContinuousMatchingActivityAcrossBoundary(currentBlock, nextCell) {
+    if (!currentBlock || !nextCell || currentBlock.summaryKey !== nextCell.summaryKey) return false;
+
+    const currentRanges = getMatchingActivitySourceRanges(currentBlock.overlaps, currentBlock.summaryKey);
+    const nextRanges = getMatchingActivitySourceRanges(nextCell.overlaps, nextCell.summaryKey);
+    if (currentRanges.length === 0 || nextRanges.length === 0) return false;
+
+    const currentEnd = Math.max(...currentRanges.map(range => range.end));
+    const nextStart = Math.min(...nextRanges.map(range => range.start));
+    return nextStart <= currentEnd + ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
+}
+
+function subtractTimelineRanges(baseRanges, blockerRanges) {
+    const blockers = (Array.isArray(blockerRanges) ? blockerRanges : [])
+        .filter(range => Number.isFinite(range?.start) && Number.isFinite(range?.end) && range.end > range.start)
+        .sort((left, right) => left.start - right.start || left.end - right.end);
+    const output = [];
+
+    for (const range of Array.isArray(baseRanges) ? baseRanges : []) {
+        if (!Number.isFinite(range?.start) || !Number.isFinite(range?.end) || range.end <= range.start) continue;
+
+        let fragments = [{ start: range.start, end: range.end }];
+        for (const blocker of blockers) {
+            fragments = fragments.flatMap(fragment => {
+                if (blocker.end <= fragment.start || blocker.start >= fragment.end) return [fragment];
+
+                const pieces = [];
+                if (blocker.start > fragment.start) pieces.push({ start: fragment.start, end: blocker.start });
+                if (blocker.end < fragment.end) pieces.push({ start: blocker.end, end: fragment.end });
+                return pieces;
+            });
+        }
+        output.push(...fragments.filter(fragment => fragment.end > fragment.start));
+    }
+
+    return output;
+}
+
+function getLoggedSourceSnapshotRange(entry, activity, dayStart, dayEnd) {
+    if (!activity) return null;
+
+    const rawStart = Number.isFinite(activity.assignmentStart)
+        ? activity.assignmentStart
+        : (Number.isFinite(activity.start) ? activity.start : entry?.start);
+    const rawEnd = Number.isFinite(activity.assignmentEnd)
+        ? activity.assignmentEnd
+        : (Number.isFinite(activity.end) ? activity.end : entry?.end);
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawEnd <= rawStart) return null;
+
+    const start = Math.max(dayStart, rawStart);
+    const end = Math.min(dayEnd, rawEnd);
+    if (end <= start) return null;
+
+    const matchKeys = new Set();
+    addActivityMatchKeys(matchKeys, activity);
+    if (matchKeys.size === 0) return null;
+
+    return { start, end, matchKeys };
+}
+
+function getLoggedSourceSnapshotRanges(timeEntries, dayStart, dayEnd) {
+    const ranges = [];
+
+    for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
+        for (const activity of Array.isArray(entry?.activities) ? entry.activities : []) {
+            const range = getLoggedSourceSnapshotRange(entry, activity, dayStart, dayEnd);
+            if (range) ranges.push(range);
+        }
+    }
+
+    return ranges;
+}
+
+function buildLoggedSourceSnapshotRangeIndex(timeEntries, dayStart, dayEnd) {
+    const ranges = getLoggedSourceSnapshotRanges(timeEntries, dayStart, dayEnd);
+    const rangesByKey = new Map();
+
+    ranges.forEach((range, index) => {
+        range.index = index;
+        range.matchKeys.forEach(key => {
+            if (!rangesByKey.has(key)) rangesByKey.set(key, []);
+            rangesByKey.get(key).push(range);
+        });
+    });
+
+    return { ranges, rangesByKey };
+}
+
+function getLoggedSourceSnapshotRangesForActivity(activity, index) {
+    const matchKeys = new Set();
+    addActivityMatchKeys(matchKeys, activity);
+    if (matchKeys.size === 0 || !index?.rangesByKey) return [];
+
+    const seenIndexes = new Set();
+    const ranges = [];
+    matchKeys.forEach(key => {
+        for (const range of index.rangesByKey.get(key) || []) {
+            if (seenIndexes.has(range.index)) continue;
+            seenIndexes.add(range.index);
+            ranges.push(range);
+        }
+    });
+    incrementTimelineDiagnostic('unloggedCandidateRangeChecks', ranges.length);
+    return ranges;
+}
+
+function getUnloggedActivityContextKey(activity) {
+    return getActivitySummaryKey(activity) || getActivitySimilarityKey(activity) || getActivityIdentityKey(activity);
+}
+
+function getUnloggedActivityLabel(activity) {
+    const title = getActivityDisplayTitle(activity);
+    const host = getActivitySummaryHostname(activity);
+    return title || host || normalizeActivityText(activity?.app).trim() || 'Recorded Activity';
+}
+
+function buildUnloggedActivityGroups({
+    activities,
+    timeEntries,
+    dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0)
+} = {}) {
+    const dayStart = Number.isFinite(dateStartOfDay)
+        ? dateStartOfDay
+        : new Date(state.currentDate).setHours(0,0,0,0);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const loggedRangeIndex = buildLoggedSourceSnapshotRangeIndex(timeEntries || state.timeEntries, dayStart, dayEnd);
+    const groupsByKey = new Map();
+    let fragmentIndex = 0;
+
+    for (const activity of Array.isArray(activities) ? activities : []) {
+        const clipped = getActivityOverlapInRange(activity, dayStart, dayEnd);
+        if (!clipped) continue;
+
+        const matchingLoggedRanges = getLoggedSourceSnapshotRangesForActivity(clipped, loggedRangeIndex);
+        const unloggedRanges = subtractTimelineRanges([clipped], matchingLoggedRanges);
+        for (const range of unloggedRanges) {
+            const duration = range.end - range.start;
+            if (duration <= 0) continue;
+
+            const groupKey = getUnloggedActivityContextKey(clipped);
+            if (!groupsByKey.has(groupKey)) {
+                groupsByKey.set(groupKey, {
+                    id: `unlogged-group-${groupsByKey.size + 1}`,
+                    key: groupKey,
+                    app: normalizeActivityText(clipped.app),
+                    title: getUnloggedActivityLabel(clipped),
+                    url: normalizeActivityText(clipped.url),
+                    appPath: normalizeActivityText(clipped.appPath),
+                    bundleId: normalizeActivityText(clipped.bundleId),
+                    durationMs: 0,
+                    start: range.start,
+                    end: range.end,
+                    fragments: []
+                });
+            }
+
+            const group = groupsByKey.get(groupKey);
+            const fragment = {
+                ...clipped,
+                id: `unlogged-fragment-${++fragmentIndex}`,
+                start: range.start,
+                end: range.end,
+                duration,
+                assignedDurationMs: duration,
+                assignmentStart: range.start,
+                assignmentEnd: range.end,
+                assignmentSource: 'activity-stream',
+                assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+                assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined
+            };
+
+            group.fragments.push(fragment);
+            group.durationMs += duration;
+            group.start = Math.min(group.start, range.start);
+            group.end = Math.max(group.end, range.end);
+        }
+    }
+
+    return Array.from(groupsByKey.values())
+        .map(group => ({
+            ...group,
+            fragments: group.fragments.sort((left, right) => left.start - right.start || left.end - right.end)
+        }))
+        .sort((left, right) => right.durationMs - left.durationMs || left.start - right.start);
+}
+
+function buildUnloggedBackfillActivities(groups, selectedFragmentIds = null) {
+    const selectedIds = Array.isArray(selectedFragmentIds) && selectedFragmentIds.length > 0
+        ? new Set(selectedFragmentIds)
+        : null;
+    const activities = [];
+
+    for (const group of Array.isArray(groups) ? groups : []) {
+        for (const fragment of Array.isArray(group?.fragments) ? group.fragments : []) {
+            if (selectedIds && !selectedIds.has(fragment.id)) continue;
+
+            const duration = Math.max(0, fragment.end - fragment.start);
+            if (duration <= 0) continue;
+            activities.push({
+                ...fragment,
+                duration,
+                assignedDurationMs: duration,
+                assignmentStart: fragment.start,
+                assignmentEnd: fragment.end,
+                assignmentSource: 'activity-stream',
+                assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+                assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined,
+                modalAggregateGroupKey: group?.key || getUnloggedActivityContextKey(fragment)
+            });
+        }
+    }
+
+    return activities.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function getCurrentUnloggedActivityGroups() {
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    return buildUnloggedActivityGroups({
+        activities: Array.isArray(state.timelineActivities) ? state.timelineActivities : state.activities,
+        timeEntries: state.timeEntries,
+        dateStartOfDay
+    });
+}
+
+function buildActionableUnloggedActivityReview(groups) {
+    const visibleGroups = [];
+    let hiddenFragmentCount = 0;
+
+    for (const group of Array.isArray(groups) ? groups : []) {
+        const actionableFragments = (Array.isArray(group?.fragments) ? group.fragments : [])
+            .filter(fragment => {
+                const duration = Number(fragment?.end) - Number(fragment?.start);
+                return Number.isFinite(duration) && duration >= UNLOGGED_WORK_MIN_REVIEW_FRAGMENT_DURATION_MS;
+            });
+        hiddenFragmentCount += Math.max(0, (group?.fragments?.length || 0) - actionableFragments.length);
+
+        const durationMs = actionableFragments.reduce((total, fragment) => {
+            const duration = Math.max(0, Number(fragment.end) - Number(fragment.start));
+            return total + duration;
+        }, 0);
+
+        if (durationMs < UNLOGGED_WORK_MIN_REVIEW_GROUP_DURATION_MS) {
+            hiddenFragmentCount += actionableFragments.length;
+            continue;
+        }
+
+        visibleGroups.push({
+            ...group,
+            durationMs,
+            start: Math.min(...actionableFragments.map(fragment => fragment.start)),
+            end: Math.max(...actionableFragments.map(fragment => fragment.end)),
+            fragments: actionableFragments
+        });
+    }
+
+    return {
+        groups: visibleGroups.sort((left, right) => right.durationMs - left.durationMs || left.start - right.start),
+        hiddenFragmentCount
+    };
+}
+
+function getCurrentActionableUnloggedActivityReview() {
+    return buildActionableUnloggedActivityReview(getCurrentUnloggedActivityGroups());
+}
+
+function draftUnloggedRecordedWorkGroup(groupId) {
+    const groups = Array.isArray(state.unloggedActivityGroups) && state.unloggedActivityGroups.length > 0
+        ? state.unloggedActivityGroups
+        : getCurrentActionableUnloggedActivityReview().groups;
+    const group = groups.find(candidate => candidate.id === groupId);
+    if (!group) return;
+
+    const activities = buildUnloggedBackfillActivities([group]);
+    if (activities.length === 0) return;
+
+    const start = Math.min(...activities.map(activity => activity.start));
+    const end = Math.max(...activities.map(activity => activity.end));
+    window.editingTimeEntryId = null;
+    window.editingTimeEntryGroupIds = null;
+    openTimeEntryModal(start, end, '', null, null, true, activities);
+}
+
+function updateUnloggedWorkReviewOverflow() {
+    const panel = document?.getElementById?.('unlogged-work-review');
+    const container = document?.getElementById?.('unlogged-work-review-list');
+    if (!panel || !container?.classList) return;
+
+    const scrollHeight = Number(container.scrollHeight) || 0;
+    const clientHeight = Number(container.clientHeight) || 0;
+    const scrollTop = Number(container.scrollTop) || 0;
+    const hasOverflow = scrollHeight > clientHeight + 1;
+    const hasMoreBelow = hasOverflow && scrollTop + clientHeight < scrollHeight - 1;
+
+    panel.classList.toggle('unlogged-work-review--scrollable', hasOverflow);
+    panel.classList.toggle('unlogged-work-review--has-more', hasMoreBelow);
+}
+
+function bindUnloggedWorkReviewOverflow() {
+    const container = document?.getElementById?.('unlogged-work-review-list');
+    if (!container || container.__orielUnloggedWorkOverflowBound) return;
+
+    container.addEventListener?.('scroll', updateUnloggedWorkReviewOverflow, { passive: true });
+    container.__orielUnloggedWorkOverflowBound = true;
+}
+
+function renderUnloggedRecordedWorkReview() {
+    const container = document?.getElementById?.('unlogged-work-review-list');
+    const totalEl = document?.getElementById?.('unlogged-work-review-total');
+    if (!container) return;
+
+    const review = getCurrentActionableUnloggedActivityReview();
+    const groups = review.groups;
+    const hiddenFragmentCount = review.hiddenFragmentCount;
+    state.unloggedActivityGroups = groups;
+    state.hiddenUnloggedActivityFragmentCount = hiddenFragmentCount;
+    const totalMs = groups.reduce((total, group) => total + group.durationMs, 0);
+    if (totalEl) totalEl.innerText = formatCompactDurationLabel(totalMs);
+    bindUnloggedWorkReviewOverflow();
+
+    if (groups.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state p-3 text-[11px]">
+                ${hiddenFragmentCount > 0
+                    ? `${hiddenFragmentCount} short ${hiddenFragmentCount === 1 ? 'fragment' : 'fragments'} hidden.`
+                    : 'All recorded source work is covered.'}
+            </div>
+        `;
+        updateUnloggedWorkReviewOverflow();
+        return;
+    }
+
+    const hiddenSummaryHtml = hiddenFragmentCount > 0
+        ? `<div class="unlogged-work-hidden-summary">${hiddenFragmentCount} short ${hiddenFragmentCount === 1 ? 'fragment' : 'fragments'} hidden</div>`
+        : '';
+
+    container.innerHTML = groups.map(group => `
+        <div class="unlogged-work-row" data-unlogged-group-id="${escapeAttribute(group.id)}">
+            <div class="min-w-0">
+                <div class="unlogged-work-title truncate">${escapeTimelineText(group.title)}</div>
+                <div class="unlogged-work-meta truncate">${escapeTimelineText(group.app)} · ${group.fragments.length} ${group.fragments.length === 1 ? 'fragment' : 'fragments'}</div>
+            </div>
+            <div class="unlogged-work-actions">
+                <span class="duration-pill">${formatCompactDurationLabel(group.durationMs)}</span>
+                <button type="button" class="button-secondary unlogged-work-log-button" data-unlogged-log-group-id="${escapeAttribute(group.id)}">
+                    Log
+                </button>
+            </div>
+        </div>
+    `).join('') + hiddenSummaryHtml;
+
+    container.querySelectorAll?.('[data-unlogged-log-group-id]')?.forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            draftUnloggedRecordedWorkGroup(button.dataset.unloggedLogGroupId);
+        });
+    });
+    updateUnloggedWorkReviewOverflow();
+}
+
+// Merges raw activities into a grid structure and renders Activity Stream blocks
+function buildActivityCellBlocksHTML(cellActivities, rowLayout) {
     let html = '';
     let currentBlock = null;
 
-    for (let i = 0; i < totalCells; i++) {
+    for (let i = 0; i < cellActivities.length; i++) {
         const cellAct = cellActivities[i];
 
         if (cellAct) {
-            if (currentBlock && currentBlock.summaryKey === cellAct.summaryKey) {
+            if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cellAct)) {
                 currentBlock.span++;
                 if (cellAct.overlaps) {
                     currentBlock.overlaps = currentBlock.overlaps.concat(cellAct.overlaps);
@@ -911,17 +1750,28 @@ function renderMemoryAidActivities() {
                     overlaps: cellAct.overlaps ? [...cellAct.overlaps] : []
                 };
             }
-        } else {
-            if (currentBlock) {
-                html += createActivityBlockHTML(currentBlock, rowLayout);
-                currentBlock = null;
-            }
+        } else if (currentBlock) {
+            html += createActivityBlockHTML(currentBlock, rowLayout);
+            currentBlock = null;
         }
     }
 
     if (currentBlock) {
         html += createActivityBlockHTML(currentBlock, rowLayout);
     }
+
+    return html;
+}
+
+function renderMemoryAidActivities() {
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    const model = getDayTimelineRenderModel({
+        dateStartOfDay,
+        zoom: state.zoom
+    });
+    const html = model.useActivitySessions
+        ? model.activitySessions.map(session => createActivityBlockHTML(session, model.rowLayout)).join('')
+        : buildActivityCellBlocksHTML(model.activityCells, model.rowLayout);
 
     const itemsMem = DOM.elItemsMemoryAid;
     if (itemsMem) {
@@ -1009,6 +1859,26 @@ function formatActivityDurationLabel(totalMs, minimumSeconds = 0) {
     }
 
     return `${Math.max(minimumSeconds, Math.round(totalMs / 1000))}s`;
+}
+
+function formatPositiveActivityDurationLabel(totalMs) {
+    const duration = Math.max(0, Number(totalMs) || 0);
+    return formatActivityDurationLabel(duration, duration > 0 ? 1 : 0);
+}
+
+function formatCompactDurationLabel(totalMs, minimumSeconds = 0) {
+    const ms = Math.max(0, Number(totalMs) || 0);
+    if (ms >= 60000) {
+        const minutes = Math.round(ms / 60000);
+        if (minutes >= 60) {
+            const hours = Math.floor(minutes / 60);
+            const remainingMinutes = minutes % 60;
+            return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+        }
+        return `${minutes}m`;
+    }
+
+    return `${Math.max(minimumSeconds, Math.round(ms / 1000))}s`;
 }
 
 function getActivitySummaryHostname(activity) {
@@ -1104,6 +1974,19 @@ function getPopupActivityExternalUrl(activity, preferredSource) {
 }
 
 function getPopupActivityDisplayLabels(activity) {
+    if (activity?.popupContextSummary) {
+        const host = getActivitySummaryHostname(activity);
+        const app = normalizeActivityText(activity?.app).trim();
+        const primary = getActivityDisplayTitle(activity) || host || app || 'Recorded Activity';
+        const secondary = app && primary.trim().toLowerCase() !== app.toLowerCase() ? app : '';
+
+        return {
+            primary,
+            secondary,
+            externalUrl: getHttpActivityUrl(activity?.url)
+        };
+    }
+
     const sources = Array.isArray(activity?.sources) ? activity.sources : [];
     const dominantSource = getDominantPopupActivitySource(activity);
     const bestTitle = dominantSource?.title || '';
@@ -1147,6 +2030,21 @@ function getActivityBlockData(blockEl) {
     };
 }
 
+function getActivityBlockTimeRange(blockEl) {
+    const exactStart = Number(blockEl?.dataset?.startMs);
+    const exactEnd = Number(blockEl?.dataset?.endMs);
+    if (Number.isFinite(exactStart) && Number.isFinite(exactEnd) && exactEnd > exactStart) {
+        return { start: exactStart, end: exactEnd };
+    }
+
+    const startCell = parseInt(blockEl?.dataset?.startCell, 10);
+    const span = parseInt(blockEl?.dataset?.span, 10);
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    const start = dateStartOfDay + (Number.isFinite(startCell) ? startCell : 0) * state.zoom * 60 * 1000;
+    const end = start + Math.max(1, Number.isFinite(span) ? span : 1) * state.zoom * 60 * 1000;
+    return { start, end };
+}
+
 function getActivitySourceKey(activity) {
     if (Number.isFinite(activity.start) && Number.isFinite(activity.end)) {
         return `${getActivityIdentityKey(activity)}|||${activity.start}|||${activity.end}`;
@@ -1178,6 +2076,10 @@ function getRenderedTimeEntryDurationMs(entry) {
     const renderDuration = Number(entry?.renderDurationMs);
     if (Number.isFinite(renderDuration) && renderDuration >= 0) {
         return renderDuration;
+    }
+
+    if (entry?.createdBy === 'manual') {
+        return Math.max(0, (entry?.end || 0) - (entry?.start || 0));
     }
 
     if (typeof getTimeEntryDurationMs === 'function') {
@@ -1453,7 +2355,7 @@ function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities,
 
     for (let rowIndex = 0; rowIndex < cellActivities.length; rowIndex++) {
         const cell = cellActivities[rowIndex];
-        if (cell && cell.summaryKey === currentBlock?.summaryKey) {
+        if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cell)) {
             currentBlock.span++;
             currentBlock.overlaps = currentBlock.overlaps.concat(cell.overlaps || []);
             continue;
@@ -1519,7 +2421,7 @@ function getActivityStreamVisibleBlocksForSummary(summaryKey, dateStartOfDay, zo
 
     for (let i = 0; i < cellActivities.length; i++) {
         const cell = cellActivities[i];
-        if (cell && cell.summaryKey === currentBlock?.summaryKey) {
+        if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cell)) {
             currentBlock.span++;
             currentBlock.duration += cell.duration || 0;
             currentBlock.overlaps = currentBlock.overlaps.concat(cell.overlaps || []);
@@ -1588,85 +2490,36 @@ function buildResolvedActivityStreamAssignmentActivity(activity) {
 }
 
 function buildAutoRuleActivityStreamAssignmentRenderEntries(entry, activity, range, dateStartOfDay, zoom) {
-    const summaryKey = getActivitySummaryKey(activity);
-    if (!summaryKey) return [];
+    const start = Number(range?.start);
+    const end = Number(range?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
 
-    const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    const rowDurationMs = renderZoom * 60 * 1000;
-    const ownershipActivities = Array.isArray(state.timelineActivities)
-        ? state.timelineActivities
-        : state.activities;
-    const visibleActivities = Array.isArray(state.activities)
-        ? state.activities
-        : ownershipActivities;
-    const cellActivities = buildVisibleActivityCells({
-        dateStartOfDay,
-        zoom: renderZoom,
-        ownershipActivities,
-        visibleActivities
-    });
-    const startCell = Math.max(0, Math.floor((range.start - dateStartOfDay) / rowDurationMs));
-    const endCell = Math.min(cellActivities.length, Math.ceil((range.end - dateStartOfDay) / rowDurationMs));
-    const renderEntries = [];
+    const assignedDuration = getActivitySourceDuration(activity, start, end) || (end - start);
+    if (!Number.isFinite(assignedDuration) || assignedDuration <= 0) return [];
 
-    for (let cellIndex = startCell; cellIndex < endCell; cellIndex++) {
-        const cell = cellActivities[cellIndex];
-        if (!cell) continue;
+    const renderActivity = {
+        ...activity,
+        start,
+        end,
+        duration: assignedDuration,
+        assignedDurationMs: assignedDuration,
+        assignmentStart: start,
+        assignmentEnd: end,
+        assignmentSource: 'activity-stream',
+        assignmentModel: ACTIVITY_STREAM_AUTO_ASSIGNMENT_MODEL,
+        activityMix: getActivityMixInRange(activity, start, end)
+    };
 
-        const cellStart = dateStartOfDay + cellIndex * rowDurationMs;
-        const cellEnd = cellStart + rowDurationMs;
-        const matchingSummary = getActivitySummaryForAssignmentWithinRange(
-            cell.overlaps || [],
-            activity,
-            summaryKey,
-            cellStart,
-            cellEnd
-        );
-        if (!matchingSummary || matchingSummary.duration <= 0) continue;
-
-        const matchesCellOwner = activityStreamBlockMatchesAssignment(cell, activity, summaryKey);
-        if (!matchesCellOwner) {
-            const summarizedOverlaps = summarizeActivityOverlaps(cell.overlaps || [], cellStart, cellEnd);
-            const visibleBreakdownOverlaps = getVisibleMultiActivityBreakdownOverlaps(
-                summarizedOverlaps,
-                cellStart,
-                cellEnd
-            );
-            const hasVisibleSecondaryMatch = visibleBreakdownOverlaps
-                .some(summary => activityMatchesAssignmentIdentity(summary, activity, summaryKey));
-            if (!hasVisibleSecondaryMatch) continue;
-        }
-
-        const start = Math.max(range.start, cellStart);
-        const end = Math.min(range.end, cellEnd);
-        if (end <= start) continue;
-
-        const assignedDuration = end - start;
-        const renderActivity = {
-            ...activity,
-            start,
-            end,
-            duration: assignedDuration,
-            assignedDurationMs: assignedDuration,
-            assignmentStart: start,
-            assignmentEnd: end,
-            assignmentSource: 'activity-stream',
-            assignmentModel: ACTIVITY_STREAM_AUTO_ASSIGNMENT_MODEL,
-            activityMix: getActivityMixInRange(activity, start, end)
-        };
-
-        renderEntries.push({
-            ...entry,
-            start,
-            end,
-            renderDisplayStart: cellStart,
-            renderDisplayEnd: cellEnd,
-            renderDurationMs: assignedDuration,
-            activities: [renderActivity]
-        });
-    }
-
-    return renderEntries;
+    return [{
+        ...entry,
+        start,
+        end,
+        renderDisplayStart: start,
+        renderDisplayEnd: end,
+        renderDurationMs: assignedDuration,
+        renderExactGeometry: true,
+        activities: [renderActivity]
+    }];
 }
 
 function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range, summaryKey, dateStartOfDay, zoom) {
@@ -1806,6 +2659,7 @@ function getAssignmentActivityRange(entry, activity) {
 function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zoom) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
+    if (entry?.createdBy === 'manual') return [entry];
     if (assignmentActivities.length === 0) return [entry];
 
     const renderEntries = [];
@@ -2027,37 +2881,13 @@ function getLoggedTimeEntryVisualMergeKey(item) {
     return `${projectId}\u0000${taskId}`;
 }
 
-function itemHasAutoRuleExactTimeEntry(item) {
-    return (item?.entries || []).some(isAutoRuleExactTimeEntry);
-}
-
 function canMergeLoggedTimeEntryVisualItems(current, item, displayStart, displayEnd) {
     const hasTouchingDisplay = current
         && Number.isFinite(displayStart)
         && Number.isFinite(displayEnd)
         && Number.isFinite(current.displayEnd)
         && displayStart <= current.displayEnd;
-    if (!hasTouchingDisplay) return false;
-
-    if (itemHasAutoRuleExactTimeEntry(current) && itemHasAutoRuleExactTimeEntry(item)) {
-        if (displayStart < current.displayEnd) return true;
-
-        const currentEnd = Number(current.end);
-        const itemStart = Number(item.start);
-        const hasNearExactRange = Number.isFinite(currentEnd)
-            && Number.isFinite(itemStart)
-            && itemStart <= currentEnd + AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS;
-        if (hasNearExactRange) return true;
-
-        const currentDuration = Number(current.durationMs);
-        const itemDuration = Number(item.durationMs);
-        return Number.isFinite(currentDuration)
-            && Number.isFinite(itemDuration)
-            && currentDuration >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS
-            && itemDuration >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS;
-    }
-
-    return true;
+    return hasTouchingDisplay;
 }
 
 function mergeLoggedTimeEntryVisualItems(renderItems) {
@@ -2109,6 +2939,7 @@ function mergeLoggedTimeEntryVisualItems(renderItems) {
             current.durationMs += item.durationMs;
             current.sourceIndex = Math.min(current.sourceIndex, item.sourceIndex);
             current.isAssignedGroup = current.isAssignedGroup || item.isAssignedGroup;
+            current.renderExactGeometry = current.renderExactGeometry || item.renderExactGeometry;
         }
     }
 
@@ -2117,7 +2948,9 @@ function mergeLoggedTimeEntryVisualItems(renderItems) {
 
 function getVisibleLoggedTimeEntryRenderItems(renderItems) {
     return renderItems.filter(item => {
-        const durationMs = Number(item?.durationMs);
+        const durationMs = Number.isFinite(Number(item?.visibleDurationMs))
+            ? Number(item.visibleDurationMs)
+            : Number(item?.durationMs);
         return Number.isFinite(durationMs) && durationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS;
     });
 }
@@ -2131,16 +2964,6 @@ function getVisiblePopupBreakdownOverlaps(overlaps) {
 
 function getVisibleMultiActivityBreakdownOverlaps(overlaps, rangeStart, rangeEnd) {
     return getVisiblePopupBreakdownOverlaps(summarizeSimilarActivityOverlaps(overlaps, rangeStart, rangeEnd));
-}
-
-function getVisibleSecondaryActivityBreakdownOverlaps(overlaps, primaryActivity) {
-    const primaryKey = getActivitySimilarityKey(primaryActivity) || getActivitySummaryKey(primaryActivity);
-    if (!primaryKey) return overlaps;
-
-    return (Array.isArray(overlaps) ? overlaps : []).filter(overlap => {
-        const overlapKey = getActivitySimilarityKey(overlap) || getActivitySummaryKey(overlap);
-        return overlapKey !== primaryKey;
-    });
 }
 
 function getAutoRuleExactRange(entry) {
@@ -2190,52 +3013,204 @@ function getAutoRuleExactAssignedDurationMs(entries) {
     return total;
 }
 
+function addActivityMatchKeys(keys, activity) {
+    const summaryKey = getActivitySummaryKey(activity);
+    const similarityKey = getActivitySimilarityKey(activity);
+    if (summaryKey) keys.add(summaryKey);
+    if (similarityKey) keys.add(similarityKey);
+}
+
+function activityMatchesAnyKey(activity, keys) {
+    if (!activity || !keys?.size) return false;
+    const summaryKey = getActivitySummaryKey(activity);
+    if (summaryKey && keys.has(summaryKey)) return true;
+
+    const similarityKey = getActivitySimilarityKey(activity);
+    return Boolean(similarityKey && keys.has(similarityKey));
+}
+
+function getAutoRuleFirstVisibleActivityDisplayStart(entry, exactStart, exactEnd, visibleActivityCells) {
+    if (!Array.isArray(visibleActivityCells) || visibleActivityCells.length === 0) return null;
+    const sourceActivities = getActivityStreamAssignmentActivities(entry);
+    if (sourceActivities.length === 0) return null;
+
+    const matchKeys = new Set();
+    sourceActivities.forEach(activity => addActivityMatchKeys(matchKeys, activity));
+    if (matchKeys.size === 0) return null;
+
+    let displayStart = null;
+
+    visibleActivityCells.forEach(cell => {
+        if (!cell || cell.end <= exactStart || cell.start >= exactEnd) return;
+        const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(cell.overlaps || [cell], cell.start, cell.end);
+        const hasVisibleMatch = visibleOverlaps.some(overlap => activityMatchesAnyKey(overlap, matchKeys));
+        if (!hasVisibleMatch) return;
+
+        displayStart = displayStart === null ? cell.start : Math.min(displayStart, cell.start);
+    });
+
+    return Number.isFinite(displayStart) ? displayStart : null;
+}
+
+function buildAutoRuleExactFragmentItems(groupEntries) {
+    const sortedEntries = groupEntries
+        .map(({ entry, sourceIndex }) => {
+            const exactRange = getAutoRuleExactRange(entry);
+            const exactStart = exactRange?.start ?? entry.start;
+            const exactEnd = exactRange?.end ?? entry.end;
+            if (!Number.isFinite(exactStart) || !Number.isFinite(exactEnd) || exactEnd <= exactStart) {
+                return null;
+            }
+            return {
+                entry,
+                sourceIndex,
+                exactStart,
+                exactEnd,
+                durationMs: getRenderedTimeEntryDurationMs(entry)
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.exactStart - right.exactStart || left.exactEnd - right.exactEnd);
+    const clusters = [];
+    let current = null;
+
+    const flushCurrent = () => {
+        if (!current) return;
+        current.visibleDurationMs = current.items.reduce((total, item) => total + item.durationMs, 0);
+        if (current.visibleDurationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS) {
+            clusters.push(current);
+        }
+        current = null;
+    };
+
+    for (const item of sortedEntries) {
+        const exactGapMs = current ? item.exactStart - current.end : Number.POSITIVE_INFINITY;
+        if (!current || exactGapMs > ACTIVITY_STREAM_SESSION_MERGE_GAP_MS) {
+            flushCurrent();
+            current = {
+                start: item.exactStart,
+                end: item.exactEnd,
+                items: [item]
+            };
+            continue;
+        }
+
+        current.items.push(item);
+        current.end = Math.max(current.end, item.exactEnd);
+    }
+
+    flushCurrent();
+
+    const renderItems = [];
+
+    for (const cluster of clusters) {
+        renderItems.push({
+            entries: cluster.items.map(item => item.entry),
+            firstEntry: cluster.items[0]?.entry,
+            start: cluster.start,
+            end: cluster.end,
+            displayStart: cluster.start,
+            displayEnd: cluster.end,
+            durationMs: cluster.visibleDurationMs,
+            visibleDurationMs: cluster.visibleDurationMs,
+            isAssignedGroup: true,
+            sourceIndex: Math.min(...cluster.items.map(item => item.sourceIndex)),
+            renderExactGeometry: true
+        });
+    }
+
+    return renderItems;
+}
+
 function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
-    const rowsByDisplayRange = new Map();
+    if (shouldRenderExactActivityStreamSessions(zoom)) {
+        return buildAutoRuleExactFragmentItems(groupEntries);
+    }
 
-    for (const { entry, sourceIndex } of groupEntries) {
-        const exactRange = getAutoRuleExactRange(entry);
-        const exactStart = exactRange?.start ?? entry.start;
-        const exactEnd = exactRange?.end ?? entry.end;
-        if (!Number.isFinite(exactStart) || !Number.isFinite(exactEnd) || exactEnd <= exactStart) continue;
+    const visibleActivityCells = shouldRenderExactActivityStreamSessions(zoom)
+        ? null
+        : buildVisibleActivityCells({
+            dateStartOfDay,
+            zoom,
+            ownershipActivities: Array.isArray(state.timelineActivities) ? state.timelineActivities : state.activities,
+            visibleActivities: state.activities
+        });
+    const sortedEntries = groupEntries
+        .map(({ entry, sourceIndex }) => {
+            const exactRange = getAutoRuleExactRange(entry);
+            const exactStart = exactRange?.start ?? entry.start;
+            const exactEnd = exactRange?.end ?? entry.end;
+            if (!Number.isFinite(exactStart) || !Number.isFinite(exactEnd) || exactEnd <= exactStart) {
+                return null;
+            }
+            return {
+                entry,
+                sourceIndex,
+                exactStart,
+                exactEnd
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.exactStart - right.exactStart || left.exactEnd - right.exactEnd);
+    const sessions = [];
+    let current = null;
 
-        const displayRange = getRenderEntryDisplayRowRange(entry, dateStartOfDay, zoom);
-        const displayStart = Number(displayRange.start);
-        const displayEnd = Number(displayRange.end);
-        if (!Number.isFinite(displayStart) || !Number.isFinite(displayEnd) || displayEnd <= displayStart) continue;
+    const flushCurrent = () => {
+        if (!current) return;
+        current.durationMs = getAutoRuleExactAssignedDurationMs(current.entries);
+        if (current.durationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS) {
+            sessions.push(current);
+        }
+        current = null;
+    };
 
-        const rowKey = `${displayStart}:${displayEnd}`;
-        if (!rowsByDisplayRange.has(rowKey)) {
-            rowsByDisplayRange.set(rowKey, {
-                entries: [],
+    for (const { entry, sourceIndex, exactStart, exactEnd } of sortedEntries) {
+        const exactDisplayRange = getTimelineDisplayRowRange(exactStart, exactEnd, dateStartOfDay, zoom);
+        const visibleDisplayStart = getAutoRuleFirstVisibleActivityDisplayStart(entry, exactStart, exactEnd, visibleActivityCells);
+        const displayRange = Number.isFinite(visibleDisplayStart)
+            && visibleDisplayStart > exactDisplayRange.start
+            && visibleDisplayStart < exactDisplayRange.end
+            ? getTimelineDisplayRowRange(visibleDisplayStart, exactEnd, dateStartOfDay, zoom)
+            : exactDisplayRange;
+        const exactGapMs = current ? exactStart - current.end : Number.POSITIVE_INFINITY;
+        const entryDurationMs = getRenderedTimeEntryDurationMs(entry);
+        const canMergeByExactGap = current && exactGapMs <= ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
+        const canMergeByDisplayRow = current
+            && displayRange.start <= current.displayEnd
+            && exactGapMs <= AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS
+            && entryDurationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS;
+        const shouldStartSession = !current
+            || (!canMergeByExactGap && !canMergeByDisplayRow);
+
+        if (shouldStartSession) {
+            flushCurrent();
+            current = {
+                entries: [entry],
                 firstEntry: entry,
                 start: exactStart,
                 end: exactEnd,
-                displayStart,
-                displayEnd,
+                displayStart: displayRange.start,
+                displayEnd: displayRange.end,
                 isAssignedGroup: true,
                 sourceIndex
-            });
+            };
+            continue;
         }
 
-        const row = rowsByDisplayRange.get(rowKey);
-        row.entries.push(entry);
-        row.start = Math.min(row.start, exactStart);
-        row.end = Math.max(row.end, exactEnd);
-        row.sourceIndex = Math.min(row.sourceIndex, sourceIndex);
+        current.entries.push(entry);
+        current.start = Math.min(current.start, exactStart);
+        current.end = Math.max(current.end, exactEnd);
+        current.displayStart = Math.min(current.displayStart, displayRange.start);
+        current.displayEnd = Math.max(current.displayEnd, displayRange.end);
+        current.sourceIndex = Math.min(current.sourceIndex, sourceIndex);
     }
 
-    return [...rowsByDisplayRange.values()]
-        .map(row => ({
-            ...row,
-            durationMs: getAutoRuleExactAssignedDurationMs(row.entries)
-        }))
-        .filter(row => row.durationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS)
-        .sort((left, right) => {
-            if (left.displayStart !== right.displayStart) return left.displayStart - right.displayStart;
-            if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
-            return left.sourceIndex - right.sourceIndex;
-        });
+    flushCurrent();
+    return sessions.sort((left, right) => {
+        if (left.displayStart !== right.displayStart) return left.displayStart - right.displayStart;
+        if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
+        return left.sourceIndex - right.sourceIndex;
+    });
 }
 
 function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
@@ -2248,7 +3223,9 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
         const renderEntries = buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom);
 
         renderEntries.forEach((renderEntry, renderIndex) => {
-            const assignmentKey = getActivityStreamAssignmentGroupKey(renderEntry);
+            const assignmentKey = renderEntry?.createdBy === 'manual'
+                ? null
+                : getActivityStreamAssignmentGroupKey(renderEntry);
             const renderSourceIndex = sourceIndex + (renderIndex / 1000);
             const displayRange = getRenderEntryDisplayRowRange(renderEntry, dateStartOfDay, zoom);
             if (!assignmentKey) {
@@ -2319,8 +3296,14 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
         const rowGroups = buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom);
         let currentGroup = null;
         for (const rowGroup of rowGroups) {
-            const shouldStartGroup = !currentGroup
-                || rowGroup.displayStart > currentGroup.displayEnd;
+            const canMergeWithCurrent = currentGroup
+                && Number.isFinite(rowGroup.displayStart)
+                && Number.isFinite(rowGroup.displayEnd)
+                && Number.isFinite(currentGroup.displayEnd)
+                && rowGroup.displayStart <= currentGroup.displayEnd
+                && (rowGroup.displayStart < currentGroup.displayEnd
+                    || rowGroup.start <= currentGroup.end + AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS);
+            const shouldStartGroup = !canMergeWithCurrent;
 
             if (shouldStartGroup) {
                 currentGroup = {
@@ -2402,6 +3385,36 @@ function sortActivitySummaries(groupedOverlaps) {
         if (startA !== startB) return startA - startB;
         return b.duration - a.duration;
     });
+}
+
+function registerActivityBlockDetailOverlaps(rowLayout, overlaps) {
+    const detailMap = rowLayout?.activityBlockDetails;
+    if (!detailMap || !Array.isArray(overlaps)) return null;
+
+    const key = `activity-overlaps-${detailMap.size + 1}`;
+    detailMap.set(key, overlaps);
+    return key;
+}
+
+function parseActivityBlockOverlapsDataset(blockEl) {
+    if (!blockEl?.dataset?.overlaps) return [];
+
+    try {
+        const parsed = JSON.parse(decodeURIComponent(blockEl.dataset.overlaps));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function getActivityBlockDetailOverlaps(blockEl) {
+    const overlapKey = blockEl?.dataset?.overlapKey;
+    if (overlapKey) {
+        const overlaps = dayTimelineRenderModelCache?.model?.activityBlockDetails?.get(overlapKey);
+        if (Array.isArray(overlaps)) return overlaps;
+    }
+
+    return parseActivityBlockOverlapsDataset(blockEl);
 }
 
 function summarizeActivityOverlaps(overlaps, rangeStart, rangeEnd) {
@@ -2532,6 +3545,419 @@ function summarizeSimilarActivityOverlaps(overlaps, rangeStart, rangeEnd) {
     return sortActivitySummaries(groupedOverlaps);
 }
 
+function getPopupActivityExactGroupingKey(activity) {
+    const app = normalizeActivityText(activity?.app).trim().toLowerCase();
+    const title = getActivityDisplayTitle(activity).toLowerCase();
+    const host = getActivitySummaryHostname(activity);
+    if (host) {
+        return `${app}|||${title}|||${host}`;
+    }
+
+    return `${app}|||${title || app}`;
+}
+
+function getPopupActivityHostBucketKey(activity) {
+    const app = normalizeActivityText(activity?.app).trim().toLowerCase();
+    const host = getActivitySummaryHostname(activity);
+    return host ? `${app}|||${host}` : '';
+}
+
+function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
+    const groupedOverlaps = {};
+    const seenSources = new Set();
+
+    for (const overlap of overlaps || []) {
+        const key = getPopupActivityExactGroupingKey(overlap) || getActivitySummaryKey(overlap);
+        const sourceKey = getActivitySourceKey(overlap);
+        const clippedStart = Number.isFinite(overlap.start) && Number.isFinite(rangeStart)
+            ? Math.max(overlap.start, rangeStart)
+            : overlap.start;
+        const clippedEnd = Number.isFinite(overlap.end) && Number.isFinite(rangeEnd)
+            ? Math.min(overlap.end, rangeEnd)
+            : overlap.end;
+        const clippedDuration = getActivitySourceDuration(overlap, rangeStart, rangeEnd);
+        const clippedMix = getActivityMixInRange(overlap, rangeStart, rangeEnd);
+
+        if (sourceKey) {
+            if (seenSources.has(sourceKey)) continue;
+            seenSources.add(sourceKey);
+        }
+
+        if (!groupedOverlaps[key]) {
+            groupedOverlaps[key] = {
+                duration: 0,
+                activityMix: emptyActivityMix(),
+                app: overlap.app,
+                title: getActivityDisplayTitle(overlap),
+                url: overlap.url,
+                appPath: overlap.appPath || '',
+                bundleId: overlap.bundleId || '',
+                start: clippedStart,
+                end: clippedEnd,
+                sources: []
+            };
+        } else {
+            const group = groupedOverlaps[key];
+            if (Number.isFinite(clippedStart)) {
+                group.start = Number.isFinite(group.start) ? Math.min(group.start, clippedStart) : clippedStart;
+            }
+            if (Number.isFinite(clippedEnd)) {
+                group.end = Number.isFinite(group.end) ? Math.max(group.end, clippedEnd) : clippedEnd;
+            }
+        }
+
+        applyAssignmentSummaryMetadata(groupedOverlaps[key], overlap);
+        groupedOverlaps[key].duration += clippedDuration;
+        groupedOverlaps[key].activityMix = addTimelineActivityMix(groupedOverlaps[key].activityMix, clippedMix);
+        if (clippedDuration > 0) {
+            groupedOverlaps[key].sources.push({
+                ...overlap,
+                title: getActivityDisplayTitle(overlap),
+                appPath: overlap.appPath || '',
+                bundleId: overlap.bundleId || '',
+                start: clippedStart,
+                end: clippedEnd,
+                duration: clippedDuration,
+                activityMix: clippedMix
+            });
+        }
+    }
+
+    return sortActivitySummaries(groupedOverlaps);
+}
+
+function getActivityPopupContextKey(activity) {
+    const app = normalizeActivityText(activity?.app).trim().toLowerCase();
+    const host = getActivitySummaryHostname(activity);
+    if (host) return `browser|||${app}|||${host}`;
+
+    const title = getActivityDisplayTitle(activity).trim().toLowerCase();
+    const meaningfulTitle = title && !isWeakPopupActivityTitle(title, activity) ? title : '';
+    return `native|||${app}|||${meaningfulTitle || app}`;
+}
+
+function getPopupRowSources(row) {
+    return Array.isArray(row?.sources) && row.sources.length > 0
+        ? row.sources
+        : [row].filter(Boolean);
+}
+
+function getPopupSourceChildRow(source, rangeStart, rangeEnd) {
+    const start = Number.isFinite(source?.start) ? source.start : undefined;
+    const end = Number.isFinite(source?.end) ? source.end : undefined;
+    const duration = getActivitySourceDuration(source, rangeStart, rangeEnd);
+    if (!Number.isFinite(duration) || duration <= 0) return null;
+
+    return {
+        ...stripActivitySources(source),
+        app: source?.app || '',
+        title: getActivityDisplayTitle(source),
+        url: source?.url || '',
+        appPath: source?.appPath || '',
+        bundleId: source?.bundleId || '',
+        start,
+        end,
+        duration,
+        activityMix: source?.activityMix || getActivityMixInRange(source, rangeStart, rangeEnd),
+        popupSourceChild: true
+    };
+}
+
+function getPopupPageChildKey(activity) {
+    const app = normalizeActivityText(activity?.app).trim().toLowerCase();
+    const rawTitle = getActivityDisplayTitle(activity).trim();
+    const title = rawTitle.toLowerCase();
+    const rawUrl = normalizeActivityText(activity?.url).trim();
+    const host = getActivitySummaryHostname(activity);
+    const weakBrowserTitle = Boolean(host && isWeakPopupActivityTitle(rawTitle, activity));
+    let urlKey = '';
+
+    if (weakBrowserTitle) {
+        urlKey = host;
+    } else if (rawUrl) {
+        try {
+            const parsed = new URL(rawUrl);
+            if (['http:', 'https:'].includes(parsed.protocol.toLowerCase())) {
+                parsed.hash = '';
+                parsed.search = '';
+                urlKey = `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname || '/'}`.toLowerCase();
+            }
+        } catch {
+            urlKey = rawUrl.toLowerCase();
+        }
+    }
+
+    const nativeIdentity = normalizeActivityText(activity?.bundleId || activity?.appPath || '').trim().toLowerCase();
+    return `${app}|||${weakBrowserTitle ? host : (title || app)}|||${urlKey || host || nativeIdentity}`;
+}
+
+function buildPopupPageChildRows(rows, rangeStart, rangeEnd) {
+    const groups = new Map();
+
+    for (const source of (Array.isArray(rows) ? rows : []).flatMap(getPopupRowSources)) {
+        const child = getPopupSourceChildRow(source, rangeStart, rangeEnd);
+        if (!child) continue;
+
+        const key = getPopupPageChildKey(child);
+        if (!groups.has(key)) {
+            groups.set(key, {
+                ...child,
+                duration: 0,
+                activityMix: emptyActivityMix(),
+                start: Number.isFinite(child.start) ? child.start : undefined,
+                end: Number.isFinite(child.end) ? child.end : undefined,
+                sources: []
+            });
+        }
+
+        const group = groups.get(key);
+        if (Number.isFinite(child.start)) {
+            group.start = Number.isFinite(group.start) ? Math.min(group.start, child.start) : child.start;
+        }
+        if (Number.isFinite(child.end)) {
+            group.end = Number.isFinite(group.end) ? Math.max(group.end, child.end) : child.end;
+        }
+        group.duration += child.duration;
+        group.activityMix = addTimelineActivityMix(group.activityMix || emptyActivityMix(), child.activityMix || emptyActivityMix());
+        group.sources.push(child);
+    }
+
+    return Array.from(groups.values())
+        .filter(child => Number(child.duration) > 0)
+        .map(child => ({
+            ...child,
+            popupSourceChild: true,
+            popupSessionChild: true
+        }))
+        .sort((left, right) => {
+            if (right.duration !== left.duration) return right.duration - left.duration;
+            const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
+            const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
+            return startA - startB;
+        });
+}
+
+function getPopupSessionDisplayTitle(rows, host) {
+    if (host) return host;
+
+    const groupRows = Array.isArray(rows) ? rows : [];
+    const first = groupRows[0] || {};
+    const title = getActivityDisplayTitle(first).trim();
+    const app = normalizeActivityText(first?.app).trim();
+    if (title && !isWeakPopupActivityTitle(title, first)) return title;
+    return app || title || 'Recorded Activity';
+}
+
+function doesPopupSessionChildAddContext(parent, child) {
+    const parentLabel = getPopupActivityDisplayLabels(parent).primary.trim().toLowerCase();
+    const childLabel = getPopupActivityDisplayLabels(child).primary.trim().toLowerCase();
+    if (!childLabel || childLabel === parentLabel) return false;
+    return !isWeakPopupActivityTitle(childLabel, child);
+}
+
+function getRenderablePopupSessionChildren(parent, children) {
+    const childRows = Array.isArray(children) ? children.filter(child => Number(child?.duration) > 0) : [];
+    if (childRows.length >= 2) return childRows;
+    if (childRows.length === 1 && doesPopupSessionChildAddContext(parent, childRows[0])) return childRows;
+    return [];
+}
+
+function buildPopupSessionSummaryRow(rows, contextKey, rangeStart, rangeEnd) {
+    const groupRows = Array.isArray(rows) ? rows : [];
+    const first = groupRows[0] || {};
+    const pageChildren = buildPopupPageChildRows(groupRows, rangeStart, rangeEnd);
+    const duration = pageChildren.reduce((total, child) => total + child.duration, 0);
+    if (duration <= 0) return null;
+
+    const host = getActivitySummaryHostname(first);
+    const title = getPopupSessionDisplayTitle(groupRows, host);
+    const url = host ? `https://${host}` : normalizeActivityText(first.url);
+    const start = pageChildren.reduce((value, child) => Number.isFinite(child.start) ? Math.min(value, child.start) : value, Number.MAX_SAFE_INTEGER);
+    const end = pageChildren.reduce((value, child) => Number.isFinite(child.end) ? Math.max(value, child.end) : value, 0);
+    const activityMix = pageChildren.reduce((mix, child) => {
+        return addTimelineActivityMix(mix, child.activityMix || emptyActivityMix());
+    }, emptyActivityMix());
+    const sources = pageChildren.flatMap(child => Array.isArray(child.sources) && child.sources.length > 0 ? child.sources : [child]);
+    const row = {
+        app: first.app || '',
+        title,
+        url,
+        appPath: first.appPath || '',
+        bundleId: first.bundleId || '',
+        start: start === Number.MAX_SAFE_INTEGER ? rangeStart : start,
+        end: end > 0 ? end : rangeEnd,
+        duration,
+        activityMix,
+        sources,
+        popupContextSummary: true,
+        popupSessionSummary: true,
+        popupContextKey: contextKey
+    };
+
+    return {
+        ...row,
+        children: getRenderablePopupSessionChildren(row, pageChildren)
+    };
+}
+
+function sortPopupDisplayRows(rows) {
+    return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
+        const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
+        const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
+        if (startA !== startB) return startA - startB;
+        return right.duration - left.duration;
+    });
+}
+
+function buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity = null) {
+    const groups = new Map();
+    const primaryContextKey = getActivityPopupContextKey(primaryActivity || {});
+
+    for (const row of Array.isArray(exactRows) ? exactRows : []) {
+        const duration = Number(row?.duration);
+        if (!Number.isFinite(duration) || duration <= 0) {
+            continue;
+        }
+
+        const contextKey = getActivityPopupContextKey(row);
+        if (!contextKey) continue;
+
+        if (!groups.has(contextKey)) {
+            groups.set(contextKey, {
+                contextKey,
+                rows: []
+            });
+        }
+
+        groups.get(contextKey).rows.push(row);
+    }
+
+    const rows = Array.from(groups.values())
+        .map(group => buildPopupSessionSummaryRow(group.rows, group.contextKey, rangeStart, rangeEnd))
+        .filter(Boolean)
+        .filter(row => {
+            const duration = Number(row?.duration);
+            return (Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS)
+                || row?.popupContextKey === primaryContextKey;
+        });
+
+    return sortPopupDisplayRows(rows);
+}
+
+function isGenericPopupPrimaryActivity(activity) {
+    const title = getActivityDisplayTitle(activity).trim().toLowerCase();
+    return title === 'multiple activities' || isWeakPopupActivityTitle(title, activity);
+}
+
+function buildPrimaryPopupDisplayRow(primaryActivity, exactRows, rangeStart, rangeEnd, activeDurationMs, zoom) {
+    const primaryKey = getPopupActivityExactGroupingKey(primaryActivity);
+    const exactRow = (Array.isArray(exactRows) ? exactRows : [])
+        .find(row => getPopupActivityExactGroupingKey(row) === primaryKey);
+    const fallbackExactRow = !exactRow && isGenericPopupPrimaryActivity(primaryActivity)
+        ? (Array.isArray(exactRows) ? exactRows : [])
+            .find(row => Number(row?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS)
+        : null;
+    const sourceExactRow = exactRow || fallbackExactRow;
+    const exactDuration = Number(sourceExactRow?.duration);
+    const activeDuration = Number(activeDurationMs);
+    const shouldUseExactRow = Number.isFinite(exactDuration)
+        && exactDuration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+    const duration = shouldUseExactRow
+        ? exactDuration
+        : Number.isFinite(activeDuration) && activeDuration > 0
+        ? activeDuration
+        : Number.isFinite(exactDuration) && exactDuration > 0
+        ? exactDuration
+        : Math.max(0, rangeEnd - rangeStart);
+    const row = shouldUseExactRow ? { ...sourceExactRow } : {
+        ...primaryActivity,
+        start: rangeStart,
+        end: rangeEnd,
+        duration,
+        activityMix: sourceExactRow?.activityMix || emptyActivityMix(),
+        sources: []
+    };
+
+    return {
+        ...row,
+        app: row.app || primaryActivity.app || '',
+        title: getActivityDisplayTitle(row) || getActivityDisplayTitle(primaryActivity),
+        url: row.url || primaryActivity.url || '',
+        appPath: row.appPath || primaryActivity.appPath || '',
+        bundleId: row.bundleId || primaryActivity.bundleId || '',
+        start: Number.isFinite(row.start) ? row.start : rangeStart,
+        end: Number.isFinite(row.end) ? row.end : rangeEnd,
+        duration,
+        activityMix: row.activityMix || emptyActivityMix(),
+        popupPrimarySummary: true,
+        popupDisplayZoom: zoom
+    };
+}
+
+function buildActivityPopupDisplayModel({
+    overlaps,
+    rangeStart,
+    rangeEnd,
+    primaryActivity,
+    activeDurationMs,
+    zoom = state.zoom
+} = {}) {
+    const exactRows = summarizePopupActivityOverlaps(overlaps || [], rangeStart, rangeEnd);
+    const topLevelRows = buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity || {});
+    const fallbackPrimaryRow = buildPrimaryPopupDisplayRow(
+        primaryActivity || {},
+        exactRows,
+        rangeStart,
+        rangeEnd,
+        activeDurationMs,
+        zoom
+    );
+    const primaryActivityExactKey = getPopupActivityExactGroupingKey(primaryActivity || {});
+    const primaryActivityContextKey = getActivityPopupContextKey(primaryActivity || {});
+    const primaryRow = topLevelRows.find(row => row.popupSessionSummary && row.popupContextKey === primaryActivityContextKey)
+        || topLevelRows.find(row => row.popupContextSummary && getActivityPopupContextKey(row) === primaryActivityContextKey)
+        || topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
+        || (topLevelRows.length === 1 ? topLevelRows[0] : null)
+        || (isGenericPopupPrimaryActivity(primaryActivity || {}) ? topLevelRows[0] : null)
+        || fallbackPrimaryRow;
+    const secondaryRows = topLevelRows.filter(row => row !== primaryRow)
+        .sort((left, right) => {
+            const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
+            const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
+            if (startA !== startB) return startA - startB;
+            return right.duration - left.duration;
+        });
+    const visibleRows = [primaryRow, ...secondaryRows];
+
+    return {
+        exactRows,
+        primaryRow,
+        secondaryRows,
+        visibleRows,
+        assignmentRows: visibleRows,
+        isMultiple: secondaryRows.length > 0
+    };
+}
+
+function getInlineBadgePopupRows(rows) {
+    return (Array.isArray(rows) ? rows : []).filter(row => {
+        const duration = Number(row?.duration);
+        return Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+    });
+}
+
+function buildActivityBlockPopupDisplayModel(blockEl) {
+    const { start: startMs, end: endMs } = getActivityBlockTimeRange(blockEl);
+    return buildActivityPopupDisplayModel({
+        overlaps: getActivityBlockDetailOverlaps(blockEl),
+        rangeStart: startMs,
+        rangeEnd: endMs,
+        primaryActivity: getActivityBlockData(blockEl),
+        activeDurationMs: Number(blockEl?.dataset?.activeDurationMs),
+        zoom: state.zoom
+    });
+}
+
 // Generate the HTML for an individual activity block in Activity Stream
 function createActivityBlockHTML(block, rowLayout = null) {
     const app = normalizeActivityText(block.app);
@@ -2539,60 +3965,105 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const url = normalizeActivityText(block.url);
     const appPath = normalizeActivityText(block.appPath);
     const bundleId = normalizeActivityText(block.bundleId);
+    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
+    const layout = rowLayout || buildFullDayTimelineRowLayout(dateStartOfDay, state.zoom);
+    const isSessionBlock = Number.isFinite(block.activeDurationMs)
+        && Number.isFinite(block.start)
+        && Number.isFinite(block.end)
+        && block.end > block.start;
+    const fallbackStartCell = Number.isFinite(block.startCell) ? block.startCell : 0;
+    const fallbackSpan = Math.max(1, Number.isFinite(block.span) ? block.span : 1);
+    const fallbackStart = dateStartOfDay + fallbackStartCell * state.zoom * 60 * 1000;
+    const fallbackEnd = fallbackStart + fallbackSpan * state.zoom * 60 * 1000;
+    const blockStart = isSessionBlock ? block.start : fallbackStart;
+    const blockEnd = isSessionBlock ? block.end : fallbackEnd;
+    const sourceRange = getTimelineDisplayRowRange(blockStart, blockEnd, dateStartOfDay, state.zoom);
+    const startCell = isSessionBlock ? sourceRange.startRow : fallbackStartCell;
+    const span = isSessionBlock ? Math.max(1, sourceRange.endRow - sourceRange.startRow) : fallbackSpan;
+    const selectionId = isSessionBlock
+        ? `activity:${blockStart}:${blockEnd}:${block.similarityKey || block.summaryKey || ''}`
+        : startCell;
 
     const textStyle = 'text-white font-semibold';
-    const isSelected = state.selectedActivities.has(block.startCell);
+    const isSelected = state.selectedActivities.has(selectionId);
     const selectedClass = isSelected ? 'selected' : '';
 
     let displayTitle = cleanTitle(title, { app, title, url, appPath, bundleId });
 
     const blockOverlaps = block.overlaps || [];
-    const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-    const blockStart = dateStartOfDay + block.startCell * state.zoom * 60 * 1000;
-    const blockEnd = blockStart + block.span * state.zoom * 60 * 1000;
-    const layout = rowLayout || buildFullDayTimelineRowLayout(dateStartOfDay, state.zoom);
-    const displayRange = getDisplayRowRangeForSourceRange(layout, block.startCell, block.startCell + block.span);
+    const displayRange = getDisplayRowRangeForSourceRange(layout, startCell, startCell + span);
+    const exactGeometry = isSessionBlock
+        ? getTimelineExactDisplayRangeGeometry(blockStart, blockEnd, dateStartOfDay, state.zoom, layout)
+        : null;
     const displayStartRow = displayRange.startRow;
     const displayRowSpan = Math.max(1, displayRange.rowSpan);
+    const naturalHeightPx = exactGeometry ? exactGeometry.height : (displayRowSpan * 40 - 3);
+    const compactClass = naturalHeightPx < 24 ? ' activity-block--compact' : '';
+    const blockStyle = exactGeometry
+        ? `top: ${formatCssNumber(exactGeometry.top)}px; height: ${formatCssNumber(exactGeometry.height)}px;`
+        : `top: calc(var(--row-height) * ${displayStartRow} + 2px); height: calc(var(--row-height) * ${displayRowSpan} - 3px);`;
     const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
     const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
-    const visibleBreakdownOverlaps = getVisibleMultiActivityBreakdownOverlaps(uniqueOverlaps, blockStart, blockEnd);
-    const visibleSecondaryOverlaps = getVisibleSecondaryActivityBreakdownOverlaps(visibleBreakdownOverlaps, {
-        app,
-        title,
-        url,
-        appPath,
-        bundleId
+    const popupDisplayModel = buildActivityPopupDisplayModel({
+        overlaps: uniqueOverlaps,
+        rangeStart: blockStart,
+        rangeEnd: blockEnd,
+        primaryActivity: {
+            app,
+            title,
+            url,
+            appPath,
+            bundleId
+        },
+        activeDurationMs: block.activeDurationMs,
+        zoom: state.zoom
     });
+    const visibleSecondaryOverlaps = getInlineBadgePopupRows(popupDisplayModel.secondaryRows);
     const inlineIconOverlaps = visibleSecondaryOverlaps.slice(0, 2);
     const hiddenInlineIconCount = Math.max(0, visibleSecondaryOverlaps.length - inlineIconOverlaps.length);
 
     const iconHTML = getActivityIconHTML(app, url, title, appPath, bundleId);
 
-    const fallbackDurationMs = block.span * state.zoom * 60000;
+    const fallbackDurationMs = blockEnd - blockStart;
     const actualDurationMs = getActivityDurationTotalMs(uniqueOverlaps) || fallbackDurationMs;
-    const isMultipleActivityBlock = uniqueOverlaps.length > 1;
-    const displayDurationMs = isMultipleActivityBlock
-        ? (getBreakdownDisplayDurationMs(visibleBreakdownOverlaps, uniqueOverlaps) || actualDurationMs)
+    const isMultipleActivityBlock = popupDisplayModel.isMultiple || uniqueOverlaps.length > 1;
+    const displayDurationMs = Number.isFinite(block.activeDurationMs) && block.activeDurationMs > 0
+        ? block.activeDurationMs
+        : isMultipleActivityBlock
+        ? (getBreakdownDisplayDurationMs(popupDisplayModel.visibleRows, uniqueOverlaps) || actualDurationMs)
         : actualDurationMs;
     const durationStr = formatActivityDurationLabel(displayDurationMs, isMultipleActivityBlock ? 0 : 1);
-    const blockActivityMix = uniqueOverlaps.reduce((mix, overlap) => {
+    const blockActivityMix = popupDisplayModel.visibleRows.reduce((mix, overlap) => {
         return addTimelineActivityMix(mix, overlap.activityMix || emptyActivityMix());
     }, emptyActivityMix());
     const durationPillClass = activityMixPillClass(blockActivityMix, 'shrink-0');
     const durationPillAttributes = activityMixPillAttributes(blockActivityMix);
+    const overlapKey = isSessionBlock
+        ? registerActivityBlockDetailOverlaps(layout, uniqueOverlaps)
+        : null;
+    const overlapDataAttribute = overlapKey
+        ? `data-overlap-key="${escapeAttribute(overlapKey)}"`
+        : `data-overlaps="${overlapsData}"`;
 
     return `
-        <div class="activity-block ${selectedClass}"
-             style="top: calc(var(--row-height) * ${displayStartRow} + 2px); height: calc(var(--row-height) * ${displayRowSpan} - 3px);"
-             data-start-cell="${block.startCell}"
-             data-span="${block.span}"
+        <div class="activity-block${compactClass} ${selectedClass}"
+             style="${blockStyle}"
+             data-start-cell="${startCell}"
+             data-span="${span}"
+             data-start-ms="${blockStart}"
+             data-end-ms="${blockEnd}"
+             data-active-duration-ms="${Number.isFinite(block.activeDurationMs) ? block.activeDurationMs : displayDurationMs}"
+             data-elapsed-duration-ms="${blockEnd - blockStart}"
+             data-exact-geometry="${isSessionBlock ? 'true' : 'false'}"
+             data-fragment-count="${Array.isArray(block.sources) ? block.sources.length : 1}"
+             data-interruption-count="${Number.isFinite(block.interruptionCount) ? block.interruptionCount : 0}"
+             data-session-key="${escapeAttribute(block.similarityKey || block.summaryKey || '')}"
              data-app="${escapeAttribute(app)}"
              data-title="${escapeAttribute(title)}"
              data-url="${escapeAttribute(url)}"
              data-app-path="${escapeAttribute(appPath)}"
              data-bundle-id="${escapeAttribute(bundleId)}"
-             data-overlaps="${overlapsData}">
+             ${overlapDataAttribute}>
             <div class="activity-checkbox ${isSelected ? 'is-selected' : ''} mr-2 shrink-0 cursor-pointer z-20 flex items-center justify-center">
                 <i class="${isSelected ? 'ph-fill ph-check-square' : 'ph ph-square'} text-base"></i>
             </div>
@@ -2638,25 +4109,10 @@ function attachMemoryAidInteractions() {
         if (btnQuickAdd) {
             btnQuickAdd.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const startCell = parseInt(b.dataset.startCell, 10);
-                const span = parseInt(b.dataset.span, 10);
-                const app = b.dataset.app;
-                const title = b.dataset.title;
-
-                const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-                const startMs = dateStartOfDay + startCell * state.zoom * 60 * 1000;
-                const endMs = startMs + span * state.zoom * 60 * 1000;
-
-                let overlaps = [];
-                if (b.dataset.overlaps) {
-                    try {
-                        overlaps = JSON.parse(decodeURIComponent(b.dataset.overlaps));
-                    } catch (err) {}
-                }
-
-                const displayOverlaps = summarizeSimilarActivityOverlaps(overlaps, startMs, endMs);
-                const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(displayOverlaps, startMs, endMs);
-                openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities.length > 0 ? assignmentActivities : displayOverlaps);
+                const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
+                const displayModel = buildActivityBlockPopupDisplayModel(b);
+                const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs);
+                openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
             });
         }
 
@@ -2676,26 +4132,10 @@ function attachMemoryAidInteractions() {
 
         b.addEventListener('dblclick', (e) => {
             if (e.target.closest('.activity-quick-add') || e.target.closest('.activity-checkbox')) return;
-            
-            const startCell = parseInt(b.dataset.startCell, 10);
-            const span = parseInt(b.dataset.span, 10);
-            const app = b.dataset.app;
-            const title = b.dataset.title;
-
-            const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-            const startMs = dateStartOfDay + startCell * state.zoom * 60 * 1000;
-            const endMs = startMs + span * state.zoom * 60 * 1000;
-
-            let overlaps = [];
-            if (b.dataset.overlaps) {
-                try {
-                    overlaps = JSON.parse(decodeURIComponent(b.dataset.overlaps));
-                } catch (err) {}
-            }
-
-            const displayOverlaps = summarizeSimilarActivityOverlaps(overlaps, startMs, endMs);
-            const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(displayOverlaps, startMs, endMs);
-            openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities.length > 0 ? assignmentActivities : displayOverlaps);
+            const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
+            const displayModel = buildActivityBlockPopupDisplayModel(b);
+            const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs);
+            openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
         });
     });
 }
@@ -2729,15 +4169,30 @@ function getActivityBlockSelectionKeys(blockEl) {
     return primaryKey ? [primaryKey] : [];
 }
 
+function getActivityBlockSelectionId(blockEl) {
+    const startCell = parseInt(blockEl?.dataset?.startCell, 10);
+    const exactStart = Number(blockEl?.dataset?.startMs);
+    const exactEnd = Number(blockEl?.dataset?.endMs);
+    if (blockEl?.dataset?.exactGeometry === 'true'
+        && Number.isFinite(exactStart)
+        && Number.isFinite(exactEnd)
+        && exactEnd > exactStart) {
+        const key = blockEl.dataset.sessionKey || getActivitySimilarityKey(getActivityBlockData(blockEl)) || '';
+        return `activity:${exactStart}:${exactEnd}:${key}`;
+    }
+
+    return Number.isFinite(startCell) ? startCell : null;
+}
+
 function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = null) {
-    const startCell = parseInt(blockEl.dataset.startCell, 10);
+    const selectionId = getActivityBlockSelectionId(blockEl);
     const checkbox = blockEl.querySelector('.activity-checkbox');
     const iconEl = blockEl.querySelector('.activity-checkbox i');
 
-    if (!Number.isFinite(startCell)) return;
+    if (selectionId === null) return;
 
     if (selected) {
-        state.selectedActivities.add(startCell);
+        state.selectedActivities.add(selectionId);
         blockEl.classList.add('selected');
         checkbox?.classList.add('is-selected');
         if (iconEl) iconEl.className = 'ph-fill ph-check-square text-base';
@@ -2748,7 +4203,7 @@ function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = nu
             delete blockEl.dataset.selectedSimilarityKeys;
         }
     } else {
-        state.selectedActivities.delete(startCell);
+        state.selectedActivities.delete(selectionId);
         blockEl.classList.remove('selected');
         checkbox?.classList.remove('is-selected');
         if (iconEl) iconEl.className = 'ph ph-square text-base';
@@ -2757,6 +4212,9 @@ function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = nu
 }
 
 function getPopupActivitySelectionKey(activity) {
+    if (activity?.popupSourceChild) {
+        return getActivitySourceKey(activity) || `${getActivitySummaryKey(activity)}|||${activity.start || ''}|||${activity.end || ''}`;
+    }
     return getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
 }
 
@@ -2794,11 +4252,75 @@ function getPopupAssignmentActivity(activity) {
     };
 }
 
+function buildPopupContextSourceActivity(source) {
+    const duration = getActivitySourceDuration(source);
+    const start = Number.isFinite(source?.start) ? source.start : undefined;
+    const end = Number.isFinite(source?.end) ? source.end : undefined;
+
+    return {
+        ...stripActivitySources(source),
+        title: getActivityDisplayTitle(source),
+        appPath: source?.appPath || '',
+        bundleId: source?.bundleId || '',
+        start,
+        end,
+        duration,
+        assignedDurationMs: duration,
+        assignmentStart: start,
+        assignmentEnd: end,
+        assignmentSource: 'activity-stream',
+        assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+        assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined
+    };
+}
+
+function buildPopupContextAssignmentActivity(activity) {
+    const sources = getPopupRowSources(activity)
+        .map(buildPopupContextSourceActivity)
+        .filter(source => Number.isFinite(source.duration) && source.duration > 0);
+    const duration = sources.reduce((total, source) => total + source.duration, 0);
+    if (duration <= 0) return null;
+
+    const start = sources.reduce((value, source) => Number.isFinite(source.start) ? Math.min(value, source.start) : value, Number.MAX_SAFE_INTEGER);
+    const end = sources.reduce((value, source) => Number.isFinite(source.end) ? Math.max(value, source.end) : value, 0);
+    const { children, ...baseActivity } = stripActivitySources(activity);
+
+    return {
+        ...baseActivity,
+        title: getActivityDisplayTitle(activity),
+        appPath: activity?.appPath || '',
+        bundleId: activity?.bundleId || '',
+        start: start === Number.MAX_SAFE_INTEGER ? activity.start : start,
+        end: end > 0 ? end : activity.end,
+        duration,
+        assignedDurationMs: duration,
+        assignmentStart: start === Number.MAX_SAFE_INTEGER ? activity.start : start,
+        assignmentEnd: end > 0 ? end : activity.end,
+        assignmentSource: 'activity-stream',
+        assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+        assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined,
+        sources,
+        modalSourceActivities: sources,
+        modalAggregateGroupKey: activity?.popupContextKey || getActivityPopupContextKey(activity)
+    };
+}
+
 function buildPopupAssignmentActivities(activities, startMs, endMs) {
-    const assignmentInputs = (Array.isArray(activities) ? activities : [])
-        .map(getPopupAssignmentActivity);
-    const assignmentActivities = buildActivityStreamSummaryAssignmentActivities(assignmentInputs, startMs, endMs);
-    return assignmentActivities.length > 0 ? assignmentActivities : assignmentInputs;
+    const assignmentActivities = [];
+
+    for (const activity of Array.isArray(activities) ? activities : []) {
+        const assignmentInput = getPopupAssignmentActivity(activity);
+        if (assignmentInput?.popupContextSummary) {
+            const contextAssignment = buildPopupContextAssignmentActivity(assignmentInput);
+            if (contextAssignment) assignmentActivities.push(contextAssignment);
+            continue;
+        }
+
+        const [summaryAssignment] = buildActivityStreamSummaryAssignmentActivities([assignmentInput], startMs, endMs);
+        assignmentActivities.push(summaryAssignment || assignmentInput);
+    }
+
+    return assignmentActivities.filter(Boolean);
 }
 
 function setPopupActivityRowSelected(row, selected) {
@@ -2831,20 +4353,34 @@ function togglePopupActivitySelection(row) {
     setPopupActivityRowSelected(row, !row?.classList?.contains?.('is-selected'));
 }
 
-function getSelectedPopupAssignmentActivities(displayOverlaps) {
+function getPopupRowDisplayActivity(row, displayOverlaps) {
+    const parentIndex = parseInt(row?.dataset?.popupOverlapIndex, 10);
+    if (!Number.isFinite(parentIndex)) return null;
+
+    const parentActivity = displayOverlaps[parentIndex];
+    const childIndex = parseInt(row?.dataset?.popupChildIndex, 10);
+    if (Number.isFinite(childIndex) && Array.isArray(parentActivity?.children)) {
+        return parentActivity.children[childIndex] || null;
+    }
+
+    return parentActivity || null;
+}
+
+function getSelectedPopupAssignmentActivities(displayOverlaps, fallbackOverlaps = displayOverlaps) {
     const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
-    if (!rows) return displayOverlaps;
+    if (!rows) return fallbackOverlaps;
 
     const selectedActivities = [];
     rows.forEach(row => {
         if (!row?.classList?.contains?.('is-selected')) return;
 
-        const index = parseInt(row.dataset?.popupOverlapIndex, 10);
-        const activity = Number.isFinite(index) ? displayOverlaps[index] : null;
+        const activity = getPopupRowDisplayActivity(row, displayOverlaps);
         if (activity) selectedActivities.push(activity);
     });
 
-    return selectedActivities.length > 0 ? selectedActivities : displayOverlaps;
+    if (selectedActivities.length > 0) return selectedActivities;
+
+    return displayOverlaps.length > 0 ? displayOverlaps : fallbackOverlaps;
 }
 
 function assignPopupActivity(activity, startMs, endMs) {
@@ -2852,17 +4388,42 @@ function assignPopupActivity(activity, startMs, endMs) {
     openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([activity], startMs, endMs));
 }
 
+function setPopupActivityChildrenExpanded(parentIndex, expanded, expandButton = null) {
+    const childRows = DOM.elPopupMultiListContainer?.querySelectorAll?.(`[data-popup-child-parent-index="${parentIndex}"]`);
+    childRows?.forEach?.(row => {
+        row.classList?.toggle?.('hidden', !expanded);
+    });
+    const childGroups = DOM.elPopupMultiListContainer?.querySelectorAll?.(`[data-popup-child-group-index="${parentIndex}"]`);
+    childGroups?.forEach?.(group => {
+        group.classList?.toggle?.('hidden', !expanded);
+    });
+
+    expandButton?.setAttribute?.('aria-expanded', String(Boolean(expanded)));
+    const icon = expandButton?.querySelector?.('i');
+    if (icon) {
+        icon.className = expanded ? 'ph ph-caret-down text-[13px]' : 'ph ph-caret-right text-[13px]';
+    }
+}
+
 function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, endMs) {
     const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
     if (!rows) return;
 
     rows.forEach(row => {
-        const index = parseInt(row.dataset?.popupOverlapIndex, 10);
-        const activity = Number.isFinite(index) ? displayOverlaps[index] : null;
+        const activity = getPopupRowDisplayActivity(row, displayOverlaps);
         if (!activity) return;
 
         const key = getPopupActivitySelectionKey(activity);
         if (key) row.dataset.popupSimilarityKey = key;
+
+        row.querySelector?.('.popup-activity-expand')?.addEventListener('click', event => {
+            event.stopPropagation();
+            event.preventDefault?.();
+            const parentIndex = parseInt(row.dataset?.popupOverlapIndex, 10);
+            if (!Number.isFinite(parentIndex)) return;
+            const expanded = row.querySelector?.('.popup-activity-expand')?.getAttribute?.('aria-expanded') === 'true';
+            setPopupActivityChildrenExpanded(parentIndex, !expanded, row.querySelector?.('.popup-activity-expand'));
+        });
 
         row.querySelector?.('.popup-activity-select')?.addEventListener('click', event => {
             event.stopPropagation();
@@ -2880,8 +4441,8 @@ function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, e
 
 // Selects or deselects an activity block for bulk actions
 function toggleActivitySelection(blockEl) {
-    const startCell = parseInt(blockEl.dataset.startCell, 10);
-    setActivityBlockSelected(blockEl, !state.selectedActivities.has(startCell));
+    const selectionId = getActivityBlockSelectionId(blockEl);
+    setActivityBlockSelected(blockEl, !state.selectedActivities.has(selectionId));
     updateMultiSelectBar();
 }
 
@@ -2908,16 +4469,14 @@ function selectSimilarActivities() {
         const primaryMatches = primaryKey && selectedKeys.has(primaryKey);
         const matchedSecondaryKeys = [];
 
-        if (!primaryMatches && el.dataset.overlaps) {
-            try {
-                const overlaps = JSON.parse(decodeURIComponent(el.dataset.overlaps));
-                for (const overlap of overlaps) {
-                    const key = getActivitySimilarityKey(overlap);
-                    if (key && selectedKeys.has(key)) {
-                        matchedSecondaryKeys.push(key);
-                    }
+        if (!primaryMatches) {
+            const overlaps = getActivityBlockDetailOverlaps(el);
+            for (const overlap of overlaps) {
+                const key = getActivitySimilarityKey(overlap);
+                if (key && selectedKeys.has(key)) {
+                    matchedSecondaryKeys.push(key);
                 }
-            } catch {}
+            }
         }
 
         if (primaryMatches || matchedSecondaryKeys.length > 0) {
@@ -2944,18 +4503,97 @@ function updateMultiSelectBar() {
     }
 }
 
+function setElementCssProperty(element, name, value) {
+    if (element?.style && typeof element.style.setProperty === 'function') {
+        element.style.setProperty(name, value);
+        return;
+    }
+
+    if (element?.style) {
+        element.style[name] = value;
+    }
+}
+
+function refreshFloatingTimeEntryLabelBlocks() {
+    const itemsTime = DOM.elItemsTimeEntries;
+    const blocks = itemsTime?.querySelectorAll?.('.time-entry-block') || [];
+    floatingTimeEntryLabelBlocks = Array.from(blocks)
+        .map(block => ({
+            block,
+            label: block.querySelector?.('.time-entry-main--floating') || null
+        }))
+        .filter(item => item.label);
+    return floatingTimeEntryLabelBlocks;
+}
+
+function scheduleFloatingTimeEntryLabelUpdate() {
+    if (floatingTimeEntryLabelFramePending) return;
+
+    floatingTimeEntryLabelFramePending = true;
+    const scheduleFrame = typeof window?.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : (callback) => (typeof setTimeout === 'function' ? setTimeout(callback, 0) : callback());
+    scheduleFrame(() => {
+        floatingTimeEntryLabelFramePending = false;
+        updateFloatingTimeEntryLabels();
+    });
+}
+
+function updateFloatingTimeEntryLabels() {
+    const itemsTime = DOM.elItemsTimeEntries;
+    const scrollPane = DOM.elTimeEntriesScroll;
+    if (!itemsTime || !scrollPane) return;
+
+    const scrollTop = Number(scrollPane.scrollTop) || 0;
+    const blocks = floatingTimeEntryLabelBlocks.length > 0
+        ? floatingTimeEntryLabelBlocks
+        : refreshFloatingTimeEntryLabelBlocks();
+
+    blocks.forEach(({ block, label }) => {
+        if (!block || !label) return;
+
+        const blockTop = Number(block.offsetTop) || 0;
+        const blockHeight = Number(block.offsetHeight)
+            || Number.parseFloat(block.style?.height)
+            || 0;
+        const labelHeight = Number(label.offsetHeight) || 24;
+        const maxOffset = Math.max(
+            TIME_ENTRY_FLOATING_LABEL_PADDING_PX,
+            blockHeight - labelHeight - TIME_ENTRY_FLOATING_LABEL_PADDING_PX
+        );
+        const nextOffset = Math.min(
+            maxOffset,
+            Math.max(TIME_ENTRY_FLOATING_LABEL_PADDING_PX, scrollTop - blockTop + TIME_ENTRY_FLOATING_LABEL_PADDING_PX)
+        );
+
+        setElementCssProperty(block, '--time-entry-label-offset', `${Math.round(nextOffset)}px`);
+    });
+}
+
+function bindFloatingTimeEntryLabelUpdates() {
+    const scrollPane = DOM.elTimeEntriesScroll;
+    refreshFloatingTimeEntryLabelBlocks();
+    if (scrollPane && floatingTimeEntryLabelScrollPane !== scrollPane) {
+        scrollPane.addEventListener?.('scroll', scheduleFloatingTimeEntryLabelUpdate, { passive: true });
+        floatingTimeEntryLabelScrollPane = scrollPane;
+    }
+
+    if (window && !window.__orielFloatingTimeEntryResizeBound) {
+        window.addEventListener?.('resize', scheduleFloatingTimeEntryLabelUpdate);
+        window.__orielFloatingTimeEntryResizeBound = true;
+    }
+}
+
 // Renders the Logged Time Entries inside the center timeline panel
 function renderLoggedTimeEntries() {
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
     let html = '';
-    const renderItems = buildLoggedTimeEntryRenderItems(state.timeEntries, state.zoom, dateStartOfDay);
-    const activityCells = getCurrentDayTimelineActivityCells(dateStartOfDay, state.zoom);
-    const rowLayout = buildDayTimelineRowLayout({
+    const model = getDayTimelineRenderModel({
         dateStartOfDay,
-        zoom: state.zoom,
-        activityCells,
-        timeEntryRenderItems: renderItems
+        zoom: state.zoom
     });
+    const renderItems = model.timeEntryRenderItems;
+    const rowLayout = model.rowLayout;
 
     for (const item of renderItems) {
         const entry = item.firstEntry;
@@ -2965,10 +4603,14 @@ function renderLoggedTimeEntries() {
         const rangeEnd = Number.isFinite(item.displayStart) && Number.isFinite(item.displayEnd) && item.displayEnd > item.displayStart
             ? item.displayEnd
             : item.end;
-        const geometry = getTimelineDisplayRangeGeometry(rangeStart, rangeEnd, dateStartOfDay, state.zoom, rowLayout);
+        const geometry = item.renderExactGeometry
+            ? getTimelineExactDisplayRangeGeometry(rangeStart, rangeEnd, dateStartOfDay, state.zoom, rowLayout)
+            : getTimelineDisplayRangeGeometry(rangeStart, rangeEnd, dateStartOfDay, state.zoom, rowLayout);
         const topPx = Math.max(0, geometry.top);
         const naturalHeightPx = geometry.height;
-        const heightPx = Math.max(37, naturalHeightPx);
+        const heightPx = item.renderExactGeometry
+            ? naturalHeightPx
+            : Math.max(37, naturalHeightPx);
 
         const project = state.projects.find(p => p.id === entry.projectId) || { name: 'Unknown Project', color: '#4b5563' };
         const task = Array.isArray(project.tasks)
@@ -2982,6 +4624,7 @@ function renderLoggedTimeEntries() {
                 : '';
         const assignmentClass = item.isAssignedGroup ? 'time-entry-block--assigned' : '';
         const className = ['time-entry-block', sizeClass, assignmentClass].filter(Boolean).join(' ');
+        const floatingLabelClass = naturalHeightPx >= TIME_ENTRY_FLOATING_LABEL_MIN_HEIGHT_PX ? ' time-entry-main--floating' : '';
         const description = (entry.description || '').trim();
         const descriptionHtml = description
             ? `<span class="time-entry-description truncate pr-2">${escapeTimelineText(description)}</span>`
@@ -2995,6 +4638,12 @@ function renderLoggedTimeEntries() {
                     <span class="time-entry-project-summary min-w-0 flex items-center gap-1.5 truncate">
                         ${projectSummaryHtml}
                     </span>
+        `;
+        const timeEntryMainHtml = (extraClass = '', inlineStyle = '', ariaHidden = false) => `
+                <div class="time-entry-main${extraClass} flex justify-between items-start text-white text-[12px] font-semibold leading-tight pointer-events-none"${inlineStyle ? ` style="${inlineStyle}"` : ''}${ariaHidden ? ' aria-hidden="true"' : ''}>
+                    ${mainContentHtml}
+                    <span class="duration-pill time-entry-duration shrink-0">${duration} min</span>
+                </div>
         `;
         const projectRowHtml = description
             ? `
@@ -3024,10 +4673,7 @@ function renderLoggedTimeEntries() {
                  style="top: ${topPx}px; height: ${heightPx}px; --entry-project-color: ${project.color};${laneStyle}"
                  data-id="${entry.id}"${groupDataHtml}>
                 ${resizeTopHandleHtml}
-                <div class="time-entry-main flex justify-between items-start text-white text-[12px] font-semibold leading-tight pointer-events-none">
-                    ${mainContentHtml}
-                    <span class="duration-pill time-entry-duration shrink-0">${duration} min</span>
-                </div>
+                ${timeEntryMainHtml(floatingLabelClass)}
                 ${projectRowHtml}
                 ${resizeBottomHandleHtml}
             </div>
@@ -3038,6 +4684,8 @@ function renderLoggedTimeEntries() {
     if (itemsTime) {
         itemsTime.innerHTML = html;
         attachTimeEntriesInteractions();
+        bindFloatingTimeEntryLabelUpdates();
+        updateFloatingTimeEntryLabels();
     }
 }
 
@@ -3218,63 +4866,101 @@ function showActivityDetailsPopup(b) {
     const bundleId = b.dataset.bundleId || '';
 
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
-    const startMs = dateStartOfDay + startCell * state.zoom * 60 * 1000;
-    const endMs = startMs + span * state.zoom * 60 * 1000;
+    const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
+    const activeDurationMs = Number(b.dataset.activeDurationMs);
+    const elapsedDurationMs = Number(b.dataset.elapsedDurationMs);
+    const interruptionCount = Number(b.dataset.interruptionCount);
 
     const formatTimeHM = (ms) => {
         const date = new Date(ms);
         return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     };
 
-    const duration = span * state.zoom;
     const timeRangeStr = `${formatTimeHM(startMs)} – ${formatTimeHM(endMs)}`;
 
-    let overlaps = [];
-    if (b.dataset.overlaps) {
-        try {
-            overlaps = JSON.parse(decodeURIComponent(b.dataset.overlaps));
-        } catch (e) {
-            console.error("Error parsing overlaps data:", e);
-        }
-    }
-    const summarizedOverlaps = summarizeSimilarActivityOverlaps(overlaps, startMs, endMs);
-    const visibleSummarizedOverlaps = getVisiblePopupBreakdownOverlaps(summarizedOverlaps);
-    const displayOverlaps = visibleSummarizedOverlaps.length > 0
-        ? visibleSummarizedOverlaps
-        : summarizedOverlaps;
-    const isMultipleActivityPopup = displayOverlaps.length > 1;
+    const popupDisplayModel = buildActivityBlockPopupDisplayModel(b);
+    const displayOverlaps = popupDisplayModel.visibleRows;
+    const assignmentOverlaps = popupDisplayModel.assignmentRows;
+    const isMultipleActivityPopup = popupDisplayModel.isMultiple;
 
-    const totalMs = isMultipleActivityPopup
-        ? getBreakdownDisplayDurationMs(displayOverlaps, summarizedOverlaps)
+    const totalMs = Number.isFinite(activeDurationMs) && activeDurationMs > 0
+        ? activeDurationMs
+        : isMultipleActivityPopup
+        ? getBreakdownDisplayDurationMs(displayOverlaps, popupDisplayModel.exactRows)
         : (getActivityDurationTotalMs(displayOverlaps) || (span * state.zoom * 60000));
-    const durationStr = formatActivityDurationLabel(totalMs, 0);
+    const durationStr = formatPositiveActivityDurationLabel(totalMs);
     const popupActivityMix = displayOverlaps.reduce((mix, overlap) => {
         return addTimelineActivityMix(mix, overlap.activityMix || emptyActivityMix());
     }, emptyActivityMix());
 
     DOM.elPopupDuration.innerText = durationStr;
     if (DOM.elPopupDuration) {
-        DOM.elPopupDuration.title = '';
+        const elapsedLabel = Number.isFinite(elapsedDurationMs) && elapsedDurationMs > 0
+            ? formatActivityDurationLabel(elapsedDurationMs, 0)
+            : '';
+        const interruptionLabel = Number.isFinite(interruptionCount) && interruptionCount > 0
+            ? ` · ${interruptionCount} interruption${interruptionCount === 1 ? '' : 's'}`
+            : '';
+        DOM.elPopupDuration.title = elapsedLabel
+            ? `Active ${durationStr} · elapsed ${elapsedLabel}${interruptionLabel}`
+            : '';
     }
     DOM.elPopupRange.innerText = timeRangeStr;
     renderPopupActivityMix(popupActivityMix);
+
+    const renderPopupActivityChildRow = (o, parentIndex, childIndex, options = {}) => {
+        const rowDurationMs = Number(o.duration) || 0;
+        const oDurationStr = formatPositiveActivityDurationLabel(rowDurationMs);
+        const rowKey = getPopupActivitySelectionKey(o);
+        const displayLabels = getPopupActivityDisplayLabels(o);
+        const hiddenClass = options.hidden === false ? '' : ' hidden';
+        const externalLinkHTML = displayLabels.externalUrl
+            ? `<a href="${escapeAttribute(displayLabels.externalUrl)}"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   class="popup-activity-external-link text-gray-400 hover:text-blue-300 focus-visible:text-blue-300 w-4 h-4 rounded-full flex items-center justify-center shrink-0"
+                   title="Open in browser"
+                   aria-label="Open ${escapeAttribute(displayLabels.primary)} in browser">
+                    <i class="ph ph-arrow-square-out text-[13px]" aria-hidden="true"></i>
+               </a>`
+            : '';
+        return `
+            <div class="flex items-center justify-between text-[10px] py-1.5 popup-activity-row popup-activity-child-row${hiddenClass}"
+                 data-popup-overlap-index="${parentIndex}"
+                 data-popup-child-index="${childIndex}"
+                 data-popup-child-parent-index="${parentIndex}"
+                 data-popup-similarity-key="${escapeAttribute(rowKey)}">
+                <div class="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                    <div class="w-5 h-5 flex items-center justify-center shrink-0 opacity-80">
+                        ${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}
+                    </div>
+                    <div class="flex items-center gap-1 min-w-0 flex-1">
+                        <span class="font-semibold text-gray-300 truncate min-w-0" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
+                        ${externalLinkHTML}
+                    </div>
+                </div>
+                <span class="popup-activity-child-duration shrink-0 text-[10px] font-semibold tabular-nums">${oDurationStr}</span>
+            </div>
+        `;
+    };
 
     if (isMultipleActivityPopup) {
         DOM.elPopupIconContainer.innerHTML = '<i class="ph ph-dots-three-circle text-base text-accent"></i>';
         DOM.elPopupAppName.innerText = 'Multiple Activities';
 
         DOM.elPopupSingleDetails.classList.add('hidden');
+        DOM.elPopupSingleChildrenContainer?.classList?.add('hidden');
+        if (DOM.elPopupSingleChildrenContainer) DOM.elPopupSingleChildrenContainer.innerHTML = '';
         DOM.elPopupMultiDetails.classList.remove('hidden');
 
-        DOM.elPopupMultiListContainer.innerHTML = displayOverlaps.map((o, index) => {
-            let oDurationStr = '';
-            if (o.duration < 60000) {
-                oDurationStr = `${Math.round(o.duration / 1000)}s`;
-            } else {
-                oDurationStr = `${Math.round(o.duration / (60 * 1000))} min`;
-            }
+        const renderPopupActivityBreakdownRow = (o, index, options = {}) => {
+            const childIndex = Number.isFinite(options.childIndex) ? options.childIndex : null;
+            const isChildRow = childIndex !== null;
+            const children = !isChildRow && Array.isArray(o.children) ? o.children : [];
+            const rowDurationMs = Number(o.duration) || 0;
+            const oDurationStr = formatPositiveActivityDurationLabel(rowDurationMs);
             const rowKey = getPopupActivitySelectionKey(o);
-            const selectedKeys = state.selectedActivities.has(startCell) ? getActivityBlockSelectionKeys(b) : [];
+            const selectedKeys = state.selectedActivities.has(getActivityBlockSelectionId(b)) ? getActivityBlockSelectionKeys(b) : [];
             const isRowSelected = Boolean(rowKey && selectedKeys.includes(rowKey));
             const rowSelectedClass = isRowSelected ? ' is-selected' : '';
             const checkboxIconClass = isRowSelected ? 'ph-fill ph-check-square' : 'ph ph-square';
@@ -3294,10 +4980,31 @@ function showActivityDetailsPopup(b) {
                 : '';
             const rowDurationPillClass = activityMixPillClass(o.activityMix, 'shrink-0');
             const rowDurationPillAttributes = activityMixPillAttributes(o.activityMix);
+            const expandButtonHTML = children.length > 0
+                ? `<button type="button"
+                           class="popup-activity-expand bg-transparent w-6 h-7 rounded-full flex items-center justify-center shrink-0 mr-0.5 text-gray-400 hover:text-gray-100"
+                           title="Show source rows"
+                           aria-label="Show source rows for ${escapeAttribute(displayLabels.primary)}"
+                           aria-expanded="false">
+                        <i class="ph ph-caret-right text-[13px]" aria-hidden="true"></i>
+                   </button>`
+                : '';
+            if (isChildRow) {
+                return renderPopupActivityChildRow(o, index, childIndex);
+            }
+
+            const rowClass = `flex items-center justify-between text-[11px] py-1.5 border-b border-[#2d2f34]/40 last:border-b-0 popup-activity-row${rowSelectedClass}`;
+            const childRowsHTML = children.length > 0
+                ? `<div class="popup-activity-children hidden" data-popup-child-group-index="${index}">
+                        ${children.map((child, nextChildIndex) => renderPopupActivityBreakdownRow(child, index, { childIndex: nextChildIndex })).join('')}
+                   </div>`
+                : '';
+
             return `
-                <div class="flex items-center justify-between text-[11px] py-1.5 border-b border-[#2d2f34]/40 last:border-b-0 popup-activity-row${rowSelectedClass}"
+                <div class="${rowClass}"
                      data-popup-overlap-index="${index}"
                      data-popup-similarity-key="${escapeAttribute(rowKey)}">
+                    ${expandButtonHTML}
                     <button type="button"
                             class="popup-activity-select activity-checkbox ${isRowSelected ? 'is-selected ' : ''}w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-1"
                             title="Select activity"
@@ -3323,18 +5030,20 @@ function showActivityDetailsPopup(b) {
                         <i class="ph ph-plus-circle text-lg"></i>
                     </button>
                 </div>
+                ${childRowsHTML}
             `;
-        }).join('');
+        };
+        DOM.elPopupMultiListContainer.innerHTML = displayOverlaps.map((o, index) => renderPopupActivityBreakdownRow(o, index)).join('');
         bindActivityMixTooltipInteractions(DOM.elPopupMultiListContainer);
         bindActivityPopupBreakdownControls(b, displayOverlaps, startMs, endMs);
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps);
+            const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps, assignmentOverlaps);
             openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs));
         };
     } else {
-        const singleActivity = displayOverlaps[0] || { app, title, url, appPath, bundleId };
+        const singleActivity = popupDisplayModel.primaryRow || { app, title, url, appPath, bundleId };
         const singleApp = normalizeActivityText(singleActivity.app || app);
         const singleTitle = normalizeActivityText(singleActivity.title || title);
         const singleUrl = normalizeActivityText(singleActivity.url || url);
@@ -3349,6 +5058,22 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupSingleDetails.classList.remove('hidden');
         DOM.elPopupMultiDetails.classList.add('hidden');
+        DOM.elPopupMultiListContainer.innerHTML = '';
+
+        const singleChildren = Array.isArray(singleActivity.children) ? singleActivity.children : [];
+        if (DOM.elPopupSingleChildrenContainer) {
+            if (singleChildren.length > 0) {
+                DOM.elPopupSingleChildrenContainer.innerHTML = `
+                    <div class="popup-activity-children popup-activity-children--single">
+                        ${singleChildren.map((child, childIndex) => renderPopupActivityChildRow(child, 0, childIndex, { hidden: false })).join('')}
+                    </div>
+                `;
+                DOM.elPopupSingleChildrenContainer.classList.remove('hidden');
+            } else {
+                DOM.elPopupSingleChildrenContainer.innerHTML = '';
+                DOM.elPopupSingleChildrenContainer.classList.add('hidden');
+            }
+        }
 
         if (singleUrl) {
             DOM.elPopupUrlContainer.classList.remove('hidden');
@@ -3360,15 +5085,12 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(displayOverlaps, startMs, endMs));
+            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(assignmentOverlaps, startMs, endMs));
         };
     }
 
-    const rowLayout = buildDayTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
-    const displayRow = rowLayout.hideEmptyRows
-        ? Math.max(0, getDisplayRowForSourceRow(rowLayout, startCell))
-        : startCell;
-    const blockTop = displayRow * 40;
+    const rowLayout = getTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
+    const blockTop = getTimelineDisplayTopForTime(startMs, rowLayout);
     DOM.elActivityDetailsPopup.style.top = `${blockTop + 6}px`;
     DOM.elActivityDetailsPopup.classList.remove('hidden');
 }
@@ -3382,7 +5104,9 @@ function dismissActivityDetailsPopup() {
 
 // Bind to window namespace
 window.renderTimelineGrids = renderTimelineGrids;
+window.getDayTimelineRenderModel = getDayTimelineRenderModel;
 window.buildVisibleActivityCells = buildVisibleActivityCells;
+window.buildActivityStreamSessions = buildActivityStreamSessions;
 window.isCompressedDayTimelineDirectManipulationDisabled = isCompressedDayTimelineDirectManipulationDisabled;
 window.buildDayTimelineRowLayout = buildDayTimelineRowLayout;
 window.getDisplayRowForSourceRow = getDisplayRowForSourceRow;
@@ -3390,12 +5114,17 @@ window.getSourceRowForDisplayRow = getSourceRowForDisplayRow;
 window.getTimelineDisplayTopForTime = getTimelineDisplayTopForTime;
 window.getTimelineTimeForDisplayTop = getTimelineTimeForDisplayTop;
 window.getTimelineDisplayRangeGeometry = getTimelineDisplayRangeGeometry;
+window.getTimelineExactDisplayRangeGeometry = getTimelineExactDisplayRangeGeometry;
 window.buildVisibleActivityRunsForSummary = buildVisibleActivityRunsForSummary;
 window.buildActivityStreamAssignmentActivities = buildActivityStreamAssignmentActivities;
 window.buildActivityStreamSummaryAssignmentActivity = buildActivityStreamSummaryAssignmentActivity;
 window.buildActivityStreamSummaryAssignmentActivities = buildActivityStreamSummaryAssignmentActivities;
 window.buildActivityStreamRenderEntries = buildActivityStreamRenderEntries;
 window.buildLoggedTimeEntryRenderItems = buildLoggedTimeEntryRenderItems;
+window.buildUnloggedActivityGroups = buildUnloggedActivityGroups;
+window.buildUnloggedBackfillActivities = buildUnloggedBackfillActivities;
+window.renderUnloggedRecordedWorkReview = renderUnloggedRecordedWorkReview;
+window.draftUnloggedRecordedWorkGroup = draftUnloggedRecordedWorkGroup;
 window.getLoggedTimeEntryLaneStyle = getLoggedTimeEntryLaneStyle;
 window.getTimelineDisplayRowRange = getTimelineDisplayRowRange;
 window.isResolvedActivityStreamAssignmentRun = isResolvedActivityStreamAssignmentRun;
@@ -3405,9 +5134,11 @@ window.getActivitySummaryKey = getActivitySummaryKey;
 window.getActivitySimilarityKey = getActivitySimilarityKey;
 window.getActivityBlockSelectionKeys = getActivityBlockSelectionKeys;
 window.getActivityBlockSelectedSimilarityKeys = getActivityBlockSelectedSimilarityKeys;
+window.getActivityBlockDetailOverlaps = getActivityBlockDetailOverlaps;
 window.getActivityMixInRange = getActivityMixInRange;
 window.summarizeActivityOverlaps = summarizeActivityOverlaps;
 window.summarizeSimilarActivityOverlaps = summarizeSimilarActivityOverlaps;
+window.summarizePopupActivityOverlaps = summarizePopupActivityOverlaps;
 window.attachMemoryAidInteractions = attachMemoryAidInteractions;
 window.setActivityBlockSelected = setActivityBlockSelected;
 window.toggleActivitySelection = toggleActivitySelection;
@@ -3415,6 +5146,8 @@ window.clearActivitySelection = clearActivitySelection;
 window.selectSimilarActivities = selectSimilarActivities;
 window.updateMultiSelectBar = updateMultiSelectBar;
 window.renderLoggedTimeEntries = renderLoggedTimeEntries;
+window.bindFloatingTimeEntryLabelUpdates = bindFloatingTimeEntryLabelUpdates;
+window.updateFloatingTimeEntryLabels = updateFloatingTimeEntryLabels;
 window.showTimeEntryHoverPreview = showTimeEntryHoverPreview;
 window.hideTimeEntryHoverPreview = hideTimeEntryHoverPreview;
 window.attachTimeEntriesInteractions = attachTimeEntriesInteractions;

@@ -28,6 +28,9 @@ function showCustomConfirm({ title, message, actionText, actionClass, onConfirm 
 
 function summarizeModalActivities(activities) {
     if (!activities || activities.length === 0) return [];
+    if (activities.some(activity => Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0)) {
+        return activities;
+    }
     if (typeof summarizeSimilarActivityOverlaps === 'function') {
         return summarizeSimilarActivityOverlaps(activities);
     }
@@ -113,11 +116,27 @@ function deriveModalActivityStreamActivities(entry, activities) {
     return derivedActivities;
 }
 
+function getModalActivitySourceActivities(activity) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    return sources.length > 0 ? sources : [activity].filter(Boolean);
+}
+
 function getSelectedModalActivities() {
     const allActivities = state.currentModalAllActivities || state.currentModalActivities || [];
     const selection = state.modalActivitySelection;
     if (!selection || selection.size === 0) return [];
-    return allActivities.filter((_, index) => selection.has(index));
+    const selectedActivities = allActivities.filter((_, index) => selection.has(index));
+    if (!selectedActivities.some(activity => Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0)) {
+        return selectedActivities;
+    }
+
+    const sourceActivities = [];
+    selectedActivities.forEach(activity => {
+        sourceActivities.push(...getModalActivitySourceActivities(activity));
+    });
+    return sourceActivities;
 }
 
 function getModalActivityDurationMs(activity) {
@@ -140,6 +159,60 @@ function isVisibleModalActivityCandidate(activity) {
 function isAssignedModalActivity(activity) {
     return activity?.assignmentSource === 'activity-stream'
         || (Number.isFinite(activity?.assignedDurationMs) && activity.assignedDurationMs > 0);
+}
+
+function getBulkModalAggregationKey(activity) {
+    const key = activity?.modalAggregateGroupKey;
+    if (key === null || key === undefined) return '';
+    return String(key).trim();
+}
+
+function buildBulkModalDisplayActivities(activities) {
+    const groupsByKey = new Map();
+    const displayActivities = [];
+
+    for (const activity of Array.isArray(activities) ? activities : []) {
+        const key = getBulkModalAggregationKey(activity);
+        if (!key) {
+            displayActivities.push(activity);
+            continue;
+        }
+
+        if (!groupsByKey.has(key)) {
+            const group = {
+                ...activity,
+                start: Number.isFinite(activity?.start) ? activity.start : undefined,
+                end: Number.isFinite(activity?.end) ? activity.end : undefined,
+                duration: 0,
+                assignedDurationMs: 0,
+                modalSourceActivities: []
+            };
+            groupsByKey.set(key, group);
+            displayActivities.push(group);
+        }
+
+        const group = groupsByKey.get(key);
+        const duration = getModalActivityDurationMs(activity);
+        group.duration += duration;
+        group.assignedDurationMs += duration;
+        group.modalSourceActivities.push(activity);
+        if (Number.isFinite(activity?.start)) {
+            group.start = Number.isFinite(group.start) ? Math.min(group.start, activity.start) : activity.start;
+        }
+        if (Number.isFinite(activity?.end)) {
+            group.end = Number.isFinite(group.end) ? Math.max(group.end, activity.end) : activity.end;
+        }
+    }
+
+    return displayActivities.filter(activity => {
+        const sources = Array.isArray(activity?.modalSourceActivities) ? activity.modalSourceActivities : [];
+        return sources.length === 0 || getModalActivityDurationMs(activity) >= MODAL_ACTIVITY_MIN_VISIBLE_DURATION_MS;
+    });
+}
+
+function shouldBuildBulkModalDisplayActivities(activities) {
+    return Array.isArray(activities)
+        && activities.some(activity => Boolean(getBulkModalAggregationKey(activity)));
 }
 
 function shouldUseSelectedModalActivityDuration(isBulk = window.isBulkAllocation) {
@@ -325,6 +398,8 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
 
     if (!isBulk) {
         finalActivities = summarizeModalActivities(finalActivities);
+    } else if (shouldBuildBulkModalDisplayActivities(finalActivities)) {
+        finalActivities = buildBulkModalDisplayActivities(finalActivities);
     }
     if (isDragCreatedActivityModal) {
         finalActivities = finalActivities.filter(isVisibleModalActivityCandidate);

@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 const SUPPORTED_THEMES = new Set(['graphite', 'light', 'reference']);
 const SUPPORTED_MIN_ACTIVITY_THRESHOLDS = new Set([10, 30, 60]);
 const DEFAULT_AI_OPENAI_MODEL = 'gpt-5.2';
@@ -327,6 +327,7 @@ const DOM = {
     get elPopupAssignBtn() { return document.getElementById('popup-assign-btn'); },
     get elPopupCloseBtn() { return document.getElementById('popup-close-btn'); },
     get elPopupSingleDetails() { return document.getElementById('popup-single-details'); },
+    get elPopupSingleChildrenContainer() { return document.getElementById('popup-single-children-container'); },
     get elPopupMultiDetails() { return document.getElementById('popup-multi-details'); },
     get elPopupMultiListContainer() { return document.getElementById('popup-multi-list-container'); },
     
