@@ -114,9 +114,9 @@ test('week timeline keeps sticky headers above scrolling time entries', () => {
   assert.doesNotMatch(weekEntryRule[1], /padding/);
   assert.match(weekCreateCueRule[1], /left:\s*0/);
   assert.match(weekCreateCueRule[1], /right:\s*0/);
-  assert.match(headerRule[1], /z-index:\s*30/);
+  assert.match(headerRule[1], /z-index:\s*var\(--z-sticky\)/);
   assert.match(headerRule[1], /border-bottom:\s*1px solid var\(--grid-line\)/);
-  assert.match(cornerRule[1], /z-index:\s*32/);
+  assert.match(cornerRule[1], /z-index:\s*var\(--z-sticky-raised\)/);
   assert.match(cornerRule[1], /border-right:\s*1px solid var\(--grid-line\)/);
   assert.match(gutterFillRule[1], /grid-column:\s*1/);
   assert.match(gutterFillRule[1], /position:\s*sticky/);
@@ -125,7 +125,7 @@ test('week timeline keeps sticky headers above scrolling time entries', () => {
   assert.doesNotMatch(dayColumnRule[1], /repeating-linear-gradient/);
   assert.match(rowLinesRule[1], /position:\s*absolute/);
   assert.match(rowLinesRule[1], /inset:\s*0/);
-  assert.match(rowLinesRule[1], /z-index:\s*0/);
+  assert.match(rowLinesRule[1], /z-index:\s*var\(--z-base\)/);
   assert.doesNotMatch(rowLinesRule[1], /repeating-linear-gradient/);
   assert.match(rowLineRule[1], /box-sizing:\s*border-box/);
   assert.match(rowLineRule[1], /height:\s*var\(--row-height\)/);
@@ -159,8 +159,8 @@ test('top chrome and zoom dropdown stack above Week sticky headers', () => {
   assert.ok(chromeRule);
   assert.ok(headerRule);
   assert.match(chromeRule[1], /position:\s*relative/);
-  assert.match(chromeRule[1], /z-index:\s*70/);
-  assert.match(headerRule[1], /z-index:\s*30/);
+  assert.match(chromeRule[1], /z-index:\s*var\(--z-chrome\)/);
+  assert.match(headerRule[1], /z-index:\s*var\(--z-sticky\)/);
   assert.match(html, /class="[^"]*\bz-50\b[^"]*" id="zoom-dropdown-menu"/);
 });
 

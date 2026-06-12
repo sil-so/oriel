@@ -115,7 +115,7 @@ test('settings tabs reuse the app tab active treatment', () => {
   const activeRule = css.match(/\.settings-section-tab\.is-active\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(activeRule, /background:\s*var\(--surface-raised\)/);
-  assert.match(activeRule, /box-shadow:\s*0 0 0 1px color-mix\(in oklch,\s*var\(--border\) 48%,\s*transparent\) inset/);
+  assert.match(activeRule, /box-shadow:\s*var\(--selected-shadow\)/);
   assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
 });
 
@@ -206,7 +206,7 @@ test('Quiet Chrome keeps dense timeline states calm but explicit', () => {
   assert.match(css, /\.workspace-panel\s*\{[\s\S]*border-color:\s*var\(--separator\)/);
   assert.match(css, /\.activity-block\s*\{[\s\S]*border:\s*1px solid color-mix\(in oklch, var\(--border\) 34%, transparent\)/);
   assert.match(css, /\.activity-block\s*\{[\s\S]*box-sizing:\s*border-box/);
-  assert.match(css, /\.activity-block\.selected\s*\{[\s\S]*background:\s*color-mix\(in oklch, var\(--accent-wash\) 54%, var\(--surface-raised\) 46%\)/);
+  assert.match(css, /\.activity-block\.selected\s*\{[\s\S]*background:\s*var\(--selected-surface\)/);
   assert.match(css, /\.time-entry-block\s*\{[\s\S]*background:\s*color-mix\(in oklch, var\(--accent-wash\) 48%, var\(--surface-raised\) 52%\)/);
   assert.doesNotMatch(css, /time-entry-block--partial-assignment/);
   assert.match(css, /\.side-summary \.surface-panel\s*\{[\s\S]*border-color:\s*var\(--separator-soft\)/);
