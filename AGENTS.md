@@ -20,6 +20,12 @@ maintainable, and easy to review.
 - Use Conventional Commit-style PR titles, such as
   `feat: add AI screenshot summaries`. Do not prefix PR titles with `[codex]`;
   keep Codex attribution in branch names and workflow context instead.
+- All commits, PRs, docs, and comments in this repo must be written as clean
+  open-source contributions. Do not reference external tools, private project
+  management, internal workflows, or conversation history. Write as if you are a
+  maintainer contributing to a public project.
+- Do not include Linear issue IDs or private tracker IDs in branch names. Use
+  descriptive public branch names such as `codex/publish-docs-foundation`.
 - Use `.github/PULL_REQUEST_TEMPLATE.md` as the source of truth for every PR
   description.
 - Keep the template's Markdown section headings exactly: `## Summary`,
@@ -49,4 +55,8 @@ maintainable, and easy to review.
 - Keep public interfaces small and behavior explicit.
 - Update docs when setup, public behavior, privacy behavior, or contribution
   workflow changes.
+- For UI design-system work, treat `PRODUCT.md`,
+  `docs/design-system.md`, and `docs/ui-consistency-audit.md` as the source of
+  truth. Preserve the neutral dark `graphite` direction, avoid new UI
+  frameworks, and keep screenshots/private activity artifacts out of commits.
 - Keep generated build products and scratch artifacts out of commits.
