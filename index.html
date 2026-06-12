@@ -49,29 +49,29 @@
                     <i class="ph ph-caret-down transition-transform duration-200" id="zoom-dropdown-caret"></i>
                 </button>
                 <div class="popover absolute top-[calc(100%+4px)] left-0 w-full p-1.5 transition-all duration-200 opacity-0 scale-95 pointer-events-none z-50 flex flex-col gap-0.5" id="zoom-dropdown-menu">
-                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="1">
+                    <button class="menu-option" data-value="1">
                         <span>1 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check"></i>
                     </button>
-                    <button class="is-selected w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="5">
+                    <button class="menu-option is-selected" data-value="5">
                         <span>5 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-100 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check is-visible"></i>
                     </button>
-                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="10">
+                    <button class="menu-option" data-value="10">
                         <span>10 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check"></i>
                     </button>
-                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="15">
+                    <button class="menu-option" data-value="15">
                         <span>15 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check"></i>
                     </button>
-                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="30">
+                    <button class="menu-option" data-value="30">
                         <span>30 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check"></i>
                     </button>
-                    <button class="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-left text-xs focus:outline-none" data-value="60">
+                    <button class="menu-option" data-value="60">
                         <span>60 min</span>
-                        <i class="ph ph-check text-blue-400 opacity-0 text-xs shrink-0"></i>
+                        <i class="ph ph-check menu-option-check"></i>
                     </button>
                 </div>
             </div>
@@ -108,11 +108,11 @@
                         <input type="date" id="date-picker-input" aria-label="Select timeline date" class="sr-only" tabindex="-1">
                         <div id="date-picker-popover" role="dialog" aria-label="Select timeline date" class="popover hidden absolute right-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
                             <div class="flex items-center justify-between mb-3">
-                                <button id="date-picker-prev-month" type="button" class="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.04] transition focus:outline-none focus:ring-2 focus:ring-blue-500/40" aria-label="Previous month">
+                                <button id="date-picker-prev-month" type="button" class="icon-button" aria-label="Previous month">
                                     <i class="ph ph-caret-left text-sm"></i>
                                 </button>
                                 <div id="date-picker-month-label" class="text-sm font-bold text-white"></div>
-                                <button id="date-picker-next-month" type="button" class="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.04] transition focus:outline-none focus:ring-2 focus:ring-blue-500/40" aria-label="Next month">
+                                <button id="date-picker-next-month" type="button" class="icon-button" aria-label="Next month">
                                     <i class="ph ph-caret-right text-sm"></i>
                                 </button>
                             </div>
@@ -179,7 +179,7 @@
                             </div>
                             <span class="font-bold text-sm" id="popup-app-name">Brave</span>
                         </div>
-                        <button id="popup-close-btn" class="text-gray-400 hover:text-white transition">
+                        <button id="popup-close-btn" class="icon-button" aria-label="Close activity details">
                             <i class="ph ph-x text-lg"></i>
                         </button>
                     </div>
@@ -337,7 +337,7 @@
                         <span class="duration-pill unlogged-work-total" id="unlogged-work-review-total">0s</span>
                     </div>
                     <div class="unlogged-work-list app-scrollbar-safe flex flex-col gap-2" id="unlogged-work-review-list">
-                        <div class="empty-state p-3 text-[11px]">
+                        <div class="empty-state empty-state--compact">
                             All recorded source work is covered.
                         </div>
                     </div>
@@ -348,7 +348,7 @@
                     <h3 class="font-bold text-[13px] uppercase tracking-wider text-gray-400 mb-3 px-1">Total Project Time</h3>
                     <div class="flex flex-col gap-2.5" id="projects-breakdown-list">
                         <!-- Project item seeded here -->
-                        <div class="empty-state p-4 text-gray-400">
+                        <div class="empty-state empty-state--spacious">
                             No time entries logged for this day. Click and drag in the scheduler to create one!
                         </div>
                     </div>
@@ -436,9 +436,9 @@
 
                 <!-- Custom dates input range (hidden by default) -->
                 <div class="flex items-center gap-2 hidden" id="stats-custom-range-inputs">
-                    <input type="date" id="stats-start-date" class="field text-xs px-2.5">
+                    <input type="date" id="stats-start-date" class="field">
                     <span class="text-gray-400 text-xs">to</span>
-                    <input type="date" id="stats-end-date" class="field text-xs px-2.5">
+                    <input type="date" id="stats-end-date" class="field">
                 </div>
             </div>
         </div>
@@ -549,7 +549,7 @@
                     <i class="ph ph-sparkle text-accent"></i>
                     <h3 class="text-base font-bold text-white truncate" id="ai-insights-detail-title">Daily Summary</h3>
                 </div>
-                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="ai-insights-detail-close" aria-label="Close AI summary">
+                <button class="icon-button" id="ai-insights-detail-close" aria-label="Close AI summary">
                     <i class="ph ph-x text-lg"></i>
                 </button>
             </div>
@@ -596,7 +596,7 @@
                     <!-- Description -->
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Activity Description</label>
-                        <input type="text" placeholder="What were you working on?" class="field px-3.5 text-[13px]" id="modal-description-input">
+                        <input type="text" placeholder="What were you working on?" class="field" id="modal-description-input">
                     </div>
 
                     <!-- Project Selector Grid -->
@@ -642,7 +642,7 @@
 
             <div class="flex flex-col gap-1">
                 <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Project Name</label>
-                <input type="text" placeholder="e.g. Acme Website Design" class="field px-3 text-[13px]" id="project-name-input">
+                <input type="text" placeholder="e.g. Acme Website Design" class="field" id="project-name-input">
             </div>
 
             <!-- Color Presets -->
@@ -656,7 +656,7 @@
             <div class="flex flex-col gap-1.5">
                 <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pricing Mode</label>
                 <div class="custom-select-wrapper w-full">
-                    <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="project-rate-type">
+                    <select class="custom-select w-full" id="project-rate-type">
                         <option value="none">No billing rate (Free/Internal)</option>
                         <option value="hourly">Hourly Rate (Time-based billing)</option>
                         <option value="fixed">Fixed Rate (Flat project price)</option>
@@ -668,7 +668,7 @@
             <div class="flex flex-col gap-1.5 hidden" id="project-currency-container">
                 <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Currency</label>
                 <div class="custom-select-wrapper w-full">
-                    <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="project-currency">
+                    <select class="custom-select w-full" id="project-currency">
                         <option value="$">USD ($)</option>
                         <option value="€">EUR (€)</option>
                         <option value="£">GBP (£)</option>
@@ -681,12 +681,12 @@
 
             <div class="flex flex-col gap-1.5 hidden" id="project-hourly-rate-container">
                 <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Hourly Rate</label>
-                <input type="number" placeholder="0.00" min="0" class="field px-3 text-[13px]" id="project-hourly-rate">
+                <input type="number" placeholder="0.00" min="0" class="field" id="project-hourly-rate">
             </div>
 
             <div class="flex flex-col gap-1.5 hidden" id="project-fixed-rate-container">
                 <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Fixed Rate</label>
-                <input type="number" placeholder="0.00" min="0" class="field px-3 text-[13px]" id="project-fixed-rate">
+                <input type="number" placeholder="0.00" min="0" class="field" id="project-fixed-rate">
             </div>
 
             <div class="flex items-center justify-between bg-[#141416]/50 p-2.5 rounded-lg border border-[#2d2f34] mt-1">
@@ -711,7 +711,7 @@
                 <h3 class="text-base font-bold text-white flex items-center gap-1.5">
                     <i class="ph ph-lightbulb text-yellow-400"></i> Auto-Assignment Rules
                 </h3>
-                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="rules-modal-btn-close">
+                <button class="icon-button" id="rules-modal-btn-close" aria-label="Close rules">
                     <i class="ph ph-x text-lg"></i>
                 </button>
             </div>
@@ -724,7 +724,7 @@
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">When captured field</label>
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-field-select">
+                            <select class="custom-select w-full" id="rule-field-select">
                                 <option value="app">Application Name</option>
                                 <option value="title">Window / Tab Title</option>
                                 <option value="url">URL / Domain</option>
@@ -736,7 +736,7 @@
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Match type</label>
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-match-select">
+                            <select class="custom-select w-full" id="rule-match-select">
                                 <option value="contains">Contains (Case Insensitive)</option>
                                 <option value="equals">Equals Exact (Case Insensitive)</option>
                                 <option value="regex">Regular Expression</option>
@@ -747,13 +747,13 @@
 
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pattern value</label>
-                        <input type="text" placeholder="e.g. Slack or YNAB" class="field px-3 text-[13px] w-full" id="rule-pattern-input">
+                        <input type="text" placeholder="e.g. Slack or YNAB" class="field w-full" id="rule-pattern-input">
                     </div>
 
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Assign to Project</label>
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="rule-project-select">
+                            <select class="custom-select w-full" id="rule-project-select">
                                 <!-- Seeded dynamically -->
                             </select>
                             <i class="ph ph-caret-down custom-select-icon"></i>
@@ -784,16 +784,16 @@
                 <h3 class="text-base font-bold text-white flex items-center gap-1.5">
                     <i class="ph ph-sliders text-blue-400"></i> Preferences & Settings
                 </h3>
-                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="settings-modal-btn-close">
+                <button class="icon-button" id="settings-modal-btn-close" aria-label="Close settings">
                     <i class="ph ph-x text-lg"></i>
                 </button>
             </div>
 
-            <div class="settings-section-tabs" role="tablist" aria-label="Settings sections">
-                <button type="button" class="settings-section-tab is-active" data-settings-section-button="general" role="tab" aria-selected="true">General</button>
-                <button type="button" class="settings-section-tab" data-settings-section-button="capture" role="tab" aria-selected="false">Capture &amp; Privacy</button>
-                <button type="button" class="settings-section-tab" data-settings-section-button="ai" role="tab" aria-selected="false">AI</button>
-                <button type="button" class="settings-section-tab" data-settings-section-button="data" role="tab" aria-selected="false">Data</button>
+            <div class="app-tab-group settings-section-tabs" role="tablist" aria-label="Settings sections">
+                <button type="button" class="app-tab settings-section-tab app-tab--active is-active" data-settings-section-button="general" role="tab" aria-selected="true">General</button>
+                <button type="button" class="app-tab settings-section-tab" data-settings-section-button="capture" role="tab" aria-selected="false">Capture &amp; Privacy</button>
+                <button type="button" class="app-tab settings-section-tab" data-settings-section-button="ai" role="tab" aria-selected="false">AI</button>
+                <button type="button" class="app-tab settings-section-tab" data-settings-section-button="data" role="tab" aria-selected="false">Data</button>
             </div>
 
             <div id="settings-modal-body" class="modal-scroll-content settings-modal-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
@@ -877,7 +877,7 @@
                     </div>
                     <div class="grid grid-cols-[1fr_1fr] gap-2">
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="settings-exclusion-field">
+                            <select class="custom-select w-full" id="settings-exclusion-field">
                                 <option value="app">Application</option>
                                 <option value="title">Window Title</option>
                                 <option value="url">URL</option>
@@ -885,7 +885,7 @@
                             <i class="ph ph-caret-down custom-select-icon"></i>
                         </div>
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select w-full bg-[#0d0e10] border border-[#2d2f34]" id="settings-exclusion-match">
+                            <select class="custom-select w-full" id="settings-exclusion-match">
                                 <option value="contains">Contains</option>
                                 <option value="equals">Equals</option>
                                 <option value="regex">Regular Expression</option>
@@ -894,7 +894,7 @@
                         </div>
                     </div>
                     <div class="flex gap-2">
-                        <input type="text" placeholder="e.g. Passwords or example.com/private" class="field flex-1 px-3 text-[12px]" id="settings-exclusion-pattern">
+                        <input type="text" placeholder="e.g. Passwords or example.com/private" class="field flex-1" id="settings-exclusion-pattern">
                         <button type="button" class="button-primary shrink-0" id="settings-exclusion-add">
                             Add
                         </button>
@@ -939,12 +939,12 @@
                         </div>
                     </div>
                     <div class="grid grid-cols-[1fr_1.5fr] gap-2">
-                        <input type="text" placeholder="Rule name" class="field px-3 text-[12px]" id="settings-title-cleanup-name">
-                        <input type="text" placeholder="Regex pattern to remove" class="field px-3 text-[12px]" id="settings-title-cleanup-pattern">
+                        <input type="text" placeholder="Rule name" class="field" id="settings-title-cleanup-name">
+                        <input type="text" placeholder="Regex pattern to remove" class="field" id="settings-title-cleanup-pattern">
                     </div>
                     <div class="grid grid-cols-[1fr_1fr_auto] gap-2">
-                        <input type="text" placeholder="App contains (optional)" class="field px-3 text-[12px]" id="settings-title-cleanup-app">
-                        <input type="text" placeholder="URL contains (optional)" class="field px-3 text-[12px]" id="settings-title-cleanup-url">
+                        <input type="text" placeholder="App contains (optional)" class="field" id="settings-title-cleanup-app">
+                        <input type="text" placeholder="URL contains (optional)" class="field" id="settings-title-cleanup-url">
                         <button type="button" class="button-primary shrink-0" id="settings-title-cleanup-add">
                             Add Rule
                         </button>
@@ -1200,7 +1200,7 @@
                                 Permanently wipe all activities, logged time entries, rules, exclusions, and custom projects.
                             </p>
                         </div>
-                        <button class="bg-red-600/20 hover:bg-red-600 border border-red-500/30 hover:border-red-500 text-red-200 hover:text-white text-[11px] font-semibold px-3 py-1.5 rounded-lg transition shrink-0 focus:outline-none" id="settings-btn-purge">
+                        <button class="button-danger shrink-0" id="settings-btn-purge">
                             Purge All Data
                         </button>
                     </div>
@@ -1233,7 +1233,7 @@
                         Project Name
                     </h3>
                 </div>
-                <button class="text-gray-400 hover:text-white transition focus:outline-none" id="proj-details-btn-close">
+                <button class="icon-button" id="proj-details-btn-close" aria-label="Close project details">
                     <i class="ph ph-x text-lg"></i>
                 </button>
             </div>
@@ -1260,7 +1260,7 @@
                     <div class="flex items-center justify-between gap-3">
                         <h4 class="section-label shrink-0">Tasks</h4>
                         <div class="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                            <input type="text" placeholder="New task" class="field px-3 text-xs max-w-[220px]" id="proj-details-task-name">
+                            <input type="text" placeholder="New task" class="field max-w-[220px]" id="proj-details-task-name">
                             <button type="button" class="button-secondary shrink-0" id="proj-details-task-add">
                                 <i class="ph ph-plus"></i> Add
                             </button>
@@ -1283,21 +1283,21 @@
                         <div class="grid grid-cols-3 gap-3">
                             <div class="flex flex-col gap-1">
                                 <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Date</label>
-                                <input type="date" class="field px-2.5 text-xs" id="proj-details-manual-date">
+                                <input type="date" class="field" id="proj-details-manual-date">
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Hours Worked</label>
-                                <input type="number" min="0" max="24" placeholder="0" class="field px-2.5 text-xs" id="proj-details-manual-hours">
+                                <input type="number" min="0" max="24" placeholder="0" class="field" id="proj-details-manual-hours">
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Minutes Worked</label>
-                                <input type="number" min="0" max="59" placeholder="0" class="field px-2.5 text-xs" id="proj-details-manual-minutes">
+                                <input type="number" min="0" max="59" placeholder="0" class="field" id="proj-details-manual-minutes">
                             </div>
                         </div>
 
                         <div class="flex flex-col gap-1">
                             <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Activity Description / Import Notes</label>
-                            <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field px-3 text-xs" id="proj-details-manual-description">
+                            <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field" id="proj-details-manual-description">
                         </div>
 
                         <div class="flex justify-end gap-2 border-t border-[#2d2f34]/40 pt-3">

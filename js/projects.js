@@ -131,7 +131,7 @@ function renderProjectTasks(project, projectEntries = []) {
 
     const activeTasks = getProjectTasks(project).filter(task => !task.archived);
     if (activeTasks.length === 0) {
-        list.innerHTML = '<div class="empty-state text-xs py-4">No tasks yet.</div>';
+        list.innerHTML = '<div class="empty-state empty-state--spacious">No tasks yet.</div>';
         return;
     }
 
@@ -151,7 +151,7 @@ function renderProjectTasks(project, projectEntries = []) {
             return `
                 <div class="surface-panel flex items-center gap-2 p-3 text-xs">
                     <input type="text"
-                           class="field flex-1 min-w-0 px-3 text-xs"
+                           class="field flex-1 min-w-0"
                            value="${taskName}"
                            data-project-task-edit="${taskId}"
                            onkeydown="handleProjectTaskRenameKeydown(event, '${projectId}', '${taskId}')">
@@ -372,7 +372,7 @@ function recalculateStatistics() {
     const projectIds = Object.keys(projectDurations);
     if (projectIds.length === 0) {
         DOM.elProjectsList.innerHTML = `
-            <div class="empty-state p-4 text-[11px]">
+            <div class="empty-state empty-state--spacious">
                 No time entries logged for this day. Click and drag in the scheduler to create one!
             </div>
         `;
@@ -868,7 +868,7 @@ async function openProjectDetails(projectId) {
     const elList = document.getElementById('proj-details-entries-list');
     if (elList) {
         if (projEntries.length === 0) {
-            elList.innerHTML = `<div class="empty-state text-xs py-8">No entries logged to this project yet.</div>`;
+            elList.innerHTML = `<div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>`;
         } else {
             elList.innerHTML = projEntries.map(e => {
                 const dateObj = new Date(e.start);

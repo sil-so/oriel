@@ -372,7 +372,7 @@ function drawDonutChart(canvasId, countLabelId, legendId, dataList, totalMs, def
         ctx.stroke();
 
         legendEl.innerHTML = `
-            <div class="empty-state p-3 text-[11px] w-full">
+            <div class="empty-state empty-state--compact w-full">
                 No active tracking data captured for this period.
             </div>
         `;
