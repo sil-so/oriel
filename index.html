@@ -543,11 +543,11 @@
 
     <!-- MODAL: AI Insights Daily Summary -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-start justify-center hidden" id="ai-insights-detail-modal" aria-modal="true" role="dialog" aria-labelledby="ai-insights-detail-title">
-        <div class="modal-panel modal-panel--scroll w-[650px] max-w-[calc(100vw-32px)] max-h-[88vh] relative flex flex-col gap-4 mt-12">
-            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
-                <div class="flex items-center gap-2 min-w-0">
-                    <i class="ph ph-sparkle text-accent"></i>
-                    <h3 class="text-base font-bold text-white truncate" id="ai-insights-detail-title">Daily Summary</h3>
+        <div class="modal-panel modal-panel--scroll modal-size--lg relative flex flex-col gap-4">
+            <div class="modal-header">
+                <div class="modal-header-title">
+                    <i class="ph ph-sparkle modal-title-icon"></i>
+                    <h3 class="modal-title truncate" id="ai-insights-detail-title">Daily Summary</h3>
                 </div>
                 <button class="icon-button" id="ai-insights-detail-close" aria-label="Close AI summary">
                     <i class="ph ph-x text-lg"></i>
@@ -559,12 +559,14 @@
 
     <!-- MODAL: Create/Edit Time Entry -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="time-entry-modal">
-        <div class="modal-panel w-[420px] relative flex flex-col gap-4 transition-all duration-200" id="time-entry-modal-content">
-            <h3 class="modal-title text-base border-b pb-3" id="modal-title">Log Time Entry</h3>
+        <div class="modal-panel modal-size--md relative flex flex-col gap-4 transition-all duration-200" id="time-entry-modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title truncate" id="modal-title">Log Time Entry</h3>
+            </div>
 
-            <div class="flex gap-6" id="modal-split-container">
+            <div class="time-entry-layout" id="modal-split-container">
                 <!-- Left Column: Recorded Activity Snapshot -->
-                <div class="flex-1 flex flex-col gap-2.5 max-h-[460px] overflow-y-auto pr-3 border-r border-[#2d2f34]/80 app-scrollbar-safe hidden" id="modal-left-panel">
+                <div class="time-entry-snapshot flex flex-col gap-2.5 app-scrollbar-safe hidden" id="modal-left-panel">
                     <label class="section-label flex items-center gap-1.5 shrink-0">
                         <i class="ph ph-sparkle"></i> Recorded Activity Snapshot
                     </label>
@@ -574,34 +576,34 @@
                 </div>
 
                 <!-- Right Column: Log Inputs Panel -->
-                <div class="w-[370px] shrink-0 flex flex-col gap-4" id="modal-right-panel">
+                <div class="time-entry-form flex flex-col gap-4" id="modal-right-panel">
                     <!-- Timing preview -->
-                    <div class="flex justify-between items-center bg-[#0d0e10] border border-[#2d2f34] px-4 py-3 rounded-xl">
-                        <div>
-                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Start Time</div>
-                            <input type="text" class="bg-transparent text-sm font-semibold text-white focus:outline-none w-20 border-b border-transparent focus:border-blue-500 mt-0.5" id="modal-start-time">
+                    <div class="time-entry-summary">
+                        <div class="time-entry-summary__item">
+                            <div class="time-entry-summary__label">Start Time</div>
+                            <input type="text" class="time-entry-summary__input" id="modal-start-time">
                         </div>
-                        <div class="h-6 w-[1px] bg-[#2d2f34]"></div>
-                        <div class="text-center px-2">
-                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duration</div>
-                            <div class="text-sm font-bold text-blue-400 mt-0.5" id="modal-duration-lbl">15 min</div>
+                        <div class="time-entry-summary__separator"></div>
+                        <div class="time-entry-summary__item time-entry-summary__item--center">
+                            <div class="time-entry-summary__label">Duration</div>
+                            <div class="time-entry-summary__duration" id="modal-duration-lbl">15 min</div>
                         </div>
-                        <div class="h-6 w-[1px] bg-[#2d2f34]"></div>
-                        <div class="text-right">
-                            <div class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">End Time</div>
-                            <input type="text" class="bg-transparent text-sm font-semibold text-white focus:outline-none w-20 border-b border-transparent focus:border-blue-500 mt-0.5 text-right" id="modal-end-time">
+                        <div class="time-entry-summary__separator"></div>
+                        <div class="time-entry-summary__item time-entry-summary__item--end">
+                            <div class="time-entry-summary__label">End Time</div>
+                            <input type="text" class="time-entry-summary__input time-entry-summary__input--end" id="modal-end-time">
                         </div>
                     </div>
 
                     <!-- Description -->
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Activity Description</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">Activity Description</label>
                         <input type="text" placeholder="What were you working on?" class="field" id="modal-description-input">
                     </div>
 
                     <!-- Project Selector Grid -->
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Allocate to Project</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">Allocate to Project</label>
                         <div class="grid grid-cols-2 gap-2 mt-1 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
                             <!-- Visual grid rendered by JS -->
                         </div>
@@ -609,8 +611,8 @@
                     </div>
 
                     <!-- Task Selector -->
-                    <div class="flex flex-col gap-1.5 hidden" id="modal-task-container">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Task</label>
+                    <div class="modal-field-group hidden" id="modal-task-container">
+                        <label class="modal-field-label">Task</label>
                         <div class="custom-select-wrapper w-full">
                             <select class="custom-select" id="modal-task-select" aria-label="Task">
                                 <option value="">No task</option>
@@ -623,9 +625,9 @@
                     <input type="checkbox" class="sr-only" id="modal-billable-toggle">
 
                     <!-- Action buttons -->
-                    <div class="flex justify-between items-center border-t border-[#2d2f34] pt-4 mt-2 shrink-0">
-                        <button class="text-red-500 hover:text-red-400 text-sm font-medium transition hidden" id="modal-btn-delete">Delete Log</button>
-                        <div class="flex gap-2.5 ml-auto">
+                    <div class="modal-footer modal-footer--split">
+                        <button class="modal-danger-link hidden" id="modal-btn-delete">Delete Log</button>
+                        <div class="modal-footer__actions">
                             <button class="button-secondary" id="modal-btn-cancel">Cancel</button>
                             <button class="button-primary" id="modal-btn-save">Save Entry</button>
                         </div>
@@ -637,24 +639,26 @@
 
     <!-- MODAL: Add Project -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="project-modal">
-        <div class="modal-panel w-[360px] relative flex flex-col gap-4">
-            <h3 class="modal-title text-base border-b pb-3">Create New Project</h3>
+        <div class="modal-panel modal-size--sm relative flex flex-col gap-4">
+            <div class="modal-header">
+                <h3 class="modal-title truncate">Create New Project</h3>
+            </div>
 
-            <div class="flex flex-col gap-1">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Project Name</label>
+            <div class="modal-field-group">
+                <label class="modal-field-label">Project Name</label>
                 <input type="text" placeholder="e.g. Acme Website Design" class="field" id="project-name-input">
             </div>
 
             <!-- Color Presets -->
-            <div class="flex flex-col gap-2">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Project Color</label>
-                <div class="grid grid-cols-6 gap-2 border border-[#2d2f34] bg-[#0d0e10] p-3 rounded-xl justify-items-center" id="project-colors-grid"></div>
+            <div class="modal-field-group">
+                <label class="modal-field-label">Project Color</label>
+                <div class="project-color-grid" id="project-colors-grid"></div>
                 <input type="color" class="hidden" id="project-color-input" value="#3b82f6">
             </div>
 
             <!-- Pricing Profile -->
-            <div class="flex flex-col gap-1.5">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pricing Mode</label>
+            <div class="modal-field-group">
+                <label class="modal-field-label">Pricing Mode</label>
                 <div class="custom-select-wrapper w-full">
                     <select class="custom-select w-full" id="project-rate-type">
                         <option value="none">No billing rate (Free/Internal)</option>
@@ -665,8 +669,8 @@
                 </div>
             </div>
 
-            <div class="flex flex-col gap-1.5 hidden" id="project-currency-container">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Currency</label>
+            <div class="modal-field-group hidden" id="project-currency-container">
+                <label class="modal-field-label">Currency</label>
                 <div class="custom-select-wrapper w-full">
                     <select class="custom-select w-full" id="project-currency">
                         <option value="$">USD ($)</option>
@@ -679,25 +683,25 @@
                 </div>
             </div>
 
-            <div class="flex flex-col gap-1.5 hidden" id="project-hourly-rate-container">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Hourly Rate</label>
+            <div class="modal-field-group hidden" id="project-hourly-rate-container">
+                <label class="modal-field-label">Hourly Rate</label>
                 <input type="number" placeholder="0.00" min="0" class="field" id="project-hourly-rate">
             </div>
 
-            <div class="flex flex-col gap-1.5 hidden" id="project-fixed-rate-container">
-                <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Fixed Rate</label>
+            <div class="modal-field-group hidden" id="project-fixed-rate-container">
+                <label class="modal-field-label">Fixed Rate</label>
                 <input type="number" placeholder="0.00" min="0" class="field" id="project-fixed-rate">
             </div>
 
-            <div class="flex items-center justify-between bg-[#141416]/50 p-2.5 rounded-lg border border-[#2d2f34] mt-1">
-                <span class="text-sm font-semibold text-white">Default Billable</span>
+            <div class="project-billable-row">
+                <span class="settings-card-title">Default Billable</span>
                 <label class="oriel-toggle oriel-toggle--sm" for="project-billable-toggle">
                     <input type="checkbox" value="" class="oriel-toggle-input" id="project-billable-toggle" checked>
                     <span class="oriel-toggle-track" aria-hidden="true"></span>
                 </label>
             </div>
 
-            <div class="flex justify-end gap-2 border-t border-[#2d2f34] pt-4 mt-2">
+            <div class="modal-footer">
                 <button class="button-secondary" id="project-btn-cancel">Cancel</button>
                 <button class="button-primary" id="project-btn-save">Create</button>
             </div>
@@ -706,23 +710,23 @@
 
     <!-- MODAL: Auto-Assignment Rules Manager -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="rules-modal">
-        <div class="modal-panel w-[750px] relative flex flex-col gap-4">
-            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
-                <h3 class="text-base font-bold text-white flex items-center gap-1.5">
-                    <i class="ph ph-lightbulb text-yellow-400"></i> Auto-Assignment Rules
+        <div class="modal-panel modal-size--xl relative flex flex-col gap-4">
+            <div class="modal-header">
+                <h3 class="modal-header-title">
+                    <i class="ph ph-lightbulb modal-title-icon"></i> Auto-Assignment Rules
                 </h3>
                 <button class="icon-button" id="rules-modal-btn-close" aria-label="Close rules">
                     <i class="ph ph-x text-lg"></i>
                 </button>
             </div>
 
-            <div class="flex gap-6 max-h-[480px]">
+            <div class="rules-modal-body">
                 <!-- Left Column: Create Rule Form -->
-                <div class="w-[300px] shrink-0 flex flex-col gap-3.5 border-r border-[#2d2f34]/80 pr-6">
+                <div class="rules-modal-form flex flex-col gap-3.5">
                     <h4 class="section-label">Create New Rule</h4>
 
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">When captured field</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">When captured field</label>
                         <div class="custom-select-wrapper w-full">
                             <select class="custom-select w-full" id="rule-field-select">
                                 <option value="app">Application Name</option>
@@ -733,8 +737,8 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Match type</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">Match type</label>
                         <div class="custom-select-wrapper w-full">
                             <select class="custom-select w-full" id="rule-match-select">
                                 <option value="contains">Contains (Case Insensitive)</option>
@@ -745,13 +749,13 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Pattern value</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">Pattern value</label>
                         <input type="text" placeholder="e.g. Slack or YNAB" class="field w-full" id="rule-pattern-input">
                     </div>
 
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Assign to Project</label>
+                    <div class="modal-field-group">
+                        <label class="modal-field-label">Assign to Project</label>
                         <div class="custom-select-wrapper w-full">
                             <select class="custom-select w-full" id="rule-project-select">
                                 <!-- Seeded dynamically -->
@@ -766,7 +770,7 @@
                 </div>
 
                 <!-- Right Column: Active Rules List -->
-                <div class="flex-1 flex flex-col gap-2.5 overflow-hidden">
+                <div class="rules-modal-list flex flex-col gap-2.5">
                     <h4 class="section-label shrink-0">Active Rules</h4>
 
                     <div class="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 app-scrollbar-safe" id="rules-list-container">
@@ -779,10 +783,10 @@
 
     <!-- MODAL: Settings -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="settings-modal">
-        <div class="modal-panel modal-panel--scroll w-[650px] max-w-[calc(100vw-32px)] max-h-[88vh] relative flex flex-col gap-4">
-            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
-                <h3 class="text-base font-bold text-white flex items-center gap-1.5">
-                    <i class="ph ph-sliders text-blue-400"></i> Preferences & Settings
+        <div class="modal-panel modal-panel--scroll modal-size--lg relative flex flex-col gap-4">
+            <div class="modal-header">
+                <h3 class="modal-header-title">
+                    <i class="ph ph-sliders modal-title-icon"></i> Preferences & Settings
                 </h3>
                 <button class="icon-button" id="settings-modal-btn-close" aria-label="Close settings">
                     <i class="ph ph-x text-lg"></i>
@@ -799,10 +803,10 @@
             <div id="settings-modal-body" class="modal-scroll-content settings-modal-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
                 <div class="settings-section-panel flex flex-col gap-4" data-settings-section-panel="general" role="tabpanel">
                 <!-- Appearance -->
-                <div class="surface-panel p-3.5 flex items-center justify-between gap-4">
+                <div class="surface-panel settings-card settings-card--row">
                     <div class="flex flex-col gap-1">
-                        <label class="text-xs font-bold text-gray-300 uppercase tracking-wide" for="settings-theme-select">Theme</label>
-                        <span class="text-[11px] text-gray-400">Choose Dark, Light, or Neutral.</span>
+                        <label class="settings-card-title" for="settings-theme-select">Theme</label>
+                        <span class="settings-helper">Choose Dark, Light, or Neutral.</span>
                     </div>
                     <div class="custom-select-wrapper w-[150px] shrink-0">
                         <select class="custom-select" id="settings-theme-select">
@@ -815,22 +819,22 @@
                 </div>
 
                 <!-- Context-switching note -->
-                <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3.5 flex gap-3">
-                    <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
-                    <div class="flex flex-col gap-1 text-[11px]">
-                        <span class="font-bold text-blue-300">How Oriel handles short switches</span>
-                        <p class="text-gray-300 leading-relaxed">
+                <div class="info-callout">
+                    <i class="ph ph-info info-callout__icon"></i>
+                    <div class="info-callout__content">
+                        <span class="info-callout__title">How Oriel handles short switches</span>
+                        <p class="info-callout__body">
                             Oriel records short app switches so your activity stays accurate and auditable. In dense breakdowns, very brief foreground changes are hidden after 60 seconds to reduce visual noise while keeping logged time aligned with recorded activity.
                         </p>
                     </div>
                 </div>
 
                 <!-- Optional branded website icons -->
-                <div class="surface-panel p-3.5 flex flex-col gap-3">
-                    <div class="flex items-start justify-between gap-4">
+                <div class="surface-panel settings-card">
+                    <div class="settings-card-header">
                         <div class="flex flex-col gap-1">
-                            <label class="text-xs font-bold text-gray-300 uppercase tracking-wide" for="settings-logo-dev-icons">Branded Website Icons</label>
-                            <span class="text-[11px] text-gray-400 leading-normal">When enabled, Oriel sends website domains to Logo.dev to retrieve brand icons and caches them locally. Recorded activity remains stored on this Mac.</span>
+                            <label class="settings-card-title" for="settings-logo-dev-icons">Branded Website Icons</label>
+                            <span class="settings-helper">When enabled, Oriel sends website domains to Logo.dev to retrieve brand icons and caches them locally. Recorded activity remains stored on this Mac.</span>
                         </div>
                         <label class="oriel-toggle mt-1" for="settings-logo-dev-icons">
                             <input type="checkbox" id="settings-logo-dev-icons" class="oriel-toggle-input" aria-label="Fetch branded website icons using Logo.dev">
@@ -840,7 +844,7 @@
 
                     <label class="ai-field ai-field--key">
                         <span>Logo.dev API Key</span>
-                        <span class="text-[11px] text-gray-400 leading-normal">Use your Logo.dev <strong>publishable</strong> key (`pk_...`).</span>
+                        <span class="settings-helper">Use your Logo.dev <strong>publishable</strong> key (`pk_...`).</span>
                         <div class="ai-key-input-shell">
                             <input type="password" class="field ai-settings-input" id="settings-logo-dev-api-key-input" aria-label="Logo.dev API key" placeholder="Paste publishable key" autocomplete="off">
                             <button type="button" class="icon-button ai-key-edit-button hidden" id="settings-logo-dev-key-edit-button" title="Replace saved Logo.dev API key" aria-label="Replace saved Logo.dev API key">
@@ -870,10 +874,10 @@
                 <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="capture" role="tabpanel">
 
                 <!-- Tracking Exclusions -->
-                <div class="flex flex-col gap-3 bg-[#141416]/50 p-3.5 rounded-xl border border-[#2d2f34]">
+                <div class="surface-panel settings-card">
                     <div class="flex flex-col gap-1">
-                        <span class="text-sm font-semibold text-white">Tracking Exclusions</span>
-                        <span class="text-[10px] text-gray-400">Do not record matching app, window title, or URL activity. Existing history can be cleaned when adding a rule.</span>
+                        <span class="settings-card-title">Tracking Exclusions</span>
+                        <span class="settings-helper">Do not record matching app, window title, or URL activity. Existing history can be cleaned when adding a rule.</span>
                     </div>
                     <div class="grid grid-cols-[1fr_1fr] gap-2">
                         <div class="custom-select-wrapper w-full">
@@ -899,10 +903,10 @@
                             Add
                         </button>
                     </div>
-                    <div class="surface-panel px-3 py-2 flex items-center justify-between gap-3">
+                    <div class="settings-row">
                         <div class="flex flex-col gap-0.5">
-                            <label class="text-[11px] font-semibold text-gray-300" for="settings-exclusion-apply-history">Clean existing history when adding</label>
-                            <span class="text-[10px] text-gray-500">Runs once after Add succeeds.</span>
+                            <label class="settings-card-title" for="settings-exclusion-apply-history">Clean existing history when adding</label>
+                            <span class="settings-helper">Runs once after Add succeeds.</span>
                         </div>
                         <label class="oriel-toggle oriel-toggle--sm" for="settings-exclusion-apply-history">
                             <input type="checkbox" id="settings-exclusion-apply-history" class="oriel-toggle-input" aria-label="Clean existing history when adding exclusion">
@@ -916,24 +920,24 @@
                 </div>
 
                 <!-- Activity title cleanup -->
-                <div class="surface-panel p-3.5 flex flex-col gap-3">
-                    <div class="flex items-start justify-between gap-4">
+                <div class="surface-panel settings-card">
+                    <div class="settings-card-header">
                         <div class="flex flex-col gap-1">
-                            <span class="text-sm font-semibold text-white">Activity Title Cleanup</span>
-                            <span class="text-[11px] text-gray-400 leading-normal">Remove browser and app status text from displayed activity titles. Raw recorded activity stays unchanged.</span>
+                            <span class="settings-card-title">Activity Title Cleanup</span>
+                            <span class="settings-helper">Remove browser and app status text from displayed activity titles. Raw recorded activity stays unchanged.</span>
                         </div>
                         <button type="button" class="button-secondary shrink-0" id="settings-title-cleanup-reset-defaults">
                             Reset Defaults
                         </button>
                     </div>
-                    <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3 flex gap-3">
-                        <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
-                        <div class="flex flex-col gap-1 text-[11px] leading-relaxed">
-                            <span class="font-bold text-blue-300">How title cleanup rules work</span>
-                            <p class="text-gray-300">
+                    <div class="info-callout">
+                        <i class="ph ph-info info-callout__icon"></i>
+                        <div class="info-callout__content">
+                            <span class="info-callout__title">How title cleanup rules work</span>
+                            <p class="info-callout__body">
                                 Rules use JavaScript regular expressions, applied globally and case-insensitively. Matches are removed from display labels only; invalid regex rules are not saved or applied.
                             </p>
-                            <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200 underline underline-offset-2">
+                            <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions" target="_blank" rel="noopener noreferrer" class="info-callout__link">
                                 MDN JavaScript regular expressions guide
                             </a>
                         </div>
@@ -957,7 +961,7 @@
                 </div>
 
                 <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="ai" role="tabpanel">
-                    <div class="surface-panel p-3.5 flex flex-col gap-3">
+                    <div class="surface-panel settings-card">
                         <div class="ai-settings-header">
                             <div class="ai-settings-heading">
                                 <span>Provider &amp; Key</span>
@@ -1013,7 +1017,7 @@
                         </div>
                     </div>
 
-                    <div class="surface-panel p-3.5 flex flex-col gap-3">
+                    <div class="surface-panel settings-card">
                         <div class="ai-settings-heading">
                             <span>Ask AI &amp; AI Insights</span>
                             <span>Used for chat in the Ask AI sidebar and generating daily summaries.</span>
@@ -1061,11 +1065,11 @@
                         </label>
                     </div>
 
-                    <div class="surface-panel p-3.5 flex flex-col gap-3">
-                        <div class="flex items-start justify-between gap-4">
+                    <div class="surface-panel settings-card">
+                        <div class="settings-card-header">
                             <div class="flex flex-col gap-1">
-                                <span class="text-sm font-semibold text-white">Screenshot Summaries</span>
-                                <span class="text-[11px] text-gray-400 leading-normal">Optional and off by default. When enabled, Oriel sends compressed screenshots and activity metadata to the selected provider. Screenshots are not stored.</span>
+                                <span class="settings-card-title">Screenshot Summaries</span>
+                                <span class="settings-helper">Optional and off by default. When enabled, Oriel sends compressed screenshots and activity metadata to the selected provider. Screenshots are not stored.</span>
                             </div>
                             <label class="oriel-toggle mt-1" for="settings-ai-screenshot-enabled">
                                 <input type="checkbox" id="settings-ai-screenshot-enabled" class="oriel-toggle-input" aria-label="Enable AI screenshot summaries">
@@ -1167,9 +1171,9 @@
                             <div class="ai-sensitive-list" id="settings-ai-screenshot-sensitive-list"></div>
                         </div>
 
-                        <div class="bg-blue-950/20 border border-blue-900/30 rounded-xl p-3 flex gap-3">
-                            <i class="ph ph-info text-blue-400 text-base shrink-0 mt-0.5"></i>
-                            <p class="text-[11px] text-gray-300 leading-relaxed">
+                        <div class="info-callout">
+                            <i class="ph ph-info info-callout__icon"></i>
+                            <p class="info-callout__body">
                                 Oriel skips screenshot analysis while you are away, hands-off, in excluded or sensitive apps, missing provider configuration, over the daily cap, or without Screen Recording permission.
                             </p>
                         </div>
@@ -1191,12 +1195,12 @@
                 <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="data" role="tabpanel">
 
                 <!-- Danger Zone -->
-                <div class="border-t border-[#2d2f34] pt-4 mt-1 flex flex-col gap-3">
-                    <h4 class="text-xs font-bold text-red-500 uppercase tracking-wide">Danger Zone</h4>
-                    <div class="bg-red-950/10 border border-red-900/20 rounded-xl p-3.5 flex justify-between items-center gap-4">
+                <div class="danger-zone">
+                    <h4 class="danger-zone__title">Danger Zone</h4>
+                    <div class="danger-zone__card">
                         <div class="flex flex-col gap-0.5">
-                            <span class="text-xs font-bold text-red-300">Purge All Data</span>
-                            <p class="text-[10px] text-gray-400 leading-normal">
+                            <span class="danger-zone__heading">Purge All Data</span>
+                            <p class="danger-zone__copy">
                                 Permanently wipe all activities, logged time entries, rules, exclusions, and custom projects.
                             </p>
                         </div>
@@ -1212,11 +1216,13 @@
     </div>
 
     <!-- Confirmation modal -->
-    <div class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center hidden" id="confirm-modal">
-        <div class="modal-panel w-[380px] relative flex flex-col gap-4">
-            <div class="flex items-center gap-2.5 text-white font-bold text-base border-b border-[#2d2f34] pb-3" id="confirm-modal-title">Confirm Action</div>
-            <p class="text-xs text-gray-300 leading-relaxed py-1" id="confirm-modal-message">Are you sure you want to perform this action?</p>
-            <div class="flex justify-end gap-2.5 mt-3">
+    <div class="modal-overlay modal-overlay--centered fixed inset-0 z-50 flex items-center justify-center hidden" id="confirm-modal">
+        <div class="modal-panel modal-size--confirm relative flex flex-col gap-4">
+            <div class="modal-header">
+                <div class="modal-header-title" id="confirm-modal-title">Confirm Action</div>
+            </div>
+            <p class="modal-message py-1" id="confirm-modal-message">Are you sure you want to perform this action?</p>
+            <div class="modal-footer">
                 <button class="button-secondary" id="confirm-modal-btn-cancel">Cancel</button>
                 <button class="button-primary" id="confirm-modal-btn-confirm">Confirm</button>
             </div>
@@ -1225,11 +1231,11 @@
 
     <!-- MODAL: Project Details Viewer -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="project-details-modal">
-        <div class="modal-panel modal-panel--scroll w-[650px] relative flex flex-col gap-4">
-            <div class="flex items-center justify-between border-b border-[#2d2f34] pb-3 shrink-0">
-                <div class="flex items-center gap-3">
+        <div class="modal-panel modal-panel--scroll modal-size--lg relative flex flex-col gap-4">
+            <div class="modal-header">
+                <div class="modal-header-title">
                     <span class="w-4 h-4 rounded-full shadow-md" id="proj-details-color"></span>
-                    <h3 class="text-base font-bold text-white flex items-center gap-1.5" id="proj-details-title">
+                    <h3 class="modal-title truncate" id="proj-details-title">
                         Project Name
                     </h3>
                 </div>
@@ -1240,7 +1246,7 @@
 
             <div class="modal-scroll-content app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
                 <!-- Statistics Quick Row -->
-                <div class="grid grid-cols-3 gap-3 bg-[#141416]/50 border border-[#2d2f34] rounded-xl p-4 text-xs">
+                <div class="project-details-stats text-xs">
                     <div class="flex flex-col gap-1">
                         <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Time Logged</span>
                         <span class="font-bold text-white text-base" id="proj-details-total-duration">0h 0m</span>
@@ -1279,7 +1285,7 @@
                         <i class="ph ph-caret-down transition-transform duration-200" id="proj-details-form-caret"></i>
                     </button>
 
-                    <div class="hidden flex flex-col gap-4 bg-[#141416]/50 border border-[#2d2f34] rounded-xl p-4 transition-all duration-200 animate-[fadeIn_0.2s_ease-out]" id="proj-details-manual-form-container">
+                    <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
                         <div class="grid grid-cols-3 gap-3">
                             <div class="flex flex-col gap-1">
                                 <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Date</label>
@@ -1300,7 +1306,7 @@
                             <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field" id="proj-details-manual-description">
                         </div>
 
-                        <div class="flex justify-end gap-2 border-t border-[#2d2f34]/40 pt-3">
+                        <div class="modal-footer">
                             <button type="button" class="button-secondary" id="proj-details-manual-cancel">Cancel</button>
                             <button type="button" class="button-primary" id="proj-details-manual-save">
                                 <i class="ph-bold ph-check"></i> Log Time

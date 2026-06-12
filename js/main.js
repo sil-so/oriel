@@ -1689,7 +1689,7 @@ function setupMainEventListeners() {
                 purgeConfirmCount = 0;
                 showCustomConfirm({
                     title: 'Purge All Data',
-                    message: 'Are you sure you want to wipes all local time tracker records permanently? This cannot be undone.',
+                    message: 'Are you sure you want to wipe all local time tracker records permanently? This cannot be undone.',
                     actionText: 'Purge Permanently',
                     actionClass: 'button-danger',
                     onConfirm: async () => {
