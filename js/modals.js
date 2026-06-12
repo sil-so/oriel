@@ -420,8 +420,8 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
 
     // Handle left panel responsive layout and detailed recorded activity snapshot.
     if (finalActivities.length > 0) {
-        DOM.elModalContent.classList.remove('w-[420px]');
-        DOM.elModalContent.classList.add('w-[800px]');
+        DOM.elModalContent.classList.remove('modal-size--md');
+        DOM.elModalContent.classList.add('modal-size--split');
         DOM.elModalLeftPanel.classList.remove('hidden');
 
         // Render activities breakdown checklist snapshot
@@ -468,8 +468,8 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
             }
         }
     } else {
-        DOM.elModalContent.classList.remove('w-[800px]');
-        DOM.elModalContent.classList.add('w-[420px]');
+        DOM.elModalContent.classList.remove('modal-size--split');
+        DOM.elModalContent.classList.add('modal-size--md');
         DOM.elModalLeftPanel.classList.add('hidden');
         DOM.elModalMemoryAidList.innerHTML = '';
         state.currentModalAllActivities = [];

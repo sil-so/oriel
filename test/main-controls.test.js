@@ -811,8 +811,8 @@ test('settings modal exposes section tabs and can open directly to AI settings',
   const script = fs.readFileSync('js/main.js', 'utf8');
   const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
 
-  assert.match(markup, /id="settings-modal"[\s\S]*class="[^"]*(?:^|\s)w-\[650px\](?:\s|")[^"]*"/);
-  assert.match(markup, /id="project-details-modal"[\s\S]*class="[^"]*(?:^|\s)w-\[650px\](?:\s|")[^"]*"/);
+  assert.match(markup, /id="settings-modal"[\s\S]*class="[^"]*(?:^|\s)modal-size--lg(?:\s|")[^"]*"/);
+  assert.match(markup, /id="project-details-modal"[\s\S]*class="[^"]*(?:^|\s)modal-size--lg(?:\s|")[^"]*"/);
   assert.match(markup, /data-settings-section-button="general"[\s\S]*General/);
   assert.match(markup, /data-settings-section-button="capture"[\s\S]*Capture &amp; Privacy/);
   assert.match(markup, /data-settings-section-button="ai"[\s\S]*AI/);

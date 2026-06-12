@@ -110,6 +110,71 @@ test('modal overlays keep dialogs top aligned below the app header', () => {
   assert.match(overlayRule, /overflow-y:\s*auto/);
 });
 
+test('modal shells use shared headers, footers, and named size classes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const modals = html.match(/<!-- MODAL: AI Insights Daily Summary -->[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+
+  for (const selector of [
+    '.modal-size--sm',
+    '.modal-size--md',
+    '.modal-size--lg',
+    '.modal-size--xl',
+    '.modal-size--split',
+    '.modal-size--confirm',
+    '.modal-header',
+    '.modal-header-title',
+    '.modal-body',
+    '.modal-footer'
+  ]) {
+    assert.match(css, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  for (const [id, sizeClass] of [
+    ['ai-insights-detail-modal', 'modal-size--lg'],
+    ['time-entry-modal', 'modal-size--md'],
+    ['project-modal', 'modal-size--sm'],
+    ['rules-modal', 'modal-size--xl'],
+    ['settings-modal', 'modal-size--lg'],
+    ['confirm-modal', 'modal-size--confirm'],
+    ['project-details-modal', 'modal-size--lg']
+  ]) {
+    const panelClass = html.match(new RegExp(`id="${id}"[\\s\\S]*?<div class="([^"]*\\bmodal-panel\\b[^"]*)"`))?.[1] || '';
+    assert.match(panelClass, new RegExp(`\\b${sizeClass}\\b`), `expected ${id} to use ${sizeClass}`);
+    assert.doesNotMatch(panelClass, /\bw-\[(?:360|380|420|650|750|800)px\]\b/);
+  }
+
+  for (const id of [
+    'ai-insights-detail-modal',
+    'time-entry-modal',
+    'project-modal',
+    'rules-modal',
+    'settings-modal',
+    'confirm-modal',
+    'project-details-modal'
+  ]) {
+    const modalMarkup = html.match(new RegExp(`id="${id}"[\\s\\S]*?(?=<!-- MODAL:|<!-- Confirmation modal -->|<!-- Modular Script Imports -->)`))?.[0] || '';
+    assert.match(modalMarkup, /\bmodal-header\b/, `expected ${id} to use modal-header`);
+  }
+
+  assert.match(modals, /id="time-entry-modal"[\s\S]*?\bmodal-footer\b/);
+  assert.match(modals, /id="project-modal"[\s\S]*?\bmodal-footer\b/);
+  assert.match(modals, /id="confirm-modal"[\s\S]*?\bmodal-footer\b/);
+});
+
+test('confirmation modal keeps compact centered overlay treatment', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const centeredRule = css.match(/\.modal-overlay--centered\s*\{[^}]*\}/)?.[0] || '';
+  const confirmOverlay = html.match(/<div class="[^"]*" id="confirm-modal">/)?.[0] || '';
+  const confirmMarkup = html.match(/id="confirm-modal"[\s\S]*?<\/div>\s*<\/div>\s*<!-- MODAL: Project Details Viewer -->/)?.[0] || '';
+
+  assert.match(centeredRule, /align-items:\s*center/);
+  assert.match(centeredRule, /padding:\s*16px/);
+  assert.match(confirmOverlay, /class="[^"]*\bmodal-overlay--centered\b[^"]*"/);
+  assert.doesNotMatch(confirmMarkup, /\bz-\[100\]\b/);
+});
+
 test('settings tabs reuse the app tab active treatment', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
@@ -182,6 +247,60 @@ test('app-rendered menu options share primitive option classes', () => {
   assert.match(main, /menuOption\.className = `menu-option custom-select-option/);
   assert.match(main, /check\.className = `ph ph-check menu-option-check custom-select-option-check/);
   assert.doesNotMatch(main, /text-blue-400 text-xs shrink-0/);
+});
+
+test('settings callouts and danger actions use shared modal vocabulary', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const settingsMarkup = html.match(/id="settings-modal"[\s\S]*?<\/div>\s*<\/div>\s*<!-- Confirmation modal -->/)?.[0] || '';
+
+  for (const selector of [
+    '.settings-card',
+    '.settings-row',
+    '.settings-helper',
+    '.info-callout',
+    '.info-callout__icon',
+    '.info-callout__title',
+    '.danger-zone',
+    '.danger-zone__card'
+  ]) {
+    assert.match(css, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.equal((settingsMarkup.match(/\binfo-callout\b/g) || []).length, 3);
+  assert.match(settingsMarkup, /\bdanger-zone\b/);
+  assert.match(settingsMarkup, /\bdanger-zone__card\b/);
+  assert.doesNotMatch(settingsMarkup, /\b(?:bg|border|text)-(?:blue|red)-/);
+});
+
+test('modal and settings chrome avoids old hardcoded utility colors and panel widths', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const modals = html.match(/<!-- MODAL: AI Insights Daily Summary -->[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+  const modalPanelClasses = Array.from(modals.matchAll(/class="([^"]*\bmodal-panel\b[^"]*)"/g))
+    .map(match => match[1]);
+
+  assert.ok(modalPanelClasses.length > 0);
+  for (const className of modalPanelClasses) {
+    assert.doesNotMatch(className, /\bw-\[(?:360|380|420|650|750|800)px\]\b/);
+    assert.doesNotMatch(className, /\bmax-w-\[calc\(100vw-32px\)\]|\bmax-h-\[88vh\]/);
+  }
+
+  assert.doesNotMatch(modals, /border-\[#2d2f34\]|bg-\[#0d0e10\]|bg-\[#141416\]|bg-blue-|border-blue-|bg-red-|border-red-|focus:border-blue/);
+});
+
+test('time entry modal width switching uses named modal size classes', () => {
+  const modals = fs.readFileSync('js/modals.js', 'utf8');
+
+  assert.match(modals, /modal-size--split/);
+  assert.match(modals, /modal-size--md/);
+  assert.doesNotMatch(modals, /w-\[420px\]|w-\[800px\]/);
+});
+
+test('modal field helpers preserve hidden state', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const hiddenFieldRule = css.match(/\.modal-field-group\.hidden\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(hiddenFieldRule, /display:\s*none/);
 });
 
 test('header and modal icon controls use the icon-button primitive', () => {
