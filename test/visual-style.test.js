@@ -111,12 +111,111 @@ test('modal overlays keep dialogs top aligned below the app header', () => {
 });
 
 test('settings tabs reuse the app tab active treatment', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
-  const activeRule = css.match(/\.settings-section-tab\.is-active\s*\{[^}]*\}/)?.[0] || '';
+  const activeRule = css.match(/\.app-tab--active,\s*\n\.range-pill--active\s*\{[^}]*\}/)?.[0] || '';
 
+  assert.match(html, /<div class="[^"]*\bapp-tab-group\b[^"]*\bsettings-section-tabs\b[^"]*"[^>]*role="tablist" aria-label="Settings sections"/);
+  assert.match(html, /class="[^"]*\bapp-tab\b[^"]*\bsettings-section-tab\b[^"]*\bapp-tab--active\b[^"]*\bis-active\b[^"]*" data-settings-section-button="general"/);
+  assert.match(html, /class="[^"]*\bapp-tab\b[^"]*\bsettings-section-tab\b[^"]*" data-settings-section-button="capture"/);
   assert.match(activeRule, /background:\s*var\(--surface-raised\)/);
   assert.match(activeRule, /box-shadow:\s*var\(--selected-shadow\)/);
   assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
+  assert.doesNotMatch(css, /\.settings-section-tab\.is-active\s*\{/);
+});
+
+test('control primitives expose complete tokenized states', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  for (const selector of [
+    '.button-primary:active',
+    '.button-secondary:active',
+    '.button-danger:active',
+    '.icon-button:active',
+    '.app-tab:active',
+    '.range-pill:active',
+    '.calendar-day:active'
+  ]) {
+    assert.match(css, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.match(css, /\.button-primary\.is-loading,\s*\n\.button-primary\[aria-busy="true"\]/);
+  assert.match(css, /\.button-secondary\.is-loading,\s*\n\.button-secondary\[aria-busy="true"\]/);
+  assert.match(css, /\.button-danger\.is-loading,\s*\n\.button-danger\[aria-busy="true"\]/);
+  assert.match(css, /\.field::placeholder,\s*\n\.custom-select::placeholder/);
+  assert.match(css, /\.field:disabled,\s*\n\.custom-select:disabled,\s*\n\.custom-select-button:disabled,\s*\n\.custom-select-button\.is-disabled/);
+  assert.match(css, /\.field:disabled:hover,\s*\n\.custom-select:disabled:hover,\s*\n\.custom-select-button:disabled:hover,\s*\n\.custom-select-button\.is-disabled:hover/);
+});
+
+test('fields and native selects avoid one-off visual utility classes', () => {
+  const sources = [
+    fs.readFileSync('index.html', 'utf8'),
+    fs.readFileSync('js/main.js', 'utf8'),
+    fs.readFileSync('js/projects.js', 'utf8')
+  ].join('\n');
+  const primitiveClassStrings = Array.from(sources.matchAll(/(?:class|className)\s*=\s*(["'`])([^"'`]*)(?:\1)/g))
+    .map(match => match[2])
+    .filter(className => {
+      const tokens = className.split(/\s+/);
+      return tokens.includes('field') || tokens.includes('custom-select');
+    });
+
+  assert.ok(primitiveClassStrings.length > 0);
+  for (const className of primitiveClassStrings) {
+    assert.doesNotMatch(className, /\b(?:px-\d|px-\[|text-\[|text-xs|bg-\[|border)\b/);
+  }
+});
+
+test('app-rendered menu options share primitive option classes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const zoomMenu = html.match(/<div class="[^"]*" id="zoom-dropdown-menu">[\s\S]*?<\/div>\s*<\/div>\s*<div id="timeline-mode-switch"/)?.[0] || '';
+
+  assert.match(css, /\.menu-option,\s*\n\.custom-select-option\s*\{/);
+  assert.match(css, /\.menu-option\.is-selected,\s*\n\.custom-select-option\.is-selected\s*\{/);
+  assert.match(zoomMenu, /class="menu-option" data-value="1"/);
+  assert.match(zoomMenu, /class="menu-option is-selected" data-value="5"/);
+  assert.match(zoomMenu, /class="ph ph-check menu-option-check is-visible"/);
+  assert.doesNotMatch(zoomMenu, /w-full flex items-center justify-between px-3 py-1\.5 rounded-lg text-left text-xs focus:outline-none/);
+  assert.match(main, /emptyOption\.className = 'menu-option custom-select-option'/);
+  assert.match(main, /menuOption\.className = `menu-option custom-select-option/);
+  assert.match(main, /check\.className = `ph ph-check menu-option-check custom-select-option-check/);
+  assert.doesNotMatch(main, /text-blue-400 text-xs shrink-0/);
+});
+
+test('header and modal icon controls use the icon-button primitive', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+
+  for (const id of [
+    'date-picker-prev-month',
+    'date-picker-next-month',
+    'popup-close-btn',
+    'ai-insights-detail-close',
+    'rules-modal-btn-close',
+    'settings-modal-btn-close',
+    'proj-details-btn-close'
+  ]) {
+    const button = html.match(new RegExp(`<button(?=[^>]*id="${id}")[^>]*>`))?.[0] || '';
+    assert.ok(button, `expected ${id} button`);
+    assert.match(button, /class="[^"]*\bicon-button\b[^"]*"/);
+    assert.doesNotMatch(button, /text-gray-400|hover:text-white|focus:outline-none|focus:ring/);
+  }
+});
+
+test('empty states use shared density variants instead of ad hoc utilities', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const sources = [
+    fs.readFileSync('index.html', 'utf8'),
+    fs.readFileSync('js/main.js', 'utf8'),
+    fs.readFileSync('js/projects.js', 'utf8'),
+    fs.readFileSync('js/reporting.js', 'utf8'),
+    fs.readFileSync('js/timeline.js', 'utf8')
+  ].join('\n');
+
+  assert.match(css, /\.empty-state--compact\s*\{/);
+  assert.match(css, /\.empty-state--spacious\s*\{/);
+  assert.doesNotMatch(sources, /empty-state[^"'`]*(?:\bp-\d|\bpy-\d|\btext-\[|\btext-xs|\btext-gray-)/);
 });
 
 test('AI Insights header omits archive controls and workspace separator', () => {

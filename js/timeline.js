@@ -1681,7 +1681,7 @@ function renderUnloggedRecordedWorkReview() {
 
     if (groups.length === 0) {
         container.innerHTML = `
-            <div class="empty-state p-3 text-[11px]">
+            <div class="empty-state empty-state--compact">
                 ${hiddenFragmentCount > 0
                     ? `${hiddenFragmentCount} short ${hiddenFragmentCount === 1 ? 'fragment' : 'fragments'} hidden.`
                     : 'All recorded source work is covered.'}

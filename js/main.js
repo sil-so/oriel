@@ -43,18 +43,16 @@ function setupZoomDropdown() {
                 if (elZoomLabel) elZoomLabel.textContent = btn.querySelector('span').textContent;
                 
                 elZoomMenu.querySelectorAll('button').forEach(b => {
-                    const check = b.querySelector('.ph-check');
+                    const check = b.querySelector('.menu-option-check');
                     if (b === btn) {
                         b.classList.add('is-selected');
                         if (check) {
-                            check.classList.remove('opacity-0');
-                            check.classList.add('opacity-100');
+                            check.classList.add('is-visible');
                         }
                     } else {
                         b.classList.remove('is-selected');
                         if (check) {
-                            check.classList.add('opacity-0');
-                            check.classList.remove('opacity-100');
+                            check.classList.remove('is-visible');
                         }
                     }
                 });
@@ -380,7 +378,7 @@ function buildCustomSelectMenu(select) {
     if (!options.length) {
         const emptyOption = document.createElement('button');
         emptyOption.type = 'button';
-        emptyOption.className = 'custom-select-option';
+        emptyOption.className = 'menu-option custom-select-option';
         emptyOption.disabled = true;
         emptyOption.textContent = 'No options';
         custom.menu.appendChild(emptyOption);
@@ -391,7 +389,7 @@ function buildCustomSelectMenu(select) {
         const menuOption = document.createElement('button');
         const isSelected = option.value === select.value;
         menuOption.type = 'button';
-        menuOption.className = `custom-select-option${isSelected ? ' is-selected' : ''}`;
+        menuOption.className = `menu-option custom-select-option${isSelected ? ' is-selected' : ''}`;
         menuOption.disabled = option.disabled;
         menuOption.setAttribute('role', 'option');
         menuOption.setAttribute('aria-selected', String(isSelected));
@@ -401,7 +399,7 @@ function buildCustomSelectMenu(select) {
         optionLabel.textContent = option.textContent.trim();
 
         const check = document.createElement('i');
-        check.className = `ph ph-check text-blue-400 text-xs shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`;
+        check.className = `ph ph-check menu-option-check custom-select-option-check${isSelected ? ' is-visible' : ''}`;
 
         menuOption.appendChild(optionLabel);
         menuOption.appendChild(check);
@@ -1144,6 +1142,7 @@ function setupMainEventListeners() {
         document.querySelectorAll?.('[data-settings-section-button]')?.forEach(button => {
             const isActive = button.dataset.settingsSectionButton === nextSection;
             button.classList.toggle('is-active', isActive);
+            button.classList.toggle('app-tab--active', isActive);
             button.setAttribute('aria-selected', String(isActive));
         });
         document.querySelectorAll?.('[data-settings-section-panel]')?.forEach(panel => {
@@ -1188,7 +1187,7 @@ function setupMainEventListeners() {
 
         if (!state.trackingExclusions.length) {
             const empty = document.createElement('div');
-            empty.className = 'empty-state text-[11px] py-2';
+            empty.className = 'empty-state empty-state--compact';
             empty.textContent = 'No tracking exclusions configured.';
             settingsExclusionsList.appendChild(empty);
             return;
@@ -1341,7 +1340,7 @@ function setupMainEventListeners() {
 
         if (rules.length === 0) {
             const empty = document.createElement('div');
-            empty.className = 'empty-state text-[11px] py-2';
+            empty.className = 'empty-state empty-state--compact';
             empty.textContent = 'No title cleanup rules configured.';
             settingsTitleCleanupList.appendChild(empty);
             return;
@@ -1370,7 +1369,7 @@ function setupMainEventListeners() {
 
             const name = document.createElement('input');
             name.type = 'text';
-            name.className = 'field flex-1 px-3 text-[12px]';
+            name.className = 'field flex-1';
             name.value = rule.name;
             name.setAttribute('aria-label', 'Title cleanup rule name');
 
@@ -1386,7 +1385,7 @@ function setupMainEventListeners() {
 
             const pattern = document.createElement('input');
             pattern.type = 'text';
-            pattern.className = 'field px-3 text-[12px]';
+            pattern.className = 'field';
             pattern.value = rule.pattern;
             pattern.setAttribute('aria-label', 'Regex pattern to remove');
 
@@ -1394,13 +1393,13 @@ function setupMainEventListeners() {
             scopes.className = 'grid grid-cols-2 gap-2';
             const appScope = document.createElement('input');
             appScope.type = 'text';
-            appScope.className = 'field px-3 text-[12px]';
+            appScope.className = 'field';
             appScope.placeholder = 'App contains';
             appScope.value = rule.appContains || '';
             appScope.setAttribute('aria-label', 'Optional app scope');
             const urlScope = document.createElement('input');
             urlScope.type = 'text';
-            urlScope.className = 'field px-3 text-[12px]';
+            urlScope.className = 'field';
             urlScope.placeholder = 'URL contains';
             urlScope.value = rule.urlContains || '';
             urlScope.setAttribute('aria-label', 'Optional URL scope');
