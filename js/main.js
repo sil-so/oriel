@@ -1906,7 +1906,8 @@ function setupMainEventListeners() {
 
         const header = createAiInsightsElement('div', 'ai-insights-card-header');
         const titleBlock = createAiInsightsElement('div', 'ai-insights-card-title');
-        titleBlock.appendChild(createAiInsightsElement('h2', '', aiInsightsFriendlyDate(row.date || '')));
+        titleBlock.appendChild(createAiInsightsElement('h2', 'card-title', aiInsightsFriendlyDate(row.date || '')));
+        titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-card-metadata', 'Daily recap'));
         const statusPill = createAiInsightsElement('span', 'ai-insights-status-pill', aiInsightsStatusLabel(status));
         statusPill.dataset.state = status;
         header.appendChild(titleBlock);
@@ -1954,7 +1955,7 @@ function setupMainEventListeners() {
         const text = String(summary.text || 'Daily summary generated.').trim();
         card.appendChild(renderAiInsightsPreview(text));
 
-        const actions = createAiInsightsElement('div', 'ai-insights-card-actions');
+        const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
         const openButton = createAiInsightsElement('button', 'button-secondary', 'Open');
         openButton.type = 'button';
         openButton.addEventListener('click', () => openAiInsightsDetail(row));
@@ -1981,7 +1982,9 @@ function setupMainEventListeners() {
         generateButton.dataset.action = 'generate';
         generateButton.disabled = !window.OrielData?.isNative || isGenerating;
         generateButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
-        card.appendChild(generateButton);
+        const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
+        actions.appendChild(generateButton);
+        card.appendChild(actions);
     }
 
     function appendFailedAiInsightsContent(card, row) {
@@ -1993,7 +1996,9 @@ function setupMainEventListeners() {
         retryButton.dataset.action = 'generate';
         retryButton.disabled = !window.OrielData?.isNative || isGenerating;
         retryButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
-        card.appendChild(retryButton);
+        const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
+        actions.appendChild(retryButton);
+        card.appendChild(actions);
     }
 
     async function refreshAiInsights({ focusDate = '' } = {}) {

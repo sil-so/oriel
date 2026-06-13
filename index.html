@@ -398,10 +398,10 @@
 
     <!-- Proper Project Management Board -->
     <div id="projects-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 app-scrollbar-safe">
-        <div class="flex justify-between items-center mb-6">
+        <div class="workspace-heading workspace-heading--spaced">
             <div>
-                <h1 class="text-xl font-bold text-white tracking-wide">Project Portfolio</h1>
-                <p class="text-gray-400 text-xs mt-1">Manage client projects, identity colors, billing defaults, and logged summaries.</p>
+                <h1 class="workspace-title">Project Portfolio</h1>
+                <p class="workspace-helper">Manage client projects, identity colors, billing defaults, and logged summaries.</p>
             </div>
             <button class="button-primary" id="btn-projects-page-new">
                 <i class="ph-bold ph-plus"></i> Create Project
@@ -416,10 +416,10 @@
     <!-- Reporting workspace -->
     <div id="stats-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
         <!-- Period picker row -->
-        <div class="flex justify-between items-center shrink-0 flex-wrap gap-4">
+        <div class="workspace-heading shrink-0">
             <div>
-                <h1 class="text-xl font-bold text-white tracking-wide">Reporting & Statistics</h1>
-                <p class="text-gray-400 text-xs mt-1">Deep analysis of program usage, website navigation, and tracked-to-logged conversion rates.</p>
+                <h1 class="workspace-title">Reporting & Statistics</h1>
+                <p class="workspace-helper">Deep analysis of program usage, website navigation, and tracked-to-logged conversion rates.</p>
             </div>
 
             <div class="flex items-center gap-2.5">
@@ -437,7 +437,7 @@
                 <!-- Custom dates input range (hidden by default) -->
                 <div class="flex items-center gap-2 hidden" id="stats-custom-range-inputs">
                     <input type="date" id="stats-start-date" class="field">
-                    <span class="text-gray-400 text-xs">to</span>
+                    <span class="metric-helper">to</span>
                     <input type="date" id="stats-end-date" class="field">
                 </div>
             </div>
@@ -446,37 +446,37 @@
         <div class="summary-band">
             <!-- Captured Hours -->
             <div class="summary-metric">
-                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Captured</span>
+                <span class="metric-label">Total Captured</span>
                 <span class="summary-value" id="stat-card-captured">0h 0m</span>
-                <span class="text-[10px] text-gray-400">Total active macOS/Browser time</span>
+                <span class="metric-helper">Total active macOS/Browser time</span>
             </div>
 
             <!-- Logged Hours -->
             <div class="summary-metric">
-                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Logged</span>
+                <span class="metric-label">Total Logged</span>
                 <span class="summary-value" id="stat-card-logged">0h 0m</span>
-                <span class="text-[10px] text-gray-400">Time entries allocated to projects</span>
+                <span class="metric-helper">Time entries allocated to projects</span>
             </div>
 
             <!-- Billable vs Non-Billable Earnings -->
             <div class="summary-metric">
-                <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Billable Earnings</span>
+                <span class="metric-label">Billable Earnings</span>
                 <span class="summary-value summary-value--success" id="stat-card-earnings">$0.00</span>
-                <span class="text-[10px] text-gray-400" id="stat-card-billable-hours">0.0h of billable work</span>
+                <span class="metric-helper" id="stat-card-billable-hours">0.0h of billable work</span>
             </div>
 
             <!-- Conversion Rate Card -->
             <div class="summary-metric">
                 <div class="flex justify-between items-center">
-                    <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Conversion Efficiency</span>
-                    <span class="text-xs font-semibold text-accent" id="stat-card-conversion-percent">0%</span>
+                    <span class="metric-label">Conversion Efficiency</span>
+                    <span class="metric-value text-accent" id="stat-card-conversion-percent">0%</span>
                 </div>
 
                 <!-- Progress bar -->
-                <div class="w-full bg-gray-800 rounded-full h-2 shadow-inner overflow-hidden">
-                    <div class="h-full rounded-full transition-all duration-500" style="width: 0%; background: var(--accent);" id="stat-card-conversion-bar"></div>
+                <div class="progress-track">
+                    <div class="progress-fill" style="width: 0%;" id="stat-card-conversion-bar"></div>
                 </div>
-                <span class="text-[10px] text-gray-400">Ratio of logged time to captured time</span>
+                <span class="metric-helper">Ratio of logged time to captured time</span>
             </div>
         </div>
 
@@ -484,20 +484,20 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             <!-- Left Chart Card: Used Programs Donut -->
             <div class="report-panel p-6 flex flex-col gap-4">
-                <div class="flex items-center gap-2 pb-2 border-b border-[#2d2f34]/80">
-                    <i class="ph ph-desktop text-accent text-lg"></i>
-                    <h3 class="font-bold text-sm text-white tracking-wide">Top Applications</h3>
+                <div class="chart-card-header">
+                    <i class="ph ph-desktop"></i>
+                    <h3 class="card-title">Top Applications</h3>
                 </div>
-                <div class="flex flex-col md:flex-row items-center gap-6 py-4">
-                    <div class="relative w-44 h-44 shrink-0 flex items-center justify-center">
-                        <canvas id="canvas-programs" width="176" height="176" class="w-full h-full"></canvas>
+                <div class="chart-card-layout">
+                    <div class="chart-frame">
+                        <canvas id="canvas-programs" width="176" height="176"></canvas>
                         <!-- Center text overlay -->
                         <div class="absolute flex flex-col items-center justify-center text-center">
-                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Apps</span>
-                            <span class="text-xs font-semibold text-white mt-0.5" id="lbl-programs-count">0 items</span>
+                            <span class="chart-center-label">Apps</span>
+                            <span class="chart-center-value" id="lbl-programs-count">0 items</span>
                         </div>
                     </div>
-                    <div class="flex-1 w-full flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="list-programs-legend">
+                    <div class="chart-legend app-scrollbar-safe" id="list-programs-legend">
                         <!-- Legend and breakdown injected here -->
                     </div>
                 </div>
@@ -505,20 +505,20 @@
 
             <!-- Right Chart Card: Visited Websites Donut -->
             <div class="report-panel p-6 flex flex-col gap-4">
-                <div class="flex items-center gap-2 pb-2 border-b border-[#2d2f34]/80">
-                    <i class="ph ph-globe text-blue-400 text-lg"></i>
-                    <h3 class="font-bold text-sm text-white tracking-wide">Top Websites</h3>
+                <div class="chart-card-header">
+                    <i class="ph ph-globe"></i>
+                    <h3 class="card-title">Top Websites</h3>
                 </div>
-                <div class="flex flex-col md:flex-row items-center gap-6 py-4">
-                    <div class="relative w-44 h-44 shrink-0 flex items-center justify-center">
-                        <canvas id="canvas-websites" width="176" height="176" class="w-full h-full"></canvas>
+                <div class="chart-card-layout">
+                    <div class="chart-frame">
+                        <canvas id="canvas-websites" width="176" height="176"></canvas>
                         <!-- Center text overlay -->
                         <div class="absolute flex flex-col items-center justify-center text-center">
-                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Sites</span>
-                            <span class="text-xs font-semibold text-white mt-0.5" id="lbl-websites-count">0 items</span>
+                            <span class="chart-center-label">Sites</span>
+                            <span class="chart-center-value" id="lbl-websites-count">0 items</span>
                         </div>
                     </div>
-                    <div class="flex-1 w-full flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="list-websites-legend">
+                    <div class="chart-legend app-scrollbar-safe" id="list-websites-legend">
                         <!-- Legend and breakdown injected here -->
                     </div>
                 </div>
@@ -528,10 +528,10 @@
 
     <!-- AI Insights workspace -->
     <div id="ai-insights-workspace" class="hidden flex-1 flex flex-col p-8 overflow-y-auto min-h-0 gap-6 app-scrollbar-safe">
-        <div class="flex justify-between items-start shrink-0 flex-wrap gap-4">
+        <div class="workspace-heading shrink-0">
             <div>
-                <h1 class="text-xl font-bold text-white tracking-wide">AI Insights</h1>
-                <p class="text-gray-400 text-xs mt-1">Generate a daily recap from stored screenshot activity summaries. Screenshots are not stored or shown here.</p>
+                <h1 class="workspace-title">AI Insights</h1>
+                <p class="workspace-helper">Generate a daily recap from stored screenshot activity summaries. Screenshots are not stored or shown here.</p>
             </div>
         </div>
 
@@ -1234,7 +1234,7 @@
         <div class="modal-panel modal-panel--scroll modal-size--lg relative flex flex-col gap-4">
             <div class="modal-header">
                 <div class="modal-header-title">
-                    <span class="w-4 h-4 rounded-full shadow-md" id="proj-details-color"></span>
+                    <span class="project-detail-color" id="proj-details-color"></span>
                     <h3 class="modal-title truncate" id="proj-details-title">
                         Project Name
                     </h3>
@@ -1246,18 +1246,18 @@
 
             <div class="modal-scroll-content app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
                 <!-- Statistics Quick Row -->
-                <div class="project-details-stats text-xs">
-                    <div class="flex flex-col gap-1">
-                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Time Logged</span>
-                        <span class="font-bold text-white text-base" id="proj-details-total-duration">0h 0m</span>
+                <div class="project-details-stats">
+                    <div class="project-detail-stat">
+                        <span class="metric-label">Total Time Logged</span>
+                        <span class="metric-value" id="proj-details-total-duration">0h 0m</span>
                     </div>
-                    <div class="flex flex-col gap-1">
-                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Billing Type</span>
-                        <span class="font-bold text-white text-base" id="proj-details-billing-type">Hourly</span>
+                    <div class="project-detail-stat">
+                        <span class="metric-label">Billing Type</span>
+                        <span class="metric-value" id="proj-details-billing-type">Hourly</span>
                     </div>
-                    <div class="flex flex-col gap-1">
-                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Value / Earnings</span>
-                        <span class="font-bold text-emerald-400 text-base" id="proj-details-total-earnings">$0.00</span>
+                    <div class="project-detail-stat">
+                        <span class="metric-label">Total Value / Earnings</span>
+                        <span class="metric-value metric-value--success" id="proj-details-total-earnings">$0.00</span>
                     </div>
                 </div>
 
@@ -1279,7 +1279,7 @@
                 <div class="flex flex-col gap-2 shrink-0">
                     <button class="button-primary w-full flex items-center justify-between px-4" id="proj-details-toggle-manual-form">
                         <span class="flex items-center gap-1.5">
-                            <i class="ph ph-plus-circle text-[14px]"></i>
+                            <i class="ph ph-plus-circle"></i>
                             Log Manual Time / Import History
                         </span>
                         <i class="ph ph-caret-down transition-transform duration-200" id="proj-details-form-caret"></i>
@@ -1288,21 +1288,21 @@
                     <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
                         <div class="grid grid-cols-3 gap-3">
                             <div class="flex flex-col gap-1">
-                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Date</label>
+                                <label class="metric-label">Date</label>
                                 <input type="date" class="field" id="proj-details-manual-date">
                             </div>
                             <div class="flex flex-col gap-1">
-                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Hours Worked</label>
+                                <label class="metric-label">Hours Worked</label>
                                 <input type="number" min="0" max="24" placeholder="0" class="field" id="proj-details-manual-hours">
                             </div>
                             <div class="flex flex-col gap-1">
-                                <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Minutes Worked</label>
+                                <label class="metric-label">Minutes Worked</label>
                                 <input type="number" min="0" max="59" placeholder="0" class="field" id="proj-details-manual-minutes">
                             </div>
                         </div>
 
                         <div class="flex flex-col gap-1">
-                            <label class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Activity Description / Import Notes</label>
+                            <label class="metric-label">Activity Description / Import Notes</label>
                             <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field" id="proj-details-manual-description">
                         </div>
 
@@ -1319,7 +1319,7 @@
                     <h4 class="section-label shrink-0">Historical Entries Log</h4>
 
                     <div class="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 max-h-[300px] app-scrollbar-safe" id="proj-details-entries-list">
-                        <div class="text-center text-gray-500 text-xs py-8 italic">No entries logged to this project yet.</div>
+                        <div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>
                     </div>
                 </div>
             </div>

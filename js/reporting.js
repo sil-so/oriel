@@ -415,17 +415,17 @@ function drawDonutChart(canvasId, countLabelId, legendId, dataList, totalMs, def
         const iconHTML = getActivityIconHTML(slice.name, defaultIcon === 'globe' ? `http://${slice.name}` : '', slice.name);
 
         return `
-            <div class="report-row flex items-center justify-between text-[11px]">
-                <div class="flex items-center gap-2 truncate max-w-[70%]">
+            <div class="report-row">
+                <div class="report-row-main">
                     <span class="project-marker" style="background-color: ${color}"></span>
-                    <div class="w-5 h-5 flex items-center justify-center shrink-0 text-gray-400">
+                    <div class="report-row-icon">
                         ${iconHTML}
                     </div>
-                    <span class="text-gray-200 font-semibold truncate" title="${slice.name}">${slice.name}</span>
+                    <span class="report-row-title" title="${slice.name}">${slice.name}</span>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="report-row-meta">
                     <span class="duration-pill">${durationStr}</span>
-                    <span class="text-white font-semibold text-[10px] w-6 text-right">${percent}%</span>
+                    <span class="report-row-percent">${percent}%</span>
                 </div>
             </div>
         `;

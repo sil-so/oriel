@@ -62,7 +62,14 @@ test('project cards render all-time totals and earnings from historical entries'
   assert.match(grid.innerHTML, /2h 0m/);
   assert.match(grid.innerHTML, /Total Earnings/);
   assert.match(grid.innerHTML, /\$200\.00/);
+  assert.match(grid.innerHTML, /\bcard-title\b/);
+  assert.match(grid.innerHTML, /\bmetric-label\b/);
+  assert.match(grid.innerHTML, /\bmetric-helper\b/);
+  assert.match(grid.innerHTML, /\bmetric-value\b/);
+  assert.match(grid.innerHTML, /\bcard-actions\b/);
+  assert.match(grid.innerHTML, /Billable/);
   assert.doesNotMatch(grid.innerHTML, /Logged Today|Earnings Today/);
+  assert.doesNotMatch(grid.innerHTML, /text-\[(?:9|10|11|12|13)px\]|text-gray-|text-white|text-emerald-|text-blue-/);
 });
 
 test('project cards show unavailable historical metrics when all-time loading fails', async () => {

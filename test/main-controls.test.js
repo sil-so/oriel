@@ -601,6 +601,13 @@ test('AI Insights renders generated, ready, and failed summary cards without unc
   await dom.elTabAiInsights.click();
   const grid = element('ai-insights-card-grid');
   assert.equal(grid.children.length, 3);
+  assert.match(String(grid.children[0].className), /\bai-insights-card\b/);
+  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('card-title')));
+  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('ai-insights-card-metadata')));
+  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('card-actions')));
+  for (const card of grid.children) {
+    assert.doesNotMatch(String(card.className || ''), /text-\[(?:10|11|12|13)px\]|text-gray-|text-white|border-\[#2d2f34\]/);
+  }
   assert.match(grid.textContent, /Sunday, 7 June 2026/);
   assert.doesNotMatch(grid.textContent, /Sun, 7 Jun 2026/);
   assert.match(grid.textContent, /Focused implementation work in Oriel/);
@@ -643,7 +650,7 @@ test('AI Insights ready card generation uses the card date and refreshes the gri
 
   await dom.elTabAiInsights.click();
   const readyCard = element('ai-insights-card-grid').children[0];
-  const generateButton = readyCard.children.find(child => child.dataset?.action === 'generate');
+  const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
   assert.ok(generateButton);
 
   await generateButton.click();
