@@ -520,8 +520,7 @@ async function renderProjectsPage() {
         }
 
         return `
-            <div class="project-card p-5 flex flex-col gap-4 relative cursor-pointer"
-                 onclick="openProjectDetails('${proj.id}')">
+            <div class="project-card p-5 flex flex-col gap-4 relative">
                 <div class="flex items-center justify-between">
                     <div class="card-title-row">
                         <span class="project-marker project-marker--large" style="background-color: ${proj.color};"></span>
@@ -551,12 +550,16 @@ async function renderProjectsPage() {
 
                 <div class="card-actions z-20">
                     <button class="button-secondary"
-                            onclick="event.stopPropagation(); editProjectInline('${proj.id}')">
+                            onclick="openProjectDetails('${proj.id}')">
+                        <i class="ph ph-folder-open"></i> Details
+                    </button>
+                    <button class="button-secondary"
+                            onclick="editProjectInline('${proj.id}')">
                         <i class="ph ph-pencil-simple-line"></i> Edit
                     </button>
                     ${isDefault ? '' : `
                     <button class="button-danger"
-                            onclick="event.stopPropagation(); deleteProjectInline('${proj.id}')">
+                            onclick="deleteProjectInline('${proj.id}')">
                         <i class="ph ph-trash-simple"></i> Delete
                     </button>
                     `}

@@ -2040,6 +2040,142 @@ function normalizeActivityExactUrl(value) {
         || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? parseUrl(`https://${url}`) : '');
 }
 
+const BROWSER_ACTIVITY_APP_NAMES = [
+    'brave browser',
+    'brave',
+    'google chrome',
+    'chrome canary',
+    'chrome',
+    'chromium',
+    'safari technology preview',
+    'safari',
+    'arc',
+    'microsoft edge',
+    'edge',
+    'firefox developer edition',
+    'firefox',
+    'opera gx',
+    'opera',
+    'vivaldi',
+    'orion',
+    'dia',
+    'zen',
+    'floorp',
+    'librewolf',
+    'waterfox',
+    'tor browser',
+    'duckduckgo',
+    'mullvad browser'
+];
+
+const BROWSER_ACTIVITY_BUNDLE_FRAGMENTS = [
+    'com.brave.browser',
+    'com.google.chrome',
+    'com.google.chrome.canary',
+    'com.apple.safari',
+    'com.apple.safaritechnologypreview',
+    'company.thebrowser.browser',
+    'company.thebrowser.dia',
+    'com.microsoft.edgemac',
+    'org.mozilla.firefox',
+    'org.mozilla.firefoxdeveloperedition',
+    'com.operasoftware.opera',
+    'com.operasoftware.operagx',
+    'com.vivaldi.vivaldi',
+    'com.kagi.kagimacos',
+    'app.zen-browser.zen',
+    'one.ablaze.floorp',
+    'io.gitlab.librewolf-community',
+    'net.waterfox.waterfox',
+    'org.torproject.torbrowser',
+    'com.duckduckgo.macos.browser',
+    'net.mullvad.mullvadbrowser'
+];
+
+function normalizeBrowserIdentityText(value) {
+    return normalizeActivityText(value)
+        .toLowerCase()
+        .replace(/\.app\b/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function browserNameMatches(value) {
+    const normalized = normalizeBrowserIdentityText(value);
+    if (!normalized) return false;
+
+    return BROWSER_ACTIVITY_APP_NAMES.some(name => {
+        const escaped = escapeRegExp(name);
+        return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(normalized);
+    });
+}
+
+function browserBundleMatches(value) {
+    const normalized = normalizeActivityText(value).trim().toLowerCase();
+    if (!normalized) return false;
+
+    return BROWSER_ACTIVITY_BUNDLE_FRAGMENTS.some(fragment => normalized.includes(fragment));
+}
+
+function isBrowserLikeActivity(activity) {
+    if (normalizeActivityExactUrl(activity?.url)) return true;
+
+    return browserNameMatches(activity?.app)
+        || browserNameMatches(activity?.appPath)
+        || browserBundleMatches(activity?.bundleId);
+}
+
+function getSimilarModeAvailability(activity) {
+    const canUseUrlModes = isBrowserLikeActivity(activity) && Boolean(normalizeActivityExactUrl(activity?.url));
+    return {
+        host: canUseUrlModes,
+        url: canUseUrlModes,
+        app: true,
+        'app-title': true,
+        defaultMode: canUseUrlModes ? 'host' : 'app'
+    };
+}
+
+function setSimilarOptionAvailability(radio, enabled) {
+    if (!radio) return;
+
+    radio.disabled = !enabled;
+    const option = radio.closest?.('.similar-option');
+    option?.classList?.toggle?.('is-disabled', !enabled);
+    if (enabled) {
+        option?.removeAttribute?.('aria-disabled');
+    } else {
+        option?.setAttribute?.('aria-disabled', 'true');
+    }
+}
+
+function updateSimilarModeAvailability(activity) {
+    const availability = getSimilarModeAvailability(activity);
+    const radios = {
+        host: DOM.elSimilarModeHost,
+        url: DOM.elSimilarModeUrl,
+        app: DOM.elSimilarModeApp,
+        'app-title': DOM.elSimilarModeAppTitle
+    };
+
+    Object.entries(radios).forEach(([mode, radio]) => {
+        setSimilarOptionAvailability(radio, Boolean(availability[mode]));
+    });
+
+    const selectedMode = getSelectedSimilarActivityMode();
+    const nextMode = availability[selectedMode] ? selectedMode : availability.defaultMode;
+    Object.entries(radios).forEach(([mode, radio]) => {
+        if (radio) radio.checked = mode === nextMode;
+    });
+
+    return availability;
+}
+
 function normalizeSimilarActivityMatchMode(mode) {
     return ['host', 'url', 'app', 'app-title'].includes(mode) ? mode : 'host';
 }
@@ -2058,10 +2194,11 @@ function getActivitySimilarityKeyForMode(activity, mode = 'host') {
 
     if (normalizedMode === 'url') {
         const exactUrl = normalizeActivityExactUrl(activity?.url);
-        return exactUrl ? `${app}|||${exactUrl}` : app;
+        return exactUrl ? `${app}|||${exactUrl}` : '';
     }
 
-    return getActivitySimilarityKey(activity);
+    const host = getActivityUrlHostname(normalizeActivityText(activity?.url));
+    return host ? `${app}|||${host}` : '';
 }
 
 function getActivityBlockData(blockEl) {
@@ -4504,7 +4641,7 @@ function getSelectedSimilarActivityMode() {
         DOM.elSimilarModeApp,
         DOM.elSimilarModeAppTitle
     ].filter(Boolean);
-    const selectedRadio = radios.find(radio => radio.checked);
+    const selectedRadio = radios.find(radio => radio.checked && !radio.disabled);
     return normalizeSimilarActivityMatchMode(selectedRadio?.value || 'host');
 }
 
@@ -4528,10 +4665,10 @@ function bindSimilarSelectionModal() {
 function openSimilarSelectionModal() {
     const itemsMem = DOM.elItemsMemoryAid;
     const selectedEls = Array.from(itemsMem?.querySelectorAll?.('.activity-block.selected') || []);
-    if (!selectedEls.length) return false;
+    if (selectedEls.length !== 1) return false;
 
     bindSimilarSelectionModal();
-    if (DOM.elSimilarModeHost) DOM.elSimilarModeHost.checked = true;
+    updateSimilarModeAvailability(getActivityBlockData(selectedEls[0]));
     DOM.elSimilarModal?.classList?.remove('hidden');
     DOM.elSimilarModalBtnApply?.focus?.();
     return true;
@@ -4568,6 +4705,7 @@ function selectSimilarActivities(options = {}) {
 function updateMultiSelectBar() {
     const size = state.selectedActivities.size;
     const bar = DOM.elMultiSelectBar;
+    const canSelectSimilar = size === 1;
     if (bar) {
         if (size > 0) {
             DOM.elSelectedCount.innerText = size;
@@ -4575,6 +4713,19 @@ function updateMultiSelectBar() {
         } else {
             bar.classList.add('hidden');
         }
+    }
+
+    if (DOM.elBtnSelectSimilar) {
+        DOM.elBtnSelectSimilar.disabled = !canSelectSimilar;
+        DOM.elBtnSelectSimilar.classList?.toggle?.('hidden', !canSelectSimilar);
+        if (canSelectSimilar) {
+            DOM.elBtnSelectSimilar.removeAttribute?.('aria-hidden');
+        } else {
+            DOM.elBtnSelectSimilar.setAttribute?.('aria-hidden', 'true');
+            closeSimilarSelectionModal();
+        }
+    } else if (!canSelectSimilar) {
+        closeSimilarSelectionModal();
     }
 }
 

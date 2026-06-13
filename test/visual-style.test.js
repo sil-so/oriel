@@ -464,6 +464,18 @@ test('timeline and sidebar chrome use semantic design-system classes', () => {
   assert.match(css, /\.unlogged-work-review\.hidden\s*\{[\s\S]*?display:\s*none/);
 });
 
+test('activity details popup reserves a fixed square close button column', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const headerRule = css.match(/\.activity-details-popup__header\s*\{[^}]*\}/)?.[0] || '';
+  const closeRule = css.match(/#popup-close-btn\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(headerRule, /display:\s*grid/);
+  assert.match(headerRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+30px/);
+  assert.match(closeRule, /width:\s*30px/);
+  assert.match(closeRule, /height:\s*30px/);
+  assert.match(closeRule, /min-height:\s*30px/);
+});
+
 test('timeline-rendered rows use semantic classes instead of one-off utilities', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
   const timeline = fs.readFileSync('js/timeline.js', 'utf8');
@@ -658,9 +670,36 @@ test('similar activity selection uses a modal with explicit match modes', () => 
   assert.match(html, /id="similar-mode-app-title"/);
   assert.match(css, /\.similar-options\b/);
   assert.match(css, /\.similar-option\b/);
+  assert.match(css, /\.similar-option\.is-disabled\b/);
   assert.match(main, /openSimilarSelectionModal\(\)/);
   assert.match(timeline, /function openSimilarSelectionModal\(/);
+  assert.match(timeline, /function isBrowserLikeActivity\(/);
+  assert.match(timeline, /function updateSimilarModeAvailability\(/);
   assert.match(timeline, /function getActivitySimilarityKeyForMode\(/);
+});
+
+test('project and AI Insights card grids keep a three-column layout', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projectsGridRule = css.match(/#projects-page-grid\s*\{[^}]*\}/)?.[0] || '';
+  const aiGridRule = css.match(/\.ai-insights-card-grid\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(html, /id="projects-page-grid"/);
+  assert.doesNotMatch(html, /grid-cols-1\s+md:grid-cols-2\s+lg:grid-cols-3/);
+  assert.match(projectsGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(aiGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(aiGridRule, /auto-fit/);
+});
+
+test('project cards avoid full-card hover and click affordances', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const projectCardTag = projects.match(/<div class="project-card[^>]*>/)?.[0] || '';
+
+  assert.doesNotMatch(css, /\.project-card:hover\b/);
+  assert.doesNotMatch(projectCardTag, /\bcursor-pointer\b/);
+  assert.doesNotMatch(projectCardTag, /onclick=/);
+  assert.match(projects, /<button class="button-secondary"[\s\S]*onclick="openProjectDetails\('\$\{proj\.id\}'\)"/);
 });
 
 test('AI and data settings sections share heading treatment without extra danger divider', () => {

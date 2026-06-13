@@ -67,6 +67,10 @@ test('project cards render all-time totals and earnings from historical entries'
   assert.match(grid.innerHTML, /\bmetric-helper\b/);
   assert.match(grid.innerHTML, /\bmetric-value\b/);
   assert.match(grid.innerHTML, /\bcard-actions\b/);
+  const cardOpen = grid.innerHTML.match(/<div class="project-card[^>]*>/)?.[0] || '';
+  assert.doesNotMatch(cardOpen, /\bcursor-pointer\b/);
+  assert.doesNotMatch(cardOpen, /onclick=/);
+  assert.match(grid.innerHTML, /<button class="button-secondary"\s+onclick="openProjectDetails\('project-1'\)">[\s\S]*Details/);
   assert.match(grid.innerHTML, /Billable/);
   assert.doesNotMatch(grid.innerHTML, /Logged Today|Earnings Today/);
   assert.doesNotMatch(grid.innerHTML, /text-\[(?:9|10|11|12|13)px\]|text-gray-|text-white|text-emerald-|text-blue-/);

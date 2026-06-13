@@ -954,9 +954,23 @@ button:focus-visible {
     background: var(--selected-surface);
 }
 
+.similar-option.is-disabled {
+    opacity: 0.48;
+    cursor: default;
+}
+
+.similar-option.is-disabled:hover {
+    border-color: var(--border);
+    background: var(--control-surface);
+}
+
 .similar-option input {
     margin-top: 2px;
     accent-color: var(--accent);
+}
+
+.similar-option input:disabled {
+    cursor: not-allowed;
 }
 
 .similar-option__body {
@@ -1602,12 +1616,18 @@ button:focus-visible {
 }
 
 .activity-details-popup__header {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 30px;
     align-items: flex-start;
-    justify-content: space-between;
     gap: 12px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--separator);
+}
+
+#popup-close-btn {
+    width: 30px;
+    height: 30px;
+    min-height: 30px;
 }
 
 .activity-details-popup__title-row {
@@ -2712,7 +2732,7 @@ body.is-column-resizing * {
 
 .ai-insights-card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
     min-width: 0;
 }
@@ -3247,13 +3267,11 @@ body.is-column-resizing * {
     font-size: 11px;
 }
 
-.project-card {
-    transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
-}
-
-.project-card:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-raised);
+#projects-page-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    min-width: 0;
 }
 
 .project-card-body {

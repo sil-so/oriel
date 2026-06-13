@@ -43,8 +43,10 @@ class FakeElement {
     this.innerText = '';
     this.value = '';
     this.checked = false;
+    this.disabled = false;
     this.style = {};
     this.listeners = {};
+    this.attributes = {};
   }
 
   addEventListener(type, listener) {
@@ -60,6 +62,22 @@ class FakeElement {
 
   querySelectorAll() {
     return [];
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return this.attributes[name] || null;
+  }
+
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+
+  closest() {
+    return null;
   }
 
   focus() {
@@ -101,6 +119,72 @@ function loadTimelineContext() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
   return context;
+}
+
+function createSimilarActivityBlock({
+  startCell,
+  app,
+  title = app,
+  url = '',
+  appPath = '',
+  bundleId = '',
+  selected = false
+}) {
+  const classes = new Set(selected ? ['activity-block', 'selected'] : ['activity-block']);
+  const checkboxClasses = new Set(selected ? ['activity-checkbox', 'is-selected'] : ['activity-checkbox']);
+  const icon = { className: selected ? 'ph-fill ph-check-square text-base' : 'ph ph-square text-base' };
+  const checkbox = {
+    classList: {
+      add: className => checkboxClasses.add(className),
+      remove: className => checkboxClasses.delete(className),
+      contains: className => checkboxClasses.has(className)
+    }
+  };
+
+  return {
+    dataset: { startCell: String(startCell), app, title, url, appPath, bundleId },
+    classList: {
+      add: className => classes.add(className),
+      remove: className => classes.delete(className),
+      contains: className => classes.has(className)
+    },
+    querySelector(selector) {
+      if (selector === '.activity-checkbox') return checkbox;
+      if (selector === '.activity-checkbox i') return icon;
+      return null;
+    }
+  };
+}
+
+function attachSimilarModalDom(context) {
+  function createRadio(id, value) {
+    const radio = new FakeElement(id);
+    const option = new FakeElement(`${id}-option`);
+    option.className = 'similar-option';
+    option.classList = new FakeClassList(option);
+    radio.value = value;
+    radio.closest = selector => selector === '.similar-option' ? option : null;
+    return { radio, option };
+  }
+
+  const host = createRadio('similar-mode-host', 'host');
+  const url = createRadio('similar-mode-url', 'url');
+  const app = createRadio('similar-mode-app', 'app');
+  const appTitle = createRadio('similar-mode-app-title', 'app-title');
+  const modal = new FakeElement('similar-modal');
+  modal.className = 'hidden';
+  modal.classList = new FakeClassList(modal);
+
+  context.DOM.elSimilarModal = modal;
+  context.DOM.elSimilarModeHost = host.radio;
+  context.DOM.elSimilarModeUrl = url.radio;
+  context.DOM.elSimilarModeApp = app.radio;
+  context.DOM.elSimilarModeAppTitle = appTitle.radio;
+  context.DOM.elSimilarModalBtnClose = new FakeElement('similar-modal-btn-close');
+  context.DOM.elSimilarModalBtnCancel = new FakeElement('similar-modal-btn-cancel');
+  context.DOM.elSimilarModalBtnApply = new FakeElement('similar-modal-btn-apply');
+
+  return { modal, host, url, app, appTitle };
 }
 
 function loadTitleCleaningContext() {
@@ -4352,6 +4436,136 @@ test('similar selection by exact URL does not select other pages on the same sit
   assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [1, 12]);
   assert.equal(blocks[1].classList.contains('selected'), false);
   assert.equal(blocks[2].classList.contains('selected'), true);
+});
+
+test('similar modal defaults native app selections to App Name and disables URL modes', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 16,
+      app: 'Codex',
+      title: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      selected: true
+    })
+  ];
+
+  context.state.selectedActivities.add(16);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.modal.classList.contains('hidden'), false);
+  assert.equal(modalDom.host.radio.disabled, true);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.host.option.classList.contains('is-disabled'), true);
+  assert.equal(modalDom.url.option.classList.contains('is-disabled'), true);
+  assert.equal(modalDom.host.option.getAttribute('aria-disabled'), 'true');
+  assert.equal(modalDom.url.option.getAttribute('aria-disabled'), 'true');
+  assert.equal(modalDom.app.radio.disabled, false);
+  assert.equal(modalDom.appTitle.radio.disabled, false);
+  assert.equal(modalDom.app.radio.checked, true);
+  assert.equal(modalDom.host.radio.checked, false);
+});
+
+test('similar modal keeps URL modes enabled for browser activity with a usable URL', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const activity = {
+    app: 'Firefox Developer Edition',
+    title: 'Docs',
+    url: 'https://developer.mozilla.org/en-US/',
+    appPath: '/Applications/Firefox Developer Edition.app',
+    bundleId: 'org.mozilla.firefoxdeveloperedition'
+  };
+  const blocks = [
+    createSimilarActivityBlock({ startCell: 22, ...activity, selected: true })
+  ];
+
+  context.state.selectedActivities.add(22);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.isBrowserLikeActivity(activity), true);
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, false);
+  assert.equal(modalDom.url.radio.disabled, false);
+  assert.equal(modalDom.host.option.classList.contains('is-disabled'), false);
+  assert.equal(modalDom.url.option.classList.contains('is-disabled'), false);
+  assert.equal(modalDom.host.radio.checked, true);
+  assert.equal(modalDom.app.radio.checked, false);
+});
+
+test('similar modal defaults browser apps without usable URLs to App Name', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const activity = {
+    app: 'Safari',
+    title: 'Private Window',
+    url: '',
+    appPath: '/Applications/Safari.app',
+    bundleId: 'com.apple.Safari'
+  };
+  const blocks = [
+    createSimilarActivityBlock({ startCell: 28, ...activity, selected: true })
+  ];
+
+  context.state.selectedActivities.add(28);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.isBrowserLikeActivity(activity), true);
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, true);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.app.radio.checked, true);
+});
+
+test('similar toolbar action is available only for one selected activity', () => {
+  const context = loadTimelineContext();
+  const bar = new FakeElement('multi-select-bar');
+  const similarButton = new FakeElement('btn-select-similar');
+  const modal = new FakeElement('similar-modal');
+  context.DOM.elMultiSelectBar = bar;
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elBtnSelectSimilar = similarButton;
+  context.DOM.elSimilarModal = modal;
+
+  context.state.selectedActivities.add(10);
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), false);
+  assert.equal(similarButton.classList.contains('hidden'), false);
+  assert.equal(similarButton.disabled, false);
+
+  context.state.selectedActivities.add(20);
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), false);
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+  assert.equal(modal.classList.contains('hidden'), true);
+
+  context.state.selectedActivities.clear();
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), true);
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
 });
 
 test('similar selection ignores unrelated secondary overlaps for a selected visible activity', () => {
