@@ -378,6 +378,7 @@ const DOM = {
 window.API_BASE = API_BASE;
 window.state = state;
 window.applyTheme = applyTheme;
+window.normalizeTheme = normalizeTheme;
 window.normalizeMinActivityThreshold = normalizeMinActivityThreshold;
 window.cloneDefaultTitleCleanupRules = cloneDefaultTitleCleanupRules;
 window.normalizeTitleCleanupRule = normalizeTitleCleanupRule;

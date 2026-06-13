@@ -13,9 +13,10 @@ template/helper cleanups, not a new UI framework.
 ## Theme And Tokens
 
 The neutral dark `graphite` theme is the only design target for this refactor.
-Keep the existing theme API for compatibility until removal is clearly safe, but
-do not spend time refining `light` or `reference` while the neutral system is
-being normalized.
+`light` and `reference` remain selectable compatibility themes for existing
+preferences and manual user choice, but they are not design targets for new UI
+work. Do not spend time redesigning or polishing those compatibility themes
+while the neutral system is being normalized.
 
 Canonical token source:
 

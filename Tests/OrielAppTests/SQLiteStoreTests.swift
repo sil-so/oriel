@@ -735,6 +735,34 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(persisted["aiScreenshotSensitiveApps"] as? [String], ["Banking App", "com.example.secret"])
     }
 
+    func testSettingsNormalizeThemeCompatibilityValues() throws {
+        let legacy = try XCTUnwrap(
+            try store.request(
+                operation: "settings.update",
+                payload: ["theme": "variant"]
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(legacy["theme"] as? String, "reference")
+
+        store = nil
+        store = try SQLiteStore(databaseURL: directory.appendingPathComponent("Oriel.sqlite"))
+        let persistedLegacy = try XCTUnwrap(try store.request(operation: "settings.get", payload: [:]) as? [String: Any])
+        XCTAssertEqual(persistedLegacy["theme"] as? String, "reference")
+
+        let unsupported = try XCTUnwrap(
+            try store.request(
+                operation: "settings.update",
+                payload: ["theme": "blueprint"]
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(unsupported["theme"] as? String, "graphite")
+
+        store = nil
+        store = try SQLiteStore(databaseURL: directory.appendingPathComponent("Oriel.sqlite"))
+        let persistedUnsupported = try XCTUnwrap(try store.request(operation: "settings.get", payload: [:]) as? [String: Any])
+        XCTAssertEqual(persistedUnsupported["theme"] as? String, "graphite")
+    }
+
     func testSettingsExposeDefaultAiPreferences() throws {
         let settings = try XCTUnwrap(try store.request(operation: "settings.get", payload: [:]) as? [String: Any])
 
