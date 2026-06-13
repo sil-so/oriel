@@ -155,7 +155,7 @@
                     <i class="ph ph-clock-counter-clockwise text-lg"></i>
                     <h2>Activity Stream</h2>
                 </div>
-                <div class="flex items-center gap-4 text-gray-400">
+                <div class="flex items-center gap-4">
                     <button class="icon-button" title="Hide Empty Rows" aria-label="Hide Empty Rows" aria-pressed="false" id="btn-toggle-empty-activity-rows"><i class="ph ph-rows text-lg"></i></button>
                     <button class="icon-button" title="Jump to Current Time" id="btn-jump-current"><i class="ph ph-arrow-line-down text-lg"></i></button>
                 </div>
@@ -171,50 +171,50 @@
                 <div class="items-layer" id="memory-aid-items"></div>
 
                 <!-- Contextual Details Popover -->
-                <div id="activity-details-popup" class="popover absolute left-[92px] right-[38px] p-5 z-40 hidden flex flex-col gap-4 text-white">
-                    <div class="flex justify-between items-start border-b border-[#2d2f34] pb-2.5">
-                        <div class="flex items-center gap-2">
-                            <div class="w-6 h-6 flex items-center justify-center" id="popup-icon-container">
+                <div id="activity-details-popup" class="popover activity-details-popup hidden">
+                    <div class="activity-details-popup__header">
+                        <div class="activity-details-popup__title-row">
+                            <div class="activity-details-popup__icon" id="popup-icon-container">
                                 <!-- Dynamic favicon/icon -->
                             </div>
-                            <span class="font-bold text-sm" id="popup-app-name">Brave</span>
+                            <span class="activity-details-popup__title" id="popup-app-name">Brave</span>
                         </div>
                         <button id="popup-close-btn" class="icon-button" aria-label="Close activity details">
                             <i class="ph ph-x text-lg"></i>
                         </button>
                     </div>
                     <!-- Single details layout -->
-                    <div id="popup-single-details" class="flex flex-col gap-3">
-                        <div class="flex flex-col gap-1">
-                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Title</span>
-                            <div class="text-xs font-semibold leading-relaxed break-words text-white" id="popup-title">Activity Title</div>
+                    <div id="popup-single-details" class="activity-details-popup__details">
+                        <div class="activity-details-popup__field">
+                            <span class="activity-details-popup__label">Title</span>
+                            <div class="activity-details-popup__value activity-details-popup__value--wrap" id="popup-title">Activity Title</div>
                         </div>
-                        <div class="flex flex-col gap-1" id="popup-url-container">
-                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">URL / Host</span>
-                            <a href="#" target="_blank" rel="noopener noreferrer" class="text-xs text-blue-400 hover:underline truncate" id="popup-url">https://github.com</a>
+                        <div class="activity-details-popup__field" id="popup-url-container">
+                            <span class="activity-details-popup__label">URL / Host</span>
+                            <a href="#" target="_blank" rel="noopener noreferrer" class="activity-details-popup__link truncate" id="popup-url">https://github.com</a>
                         </div>
                         <div id="popup-single-children-container" class="hidden"></div>
                     </div>
 
                     <!-- Multi details layout -->
-                    <div id="popup-multi-details" class="flex flex-col gap-2.5 hidden">
+                    <div id="popup-multi-details" class="activity-details-popup__details activity-details-popup__details--compact hidden">
                         <span class="section-label">Recorded Activity Breakdown</span>
-                        <div class="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-1 app-scrollbar-safe" id="popup-multi-list-container">
+                        <div class="activity-details-popup__list app-scrollbar-safe" id="popup-multi-list-container">
                             <!-- Injected dynamically by JS -->
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-4 border-t border-[#2d2f34]/80 pt-3">
-                        <div>
-                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Duration</span>
-                            <div class="text-xs font-semibold mt-0.5 text-accent" id="popup-duration">15 min</div>
+                    <div class="activity-details-popup__meta-grid">
+                        <div class="activity-details-popup__meta-item">
+                            <span class="activity-details-popup__label">Duration</span>
+                            <div class="activity-details-popup__metric activity-details-popup__metric--accent" id="popup-duration">15 min</div>
                         </div>
-                        <div>
-                            <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Time Range</span>
-                            <div class="text-xs font-semibold mt-0.5 text-gray-200" id="popup-range">09:15 - 09:30</div>
+                        <div class="activity-details-popup__meta-item">
+                            <span class="activity-details-popup__label">Time Range</span>
+                            <div class="activity-details-popup__metric" id="popup-range">09:15 - 09:30</div>
                         </div>
-                        <div class="activity-mix-summary hidden col-span-2" id="popup-activity-mix-container">
+                        <div class="activity-mix-summary activity-details-popup__mix hidden" id="popup-activity-mix-container">
                             <div class="activity-mix-summary__heading">
-                                <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Activity Mix</span>
+                                <span class="activity-details-popup__label">Activity Mix</span>
                                 <button type="button" class="activity-mix-info" id="popup-activity-mix-info" aria-label="Activity Mix help">
                                     <i class="ph ph-info text-xs"></i>
                                 </button>
@@ -222,7 +222,7 @@
                             <span class="activity-mix-summary__label" id="popup-activity-mix-label"></span>
                         </div>
                     </div>
-                    <button id="popup-assign-btn" class="button-primary mt-1">
+                    <button id="popup-assign-btn" class="button-primary activity-details-popup__assign">
                         <i class="ph ph-plus-circle text-base"></i> Assign to Project
                     </button>
                 </div>
@@ -232,7 +232,7 @@
         <div id="activity-mix-tooltip" class="activity-mix-tooltip hidden" role="tooltip"></div>
 
         <!-- Resize Handler -->
-        <div class="day-timeline-only w-1 flex items-center justify-center cursor-col-resize transition shrink-0 border-r border-[#2d2f34]" id="resize-handle"></div>
+        <div class="day-timeline-only timeline-resize-handle" id="resize-handle"></div>
 
         <!-- Middle Column: Logged Time Entries Grid -->
         <div class="workspace-panel day-timeline-only flex flex-col flex-1 min-w-[350px] border-r">
@@ -241,13 +241,13 @@
                     <i class="ph ph-calendar-check text-lg"></i>
                     <h2>Time Entries</h2>
                 </div>
-                <div class="flex items-center gap-3 text-gray-400">
+                <div class="flex items-center gap-3">
                     <button class="icon-button" title="Time Entry Rules" id="btn-rules"><i class="ph ph-lightbulb text-lg"></i></button>
                 </div>
             </div>
 
             <div class="pane-subhead border-b flex items-center justify-center px-5 shrink-0">
-                <span class="text-[11px] font-semibold text-gray-400 tracking-wide">Click & drag down to log a time entry</span>
+                <span class="timeline-help-text">Click & drag down to log a time entry</span>
             </div>
 
             <!-- Scrollable Timeline Grid for Time Entries -->
@@ -264,13 +264,13 @@
         </div>
 
         <!-- Floating Action Bar for selected Activity Stream assignment -->
-        <div id="timeline-selection-overlay" class="day-timeline-only absolute inset-y-0 left-0 right-[340px] pointer-events-none">
-            <div id="multi-select-bar" class="popover hidden absolute bottom-6 left-1/2 -translate-x-1/2 w-max max-w-[calc(100%-3rem)] gap-8 pointer-events-auto p-3.5 flex items-center justify-between z-30 transition-all duration-200">
-                <div class="flex items-center gap-2">
-                    <i class="ph ph-check-square-offset text-accent text-lg"></i>
-                    <span class="text-white font-semibold text-[12px]"><span id="lbl-selected-count" class="inline-block w-[4ch] text-right tabular-nums">0</span> items selected</span>
+        <div id="timeline-selection-overlay" class="day-timeline-only timeline-selection-overlay">
+            <div id="multi-select-bar" class="popover timeline-selection-bar hidden">
+                <div class="timeline-selection-bar__summary">
+                    <i class="ph ph-check-square-offset timeline-selection-bar__icon"></i>
+                    <span class="timeline-selection-bar__label"><span id="lbl-selected-count" class="timeline-selection-bar__count">0</span> items selected</span>
                 </div>
-                <div class="flex gap-2">
+                <div class="timeline-selection-bar__actions">
                     <button class="button-secondary" id="btn-select-similar">Similar</button>
                     <button class="button-secondary" id="btn-clear-selection">Deselect</button>
                     <button class="button-primary" id="btn-assign-selected">
@@ -281,7 +281,7 @@
         </div>
 
         <!-- Right Column: Work Summary Statistics and AI Assistant -->
-        <div class="side-summary day-timeline-only w-[340px] flex flex-col shrink-0" id="work-times-sidebar">
+        <div class="side-summary day-timeline-only" id="work-times-sidebar">
             <div class="pane-header flex items-center justify-between px-5 border-b">
                 <div class="sidebar-tab-group work-times-title" role="tablist" aria-label="Sidebar panels">
                     <button type="button" class="sidebar-tab is-active" id="sidebar-tab-work-times" role="tab" aria-selected="true" aria-controls="work-times-panel">
@@ -295,48 +295,48 @@
                 </div>
             </div>
 
-            <div class="side-summary-content app-scrollbar-safe p-5 flex flex-col gap-6 overflow-y-auto flex-1">
-                <div class="sidebar-panel flex flex-col gap-6" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
+            <div class="side-summary-content app-scrollbar-safe">
+                <div class="sidebar-panel sidebar-panel--work-times" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
 
                 <!-- Main Stats Panel -->
-                <div class="surface-panel p-5 flex flex-col gap-4">
+                <div class="surface-panel sidebar-stat-card">
 
                     <!-- Recorded Activity -->
                     <div>
-                        <div class="flex justify-between items-center text-[13px] font-semibold mb-1.5">
-                            <span class="text-gray-100">Recorded Active Time</span>
-                            <span class="text-white font-bold" id="stat-captured-active">0h 0m</span>
+                        <div class="sidebar-stat-row">
+                            <span class="sidebar-stat-label">Recorded Active Time</span>
+                            <span class="sidebar-stat-value" id="stat-captured-active">0h 0m</span>
                         </div>
                     </div>
 
-                    <div class="border-t border-[#2d2f34] my-1"></div>
+                    <div class="sidebar-stat-divider"></div>
 
                     <!-- Logged Projects -->
                     <div>
-                        <div class="flex justify-between items-center text-[13px] font-semibold mb-1.5">
-                            <span class="text-gray-100">Project Logged Time</span>
-                            <span class="text-emerald-400 font-bold" id="stat-project-total">0h 0m</span>
+                        <div class="sidebar-stat-row">
+                            <span class="sidebar-stat-label">Project Logged Time</span>
+                            <span class="sidebar-stat-value sidebar-stat-value--success" id="stat-project-total">0h 0m</span>
                         </div>
-                        <div class="w-full bg-[#0d0e10] h-1.5 rounded-full overflow-hidden border border-[#2d2f34]">
-                            <div class="bg-emerald-500 h-full rounded-full w-0 transition-all duration-500" id="bar-project"></div>
+                        <div class="sidebar-progress-track">
+                            <div class="sidebar-progress-fill" id="bar-project"></div>
                         </div>
-                        <div class="work-breakdown-row text-[11px] text-gray-400 mt-2">
+                        <div class="work-breakdown-row">
                             <span>Billable Hours</span>
                             <span id="stat-billable">0h 0m</span>
                         </div>
-                        <div class="work-breakdown-row text-[11px] text-gray-400">
+                        <div class="work-breakdown-row">
                             <span>Non-Billable</span>
                             <span id="stat-nonbillable">0h 0m</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="unlogged-work-review surface-panel p-4 flex flex-col gap-3" id="unlogged-work-review">
+                <div class="unlogged-work-review surface-panel" id="unlogged-work-review">
                     <div class="unlogged-work-review-header">
-                        <h3 class="font-bold text-[13px] uppercase tracking-wider text-gray-400">Unlogged Work</h3>
+                        <h3 class="sidebar-section-title">Unlogged Work</h3>
                         <span class="duration-pill unlogged-work-total" id="unlogged-work-review-total">0s</span>
                     </div>
-                    <div class="unlogged-work-list app-scrollbar-safe flex flex-col gap-2" id="unlogged-work-review-list">
+                    <div class="unlogged-work-list app-scrollbar-safe" id="unlogged-work-review-list">
                         <div class="empty-state empty-state--compact">
                             All recorded source work is covered.
                         </div>
@@ -344,9 +344,9 @@
                 </div>
 
                 <!-- Projects Breakdown List -->
-                <div>
-                    <h3 class="font-bold text-[13px] uppercase tracking-wider text-gray-400 mb-3 px-1">Total Project Time</h3>
-                    <div class="flex flex-col gap-2.5" id="projects-breakdown-list">
+                <div class="sidebar-projects-section">
+                    <h3 class="sidebar-section-title sidebar-section-title--padded">Total Project Time</h3>
+                    <div class="sidebar-project-list" id="projects-breakdown-list">
                         <!-- Project item seeded here -->
                         <div class="empty-state empty-state--spacious">
                             No time entries logged for this day. Click and drag in the scheduler to create one!
@@ -356,7 +356,7 @@
 
                 </div>
 
-                <div class="sidebar-panel sidebar-panel--ai hidden flex flex-col gap-4 min-h-0 flex-1" id="ai-sidebar-panel" role="tabpanel" aria-labelledby="sidebar-tab-ai">
+                <div class="sidebar-panel sidebar-panel--ai hidden" id="ai-sidebar-panel" role="tabpanel" aria-labelledby="sidebar-tab-ai">
                     <div class="ai-topbar">
                         <div class="ai-topbar-actions">
                             <button type="button" class="button-secondary ai-new-chat-button" id="ai-new-chat-button" title="Start New Chat" aria-label="Start New Chat" disabled>

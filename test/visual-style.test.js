@@ -430,6 +430,73 @@ test('Quiet Chrome keeps dense timeline states calm but explicit', () => {
   assert.match(css, /\.side-summary \.surface-panel\s*\{[\s\S]*border-color:\s*var\(--separator-soft\)/);
 });
 
+test('timeline and sidebar chrome use semantic design-system classes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const timelineStart = html.indexOf('id="scheduler-workspace"');
+  const projectsStart = html.indexOf('id="projects-workspace"');
+  const timelineMarkup = html.slice(timelineStart, projectsStart);
+
+  for (const className of [
+    'activity-details-popup',
+    'activity-details-popup__header',
+    'activity-details-popup__meta-grid',
+    'timeline-selection-bar',
+    'timeline-selection-bar__summary',
+    'side-summary-content',
+    'sidebar-stat-card',
+    'sidebar-stat-row',
+    'sidebar-progress-track',
+    'sidebar-progress-fill',
+    'sidebar-section-title'
+  ]) {
+    assert.match(timelineMarkup, new RegExp(`\\b${className}\\b`), `expected timeline markup to use ${className}`);
+    assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
+  }
+
+  assert.doesNotMatch(timelineMarkup, /border-\[#2d2f34\]|bg-\[#0d0e10\]|text-\[(?:10|11|12)px\]|text-gray-|text-white|bg-emerald-|text-emerald-/);
+  assert.match(css, /\.activity-details-popup__details\.hidden\s*\{[\s\S]*?display:\s*none/);
+  assert.match(css, /\.activity-details-popup__field\.hidden,\s*\.activity-details-popup__meta-item\.hidden\s*\{[\s\S]*?display:\s*none/);
+  assert.match(css, /\.sidebar-panel--work-times\.hidden\s*\{[\s\S]*?display:\s*none/);
+  assert.match(css, /\.unlogged-work-review\.hidden\s*\{[\s\S]*?display:\s*none/);
+});
+
+test('timeline-rendered rows use semantic classes instead of one-off utilities', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const activityTemplate = timeline.match(/function createActivityBlockHTML[\s\S]*?function attachMemoryAidInteractions/)?.[0] || '';
+  const timeEntryTemplate = timeline.match(/function renderLoggedTimeEntries[\s\S]*?function updateTimeEntryHoverPreview/)?.[0] || '';
+  const popupTemplate = timeline.match(/function showActivityDetailsPopup[\s\S]*?function dismissActivityDetailsPopup/)?.[0] || '';
+
+  for (const className of [
+    'activity-block__checkbox',
+    'activity-block__icon',
+    'activity-block__content',
+    'activity-block__title',
+    'activity-block__subtitle',
+    'activity-block__actions',
+    'activity-block__secondary-icons',
+    'activity-quick-add',
+    'time-entry-project-summary',
+    'time-entry-project',
+    'time-entry-description',
+    'popup-activity-row',
+    'popup-activity-child-row',
+    'popup-activity-select',
+    'popup-activity-expand',
+    'popup-activity-external-link',
+    'popup-activity-secondary',
+    'popup-activity-duration'
+  ]) {
+    assert.match(timeline, new RegExp(`\\b${className}\\b`), `expected timeline templates to use ${className}`);
+    assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
+  }
+
+  assert.doesNotMatch(activityTemplate, /text-white|text-gray-|text-\[(?:10|11|12)px\]|w-5 h-5|w-7 h-7|bg-transparent/);
+  assert.doesNotMatch(timeEntryTemplate, /text-white|text-white\/80|text-\[(?:10|11|12)px\]|font-bold mt-1|uppercase tracking-wider/);
+  assert.doesNotMatch(popupTemplate, /border-\[#2d2f34\]|text-blue-|text-gray-|text-\[(?:10|11|13)px\]|w-[4567] h-[4567]|bg-transparent/);
+});
+
 test('modal controls use theme surfaces instead of hardcoded near-black fills', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
 
