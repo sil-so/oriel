@@ -149,7 +149,7 @@ function renderProjectTasks(project, projectEntries = []) {
 
         if (task.id === editingProjectTaskId) {
             return `
-                <div class="surface-panel flex items-center gap-2 p-3 text-xs">
+                <div class="surface-panel project-task-row project-task-row--editing">
                     <input type="text"
                            class="field flex-1 min-w-0"
                            value="${taskName}"
@@ -172,10 +172,10 @@ function renderProjectTasks(project, projectEntries = []) {
         }
 
         return `
-            <div class="surface-panel flex items-center gap-3 p-3 text-xs">
+            <div class="surface-panel project-task-row">
                 <div class="flex-1 min-w-0">
-                    <div class="font-semibold text-white truncate">${taskName}</div>
-                    <div class="text-[10px] text-gray-400 mt-0.5">${loggedDuration} logged</div>
+                    <div class="project-task-name">${taskName}</div>
+                    <div class="project-task-meta">${loggedDuration} logged</div>
                 </div>
                 <button type="button"
                         class="button-secondary shrink-0"
@@ -385,18 +385,18 @@ function recalculateStatistics() {
         const pct = totalProjectMs > 0 ? Math.round((ms / totalProjectMs) * 100) : 0;
 
         return `
-            <div class="surface-panel p-4 flex flex-col gap-2">
-                <div class="flex justify-between items-center text-[12px] font-semibold text-white">
-                    <div class="flex items-center gap-2">
+            <div class="surface-panel project-breakdown-card">
+                <div class="project-breakdown-header">
+                    <div class="project-breakdown-title">
                         <span class="project-marker" style="background-color: ${proj.color}"></span>
                         ${proj.name}
                     </div>
-                    <span class="font-semibold text-success">${formatHoursMins(ms)}</span>
+                    <span class="metric-value metric-value--success">${formatHoursMins(ms)}</span>
                 </div>
-                <div class="w-full bg-[#0d0e10] h-1 rounded-full overflow-hidden border border-[#2d2f34]">
-                    <div class="h-full rounded-full" style="background-color: ${proj.color}; width: ${pct}%"></div>
+                <div class="progress-track progress-track--thin">
+                    <div class="progress-fill" style="background-color: ${proj.color}; width: ${pct}%"></div>
                 </div>
-                <div class="flex justify-between text-[10px] text-gray-400">
+                <div class="project-breakdown-footer">
                     <span>Contribution</span>
                     <span>${pct}%</span>
                 </div>
@@ -454,25 +454,25 @@ async function renderProjectsPage() {
                 ? `${currencySymbol}${((ms / (60 * 60 * 1000)) * (proj.hourlyRate || 0)).toFixed(2)}`
                 : 'Unavailable';
             earningsHTML = `
-                <div class="flex flex-col gap-0.5">
-                    <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Total Earnings</span>
-                    <span class="font-bold ${hasHistoricalTotals ? 'text-emerald-400' : 'text-gray-400'} text-sm">${earningsText}</span>
-                    <span class="text-[9px] text-gray-400">(${currencySymbol}${proj.hourlyRate || 0}/hr rate)</span>
+                <div class="project-card-metric project-card-metric--end">
+                    <span class="metric-label">Total Earnings</span>
+                    <span class="metric-value ${hasHistoricalTotals ? 'metric-value--success' : 'metric-value--muted'}">${earningsText}</span>
+                    <span class="metric-helper">(${currencySymbol}${proj.hourlyRate || 0}/hr rate)</span>
                 </div>
             `;
         } else if (proj.rateType === 'fixed') {
             earningsHTML = `
-                <div class="flex flex-col gap-0.5">
-                    <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Fixed Budget</span>
-                    <span class="font-bold text-blue-400 text-sm">${currencySymbol}${proj.fixedRate || 0}</span>
-                    <span class="text-[9px] text-gray-400">Project fixed pricing</span>
+                <div class="project-card-metric project-card-metric--end">
+                    <span class="metric-label">Fixed Budget</span>
+                    <span class="metric-value text-accent">${currencySymbol}${proj.fixedRate || 0}</span>
+                    <span class="metric-helper">Project fixed pricing</span>
                 </div>
             `;
         } else {
             earningsHTML = `
-                <div class="flex flex-col gap-0.5">
-                    <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Financial Mode</span>
-                    <span class="text-gray-300 font-semibold text-xs py-1">No billing rate set</span>
+                <div class="project-card-metric project-card-metric--end">
+                    <span class="metric-label">Financial Mode</span>
+                    <span class="metric-value metric-value--muted">No billing rate set</span>
                 </div>
             `;
         }
@@ -481,11 +481,11 @@ async function renderProjectsPage() {
             <div class="project-card p-5 flex flex-col gap-4 relative cursor-pointer"
                  onclick="openProjectDetails('${proj.id}')">
                 <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3">
+                    <div class="card-title-row">
                         <span class="project-marker project-marker--large" style="background-color: ${proj.color};"></span>
-                        <h3 class="text-sm font-semibold text-white truncate flex items-center gap-1.5">
+                        <h3 class="card-title">
                             ${proj.name}
-                            ${isDefault ? '<i class="ph-fill ph-lock text-gray-500 text-[13px] shrink-0" title="Protected System Default"></i>' : ''}
+                            ${isDefault ? '<i class="ph-fill ph-lock shrink-0" title="Protected System Default"></i>' : ''}
                         </h3>
                     </div>
                     <span class="status-pill shrink-0 ${
@@ -499,17 +499,15 @@ async function renderProjectsPage() {
 
                 <div class="border-t my-0.5" style="border-color: var(--border);"></div>
 
-                <div class="flex justify-between items-center text-xs">
-                    <div class="flex flex-col">
-                        <span class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Total Logged</span>
-                        <span class="font-semibold text-gray-200 mt-1">${formatHoursMins(ms)}</span>
+                <div class="project-card-body">
+                    <div class="project-card-metric">
+                        <span class="metric-label">Total Logged</span>
+                        <span class="metric-value">${formatHoursMins(ms)}</span>
                     </div>
-                    <div class="text-right">
-                        ${earningsHTML}
-                    </div>
+                    ${earningsHTML}
                 </div>
 
-                <div class="flex gap-2.5 mt-3 justify-end z-20">
+                <div class="card-actions z-20">
                     <button class="button-secondary"
                             onclick="event.stopPropagation(); editProjectInline('${proj.id}')">
                         <i class="ph ph-pencil-simple-line"></i> Edit
@@ -858,9 +856,9 @@ async function openProjectDetails(projectId) {
     if (elTotalEarnings) {
         elTotalEarnings.innerText = totalEarningsStr;
         if (proj.rateType === 'hourly' || proj.rateType === 'fixed') {
-            elTotalEarnings.className = 'font-semibold text-success text-base';
+            elTotalEarnings.className = 'metric-value metric-value--success';
         } else {
-            elTotalEarnings.className = 'font-semibold text-gray-400 text-base';
+            elTotalEarnings.className = 'metric-value metric-value--muted';
         }
     }
 
@@ -882,25 +880,25 @@ async function openProjectDetails(projectId) {
                 let itemHrs = getProjectTimeEntryDurationMs(e) / (60 * 60 * 1000);
                 let itemEarningsStr = '';
                 if (proj.rateType === 'hourly') {
-                    itemEarningsStr = `<span class="text-emerald-400 font-bold shrink-0">${currencySymbol}${(itemHrs * (proj.hourlyRate || 0)).toFixed(2)}</span>`;
+                    itemEarningsStr = `<span class="metric-value metric-value--success shrink-0">${currencySymbol}${(itemHrs * (proj.hourlyRate || 0)).toFixed(2)}</span>`;
                 } else if (proj.rateType === 'fixed') {
-                    itemEarningsStr = `<span class="text-blue-400 font-bold shrink-0">Fixed</span>`;
+                    itemEarningsStr = `<span class="metric-value text-accent shrink-0">Fixed</span>`;
                 }
 
                 return `
-                    <div class="surface-panel flex flex-col gap-1.5 p-3 text-xs">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">${dateStr}</span>
-                            <div class="flex items-center gap-2">
+                    <div class="surface-panel project-entry-row">
+                        <div class="project-entry-header">
+                            <span class="project-entry-meta">${dateStr}</span>
+                            <div class="project-entry-actions">
                                 ${taskLabel}
                                 <span class="duration-pill shrink-0">${durMin} min</span>
                                 ${itemEarningsStr}
-                                <button class="text-gray-500 hover:text-red-400 hover:bg-white/5 ml-1 p-1 rounded-lg transition cursor-pointer focus:outline-none flex items-center justify-center" title="Delete entry" onclick="deleteProjectDetailEntry(event, '${e.id}', '${projectId}')">
+                                <button class="icon-button icon-button--danger" title="Delete entry" aria-label="Delete entry" onclick="deleteProjectDetailEntry(event, '${e.id}', '${projectId}')">
                                     <i class="ph ph-trash-simple text-sm"></i>
                                 </button>
                             </div>
                         </div>
-                        <p class="text-white font-medium break-words leading-relaxed">${e.description || '<span class="italic text-gray-500">No description provided</span>'}</p>
+                        <p class="project-entry-description">${e.description || '<span class="project-entry-empty-description">No description provided</span>'}</p>
                     </div>
                 `;
             }).join('');

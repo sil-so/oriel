@@ -497,6 +497,62 @@ test('timeline-rendered rows use semantic classes instead of one-off utilities',
   assert.doesNotMatch(popupTemplate, /border-\[#2d2f34\]|text-blue-|text-gray-|text-\[(?:10|11|13)px\]|w-[4567] h-[4567]|bg-transparent/);
 });
 
+test('projects statistics and AI insights use semantic design-system classes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const reporting = fs.readFileSync('js/reporting.js', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const sources = `${html}\n${projects}\n${reporting}\n${main}`;
+
+  for (const className of [
+    'workspace-heading',
+    'workspace-title',
+    'workspace-helper',
+    'metric-label',
+    'metric-helper',
+    'card-title',
+    'chart-card-header',
+    'chart-center-label',
+    'chart-center-value',
+    'progress-track',
+    'progress-fill',
+    'project-breakdown-card',
+    'project-detail-stat',
+    'project-task-row',
+    'project-entry-row',
+    'report-row-title',
+    'report-row-percent',
+    'ai-insights-card-metadata'
+  ]) {
+    assert.match(sources, new RegExp(`\\b${className}\\b`), `expected SIL-32 sources to use ${className}`);
+    assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
+  }
+
+  const sil32Markup = [
+    html.match(/id="projects-workspace"[\s\S]*?<!-- Reporting workspace -->/)?.[0] || '',
+    html.match(/id="stats-workspace"[\s\S]*?<!-- AI Insights workspace -->/)?.[0] || '',
+    html.match(/id="ai-insights-workspace"[\s\S]*?<!-- MODAL: AI Insights Daily Summary -->/)?.[0] || '',
+    html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || ''
+  ].join('\n');
+
+  assert.doesNotMatch(sil32Markup, /text-xl|text-white|text-gray-|text-\[(?:9|10|11|12|13|14)px\]|border-\[#2d2f34\]|bg-gray-|text-blue-|text-emerald-|rounded-full h-2/);
+
+  for (const source of [projects, reporting]) {
+    assert.doesNotMatch(source, /text-\[(?:9|10|11|12|13)px\]|text-gray-|text-white|text-blue-|text-emerald-|bg-\[#0d0e10\]|border-\[#2d2f34\]/);
+  }
+});
+
+test('project and chart identity colors remain explicit data exceptions', () => {
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const reporting = fs.readFileSync('js/reporting.js', 'utf8');
+
+  assert.match(projects, /style="background-color: \$\{proj\.color\}/);
+  assert.match(projects, /style="background-color: \$\{proj\.color\}; width: \$\{pct\}%"/);
+  assert.match(reporting, /const STATS_COLORS = \[/);
+  assert.match(reporting, /style="background-color: \$\{color\}"/);
+});
+
 test('modal controls use theme surfaces instead of hardcoded near-black fills', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
 

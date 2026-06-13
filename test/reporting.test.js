@@ -218,6 +218,30 @@ test('reporting all-time preset fetches unbounded historical data', async () => 
   ]);
 });
 
+test('reporting chart legends use semantic row classes without changing values', () => {
+  const { context, elements } = loadReportingContext();
+
+  context.drawDonutChart(
+    'canvas-programs',
+    'lbl-programs-count',
+    'list-programs-legend',
+    [
+      { name: 'Xcode', duration: 90 * 60 * 1000 },
+      { name: 'Oriel', duration: 30 * 60 * 1000 }
+    ],
+    120 * 60 * 1000,
+    'app'
+  );
+
+  const legendMarkup = elements.get('list-programs-legend').innerHTML;
+  assert.match(elements.get('lbl-programs-count').innerText, /2 items/);
+  assert.match(legendMarkup, /\breport-row\b/);
+  assert.match(legendMarkup, /\breport-row-title\b[^>]*>Xcode/);
+  assert.match(legendMarkup, /\bduration-pill\b[^>]*>1h 30m/);
+  assert.match(legendMarkup, /\breport-row-percent\b[^>]*>75%/);
+  assert.doesNotMatch(legendMarkup, /text-\[(?:10|11)px\]|text-gray-|text-white|w-5 h-5/);
+});
+
 test('app initialization initializes reporting controls', async () => {
   const context = {
     window: {},
