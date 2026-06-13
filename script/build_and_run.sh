@@ -125,6 +125,7 @@ signOrielBundle "$STAGED_APP_DIR" strict
 
 stopRunningOrielBundleProcesses
 rm -rf "$APP_DIR"
+mkdir -p "$(dirname "$APP_DIR")"
 cp -R -X "$STAGED_APP_DIR" "$APP_DIR"
 codesign --verify --deep "$APP_DIR"
 codesign -dv "$APP_DIR" >/dev/null 2>&1

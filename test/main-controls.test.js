@@ -127,6 +127,16 @@ class FakeElement {
   }
 }
 
+function findDescendant(element, predicate) {
+  if (!element) return null;
+  if (predicate(element)) return element;
+  for (const child of element.children || []) {
+    const match = findDescendant(child, predicate);
+    if (match) return match;
+  }
+  return null;
+}
+
 test('today navigation refreshes current date before jumping to current time', async () => {
   const calls = [];
   const RealDate = Date;
@@ -209,13 +219,22 @@ test('top workspace navigation includes AI Insights tab and workspace', () => {
   assert.match(markup, /id="ai-insights-detail-modal"/);
 });
 
-function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmResult = true } = {}) {
+function loadMainControlsContext({
+  fetchJson,
+  nativeResponses = null,
+  confirmResult = true,
+  initialStorage = {},
+  defaultTitleCleanupRules = []
+} = {}) {
   const elements = new Map();
   const hoverCalls = [];
   const fetchCalls = [];
   const nativeRequests = [];
   const windowListeners = {};
   const stored = new Map();
+  for (const [key, value] of Object.entries(initialStorage)) {
+    stored.set(key, String(value));
+  }
   const element = id => {
     if (!elements.has(id)) elements.set(id, new FakeElement(id));
     return elements.get(id);
@@ -383,6 +402,9 @@ function loadMainControlsContext({ fetchJson, nativeResponses = null, confirmRes
     normalizeMinActivityThreshold(value) {
       const threshold = Number.parseInt(value, 10);
       return [10, 30, 60].includes(threshold) ? threshold : 60;
+    },
+    cloneDefaultTitleCleanupRules() {
+      return JSON.parse(JSON.stringify(defaultTitleCleanupRules));
     },
     showTimeEntryHoverPreview(cellIndex) {
       hoverCalls.push(`show:${cellIndex}`);
@@ -965,6 +987,108 @@ test('settings title cleanup rules add valid regex rules and block invalid regex
   assert.equal(nativeRequests.length, requestCount);
   assert.equal(element('settings-title-cleanup-status').textContent, 'Enter a valid JavaScript regular expression.');
   assert.equal(element('settings-title-cleanup-status').classList.contains('hidden'), false);
+});
+
+test('settings title cleanup rules migrate recoverable browser rules over native defaults', async () => {
+  const defaultRules = [
+    {
+      id: 'browser-prefix',
+      name: 'Browser title prefix',
+      enabled: true,
+      pattern: '^\\(\\d+\\)\\s+',
+      appContains: '',
+      urlContains: ''
+    }
+  ];
+  const localRules = [
+    {
+      id: 'custom-ticket-suffix',
+      name: 'Ticket suffix',
+      enabled: true,
+      pattern: '\\s+\\[ticket\\]$',
+      appContains: 'Brave',
+      urlContains: 'github.com'
+    }
+  ];
+  const { context, element, nativeRequests, stored } = loadMainControlsContext({
+    initialStorage: {
+      titleCleanupRules: JSON.stringify(localRules)
+    },
+    defaultTitleCleanupRules: defaultRules,
+    nativeResponses: {
+      'settings.get': {
+        theme: 'graphite',
+        logoDevIconsEnabled: false,
+        minActivityThreshold: 60,
+        titleCleanupRules: defaultRules
+      },
+      'settings.update': payload => payload,
+      'logoDev.key.status': { saved: false }
+    }
+  });
+
+  await element('btn-settings').click();
+
+  const migrationRequest = nativeRequests.find(request => (
+    request.operation === 'settings.update'
+    && Array.isArray(request.payload.titleCleanupRules)
+  ));
+  assert.ok(migrationRequest);
+  assert.deepEqual(JSON.parse(JSON.stringify(migrationRequest.payload.titleCleanupRules)), localRules);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.state.settings.titleCleanupRules)), localRules);
+  assert.equal(stored.get('titleCleanupRules'), JSON.stringify(localRules));
+});
+
+test('settings title cleanup saved rules render compact collapsed rows with inline edit', async () => {
+  const rules = [
+    {
+      id: 'custom-ticket-suffix',
+      name: 'Ticket suffix',
+      enabled: true,
+      pattern: '\\s+\\[ticket\\]$',
+      appContains: 'Brave',
+      urlContains: 'github.com'
+    }
+  ];
+  const { element } = loadMainControlsContext({
+    nativeResponses: {
+      'settings.get': {
+        theme: 'graphite',
+        logoDevIconsEnabled: false,
+        minActivityThreshold: 60,
+        titleCleanupRules: rules
+      },
+      'settings.update': payload => payload,
+      'logoDev.key.status': { saved: false }
+    }
+  });
+
+  await element('btn-settings').click();
+
+  const list = element('settings-title-cleanup-list');
+  assert.equal(list.children.length, 1);
+  const row = list.children[0];
+  assert.match(row.className, /\btitle-cleanup-rule\b/);
+  assert.match(row.textContent, /Ticket suffix/);
+  assert.match(row.textContent, /Pattern set/);
+  assert.match(row.textContent, /Brave/);
+  assert.match(row.textContent, /github\.com/);
+  assert.doesNotMatch(row.textContent, /ticket\\\]/i);
+
+  const summary = findDescendant(row, child => String(child.className).includes('title-cleanup-rule__summary'));
+  const editor = findDescendant(row, child => String(child.className).includes('title-cleanup-rule__editor'));
+  const editButton = findDescendant(row, child => child.attributes?.['aria-label'] === 'Edit title cleanup rule');
+  assert.ok(summary);
+  assert.ok(editor);
+  assert.ok(editButton);
+  assert.equal(editor.classList.contains('hidden'), true);
+
+  await editButton.click();
+
+  const expandedEditor = findDescendant(list.children[0], child => String(child.className).includes('title-cleanup-rule__editor'));
+  assert.ok(expandedEditor);
+  assert.equal(expandedEditor.classList.contains('hidden'), false);
+  assert.match(expandedEditor.textContent, /Regex Pattern/);
 });
 
 test('settings Logo.dev key controls lock saved keys and require explicit edit or confirmed removal', async () => {

@@ -2020,6 +2020,187 @@ function getActivitySimilarityKey(activity) {
     return host ? `${app}|||${host}` : app;
 }
 
+function normalizeActivityExactUrl(value) {
+    const url = normalizeActivityText(value).trim();
+    if (!url) return '';
+
+    const parseUrl = (candidate) => {
+        try {
+            const parsed = new URL(candidate);
+            if (!['http:', 'https:'].includes(parsed.protocol.toLowerCase())) return '';
+            const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+            const pathname = parsed.pathname || '/';
+            return `${parsed.protocol.toLowerCase()}//${hostname}${pathname}${parsed.search}`;
+        } catch {
+            return '';
+        }
+    };
+
+    return parseUrl(url)
+        || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? parseUrl(`https://${url}`) : '');
+}
+
+const BROWSER_ACTIVITY_APP_NAMES = [
+    'brave browser',
+    'brave',
+    'google chrome',
+    'chrome canary',
+    'chrome',
+    'chromium',
+    'safari technology preview',
+    'safari',
+    'arc',
+    'microsoft edge',
+    'edge',
+    'firefox developer edition',
+    'firefox',
+    'opera gx',
+    'opera',
+    'vivaldi',
+    'orion',
+    'dia',
+    'zen',
+    'floorp',
+    'librewolf',
+    'waterfox',
+    'tor browser',
+    'duckduckgo',
+    'mullvad browser'
+];
+
+const BROWSER_ACTIVITY_BUNDLE_FRAGMENTS = [
+    'com.brave.browser',
+    'com.google.chrome',
+    'com.google.chrome.canary',
+    'com.apple.safari',
+    'com.apple.safaritechnologypreview',
+    'company.thebrowser.browser',
+    'company.thebrowser.dia',
+    'com.microsoft.edgemac',
+    'org.mozilla.firefox',
+    'org.mozilla.firefoxdeveloperedition',
+    'com.operasoftware.opera',
+    'com.operasoftware.operagx',
+    'com.vivaldi.vivaldi',
+    'com.kagi.kagimacos',
+    'app.zen-browser.zen',
+    'one.ablaze.floorp',
+    'io.gitlab.librewolf-community',
+    'net.waterfox.waterfox',
+    'org.torproject.torbrowser',
+    'com.duckduckgo.macos.browser',
+    'net.mullvad.mullvadbrowser'
+];
+
+function normalizeBrowserIdentityText(value) {
+    return normalizeActivityText(value)
+        .toLowerCase()
+        .replace(/\.app\b/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function browserNameMatches(value) {
+    const normalized = normalizeBrowserIdentityText(value);
+    if (!normalized) return false;
+
+    return BROWSER_ACTIVITY_APP_NAMES.some(name => {
+        const escaped = escapeRegExp(name);
+        return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(normalized);
+    });
+}
+
+function browserBundleMatches(value) {
+    const normalized = normalizeActivityText(value).trim().toLowerCase();
+    if (!normalized) return false;
+
+    return BROWSER_ACTIVITY_BUNDLE_FRAGMENTS.some(fragment => normalized.includes(fragment));
+}
+
+function isBrowserLikeActivity(activity) {
+    if (normalizeActivityExactUrl(activity?.url)) return true;
+
+    return browserNameMatches(activity?.app)
+        || browserNameMatches(activity?.appPath)
+        || browserBundleMatches(activity?.bundleId);
+}
+
+function getSimilarModeAvailability(activity) {
+    const canUseUrlModes = isBrowserLikeActivity(activity) && Boolean(normalizeActivityExactUrl(activity?.url));
+    return {
+        host: canUseUrlModes,
+        url: canUseUrlModes,
+        app: true,
+        'app-title': true,
+        defaultMode: canUseUrlModes ? 'host' : 'app'
+    };
+}
+
+function setSimilarOptionAvailability(radio, enabled) {
+    if (!radio) return;
+
+    radio.disabled = !enabled;
+    const option = radio.closest?.('.similar-option');
+    option?.classList?.toggle?.('is-disabled', !enabled);
+    if (enabled) {
+        option?.removeAttribute?.('aria-disabled');
+    } else {
+        option?.setAttribute?.('aria-disabled', 'true');
+    }
+}
+
+function updateSimilarModeAvailability(activity) {
+    const availability = getSimilarModeAvailability(activity);
+    const radios = {
+        host: DOM.elSimilarModeHost,
+        url: DOM.elSimilarModeUrl,
+        app: DOM.elSimilarModeApp,
+        'app-title': DOM.elSimilarModeAppTitle
+    };
+
+    Object.entries(radios).forEach(([mode, radio]) => {
+        setSimilarOptionAvailability(radio, Boolean(availability[mode]));
+    });
+
+    const selectedMode = getSelectedSimilarActivityMode();
+    const nextMode = availability[selectedMode] ? selectedMode : availability.defaultMode;
+    Object.entries(radios).forEach(([mode, radio]) => {
+        if (radio) radio.checked = mode === nextMode;
+    });
+
+    return availability;
+}
+
+function normalizeSimilarActivityMatchMode(mode) {
+    return ['host', 'url', 'app', 'app-title'].includes(mode) ? mode : 'host';
+}
+
+function getActivitySimilarityKeyForMode(activity, mode = 'host') {
+    const normalizedMode = normalizeSimilarActivityMatchMode(mode);
+    const app = normalizeActivityText(activity?.app).trim().toLowerCase();
+    if (!app) return '';
+
+    if (normalizedMode === 'app') return app;
+
+    if (normalizedMode === 'app-title') {
+        const title = getActivityDisplayTitle(activity).trim().toLowerCase();
+        return title ? `${app}|||${title}` : app;
+    }
+
+    if (normalizedMode === 'url') {
+        const exactUrl = normalizeActivityExactUrl(activity?.url);
+        return exactUrl ? `${app}|||${exactUrl}` : '';
+    }
+
+    const host = getActivityUrlHostname(normalizeActivityText(activity?.url));
+    return host ? `${app}|||${host}` : '';
+}
+
 function getActivityBlockData(blockEl) {
     return {
         app: blockEl.dataset.app || '',
@@ -4453,33 +4634,65 @@ function clearActivitySelection() {
     updateMultiSelectBar();
 }
 
-function selectSimilarActivities() {
+function getSelectedSimilarActivityMode() {
+    const radios = [
+        DOM.elSimilarModeHost,
+        DOM.elSimilarModeUrl,
+        DOM.elSimilarModeApp,
+        DOM.elSimilarModeAppTitle
+    ].filter(Boolean);
+    const selectedRadio = radios.find(radio => radio.checked && !radio.disabled);
+    return normalizeSimilarActivityMatchMode(selectedRadio?.value || 'host');
+}
+
+function closeSimilarSelectionModal() {
+    DOM.elSimilarModal?.classList?.add('hidden');
+}
+
+function bindSimilarSelectionModal() {
+    const modal = DOM.elSimilarModal;
+    if (!modal || modal.__orielSimilarModalBound) return;
+
+    modal.__orielSimilarModalBound = true;
+    DOM.elSimilarModalBtnClose?.addEventListener?.('click', closeSimilarSelectionModal);
+    DOM.elSimilarModalBtnCancel?.addEventListener?.('click', closeSimilarSelectionModal);
+    DOM.elSimilarModalBtnApply?.addEventListener?.('click', () => {
+        selectSimilarActivities({ mode: getSelectedSimilarActivityMode() });
+        closeSimilarSelectionModal();
+    });
+}
+
+function openSimilarSelectionModal() {
+    const itemsMem = DOM.elItemsMemoryAid;
+    const selectedEls = Array.from(itemsMem?.querySelectorAll?.('.activity-block.selected') || []);
+    if (selectedEls.length !== 1) return false;
+
+    bindSimilarSelectionModal();
+    updateSimilarModeAvailability(getActivityBlockData(selectedEls[0]));
+    DOM.elSimilarModal?.classList?.remove('hidden');
+    DOM.elSimilarModalBtnApply?.focus?.();
+    return true;
+}
+
+function selectSimilarActivities(options = {}) {
     const itemsMem = DOM.elItemsMemoryAid;
     if (!itemsMem) return 0;
 
     const selectedEls = Array.from(itemsMem.querySelectorAll('.activity-block.selected'));
     if (!selectedEls.length) return 0;
 
-    const selectedKeys = new Set(selectedEls.flatMap(el => getActivityBlockSelectionKeys(el)));
+    const mode = normalizeSimilarActivityMatchMode(options?.mode);
+    const selectedKeys = new Set(selectedEls
+        .map(el => getActivitySimilarityKeyForMode(getActivityBlockData(el), mode))
+        .filter(Boolean));
 
     let selectedCount = 0;
     itemsMem.querySelectorAll('.activity-block').forEach(el => {
-        const primaryKey = getActivitySimilarityKey(getActivityBlockData(el));
+        const primaryKey = getActivitySimilarityKeyForMode(getActivityBlockData(el), mode);
         const primaryMatches = primaryKey && selectedKeys.has(primaryKey);
-        const matchedSecondaryKeys = [];
 
-        if (!primaryMatches) {
-            const overlaps = getActivityBlockDetailOverlaps(el);
-            for (const overlap of overlaps) {
-                const key = getActivitySimilarityKey(overlap);
-                if (key && selectedKeys.has(key)) {
-                    matchedSecondaryKeys.push(key);
-                }
-            }
-        }
-
-        if (primaryMatches || matchedSecondaryKeys.length > 0) {
-            setActivityBlockSelected(el, true, primaryMatches ? null : matchedSecondaryKeys);
+        if (primaryMatches) {
+            setActivityBlockSelected(el, true);
             selectedCount++;
         }
     });
@@ -4492,6 +4705,7 @@ function selectSimilarActivities() {
 function updateMultiSelectBar() {
     const size = state.selectedActivities.size;
     const bar = DOM.elMultiSelectBar;
+    const canSelectSimilar = size === 1;
     if (bar) {
         if (size > 0) {
             DOM.elSelectedCount.innerText = size;
@@ -4499,6 +4713,19 @@ function updateMultiSelectBar() {
         } else {
             bar.classList.add('hidden');
         }
+    }
+
+    if (DOM.elBtnSelectSimilar) {
+        DOM.elBtnSelectSimilar.disabled = !canSelectSimilar;
+        DOM.elBtnSelectSimilar.classList?.toggle?.('hidden', !canSelectSimilar);
+        if (canSelectSimilar) {
+            DOM.elBtnSelectSimilar.removeAttribute?.('aria-hidden');
+        } else {
+            DOM.elBtnSelectSimilar.setAttribute?.('aria-hidden', 'true');
+            closeSimilarSelectionModal();
+        }
+    } else if (!canSelectSimilar) {
+        closeSimilarSelectionModal();
     }
 }
 
@@ -4929,10 +5156,7 @@ function showActivityDetailsPopup(b) {
                  data-popup-child-index="${childIndex}"
                  data-popup-child-parent-index="${parentIndex}"
                  data-popup-similarity-key="${escapeAttribute(rowKey)}">
-                <div class="popup-activity-row__main">
-                    <div class="popup-activity-row__icon popup-activity-row__icon--muted">
-                        ${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}
-                    </div>
+                <div class="popup-activity-row__main popup-activity-row__main--child">
                     <div class="popup-activity-row__label">
                         <span class="popup-activity-title popup-activity-title--child" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
                         ${externalLinkHTML}
@@ -4994,7 +5218,7 @@ function showActivityDetailsPopup(b) {
 
             const rowClass = `popup-activity-row${rowSelectedClass}`;
             const childRowsHTML = children.length > 0
-                ? `<div class="popup-activity-children hidden" data-popup-child-group-index="${index}">
+                ? `<div class="popup-activity-children popup-activity-children--multi hidden" data-popup-child-group-index="${index}">
                         ${children.map((child, nextChildIndex) => renderPopupActivityBreakdownRow(child, index, { childIndex: nextChildIndex })).join('')}
                    </div>`
                 : '';
@@ -5042,7 +5266,35 @@ function showActivityDetailsPopup(b) {
             openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs));
         };
     } else {
-        const singleActivity = popupDisplayModel.primaryRow || { app, title, url, appPath, bundleId };
+        const visibleActivity = { app, title, url, appPath, bundleId };
+        const exactRow = (Array.isArray(popupDisplayModel.exactRows) ? popupDisplayModel.exactRows : [])
+            .find(row => getPopupActivityExactGroupingKey(row) === getPopupActivityExactGroupingKey(visibleActivity));
+        const singleSource = {
+            ...(exactRow || {}),
+            app,
+            title,
+            url,
+            appPath,
+            bundleId,
+            start: startMs,
+            end: endMs,
+            duration: totalMs,
+            activityMix: popupActivityMix
+        };
+        const singleActivity = {
+            ...(exactRow || popupDisplayModel.primaryRow || {}),
+            app,
+            title,
+            url,
+            appPath,
+            bundleId,
+            start: startMs,
+            end: endMs,
+            duration: totalMs,
+            activityMix: popupActivityMix,
+            popupContextSummary: true,
+            sources: [singleSource]
+        };
         const singleApp = normalizeActivityText(singleActivity.app || app);
         const singleTitle = normalizeActivityText(singleActivity.title || title);
         const singleUrl = normalizeActivityText(singleActivity.url || url);
@@ -5059,19 +5311,9 @@ function showActivityDetailsPopup(b) {
         DOM.elPopupMultiDetails.classList.add('hidden');
         DOM.elPopupMultiListContainer.innerHTML = '';
 
-        const singleChildren = Array.isArray(singleActivity.children) ? singleActivity.children : [];
         if (DOM.elPopupSingleChildrenContainer) {
-            if (singleChildren.length > 0) {
-                DOM.elPopupSingleChildrenContainer.innerHTML = `
-                    <div class="popup-activity-children popup-activity-children--single">
-                        ${singleChildren.map((child, childIndex) => renderPopupActivityChildRow(child, 0, childIndex, { hidden: false })).join('')}
-                    </div>
-                `;
-                DOM.elPopupSingleChildrenContainer.classList.remove('hidden');
-            } else {
-                DOM.elPopupSingleChildrenContainer.innerHTML = '';
-                DOM.elPopupSingleChildrenContainer.classList.add('hidden');
-            }
+            DOM.elPopupSingleChildrenContainer.innerHTML = '';
+            DOM.elPopupSingleChildrenContainer.classList.add('hidden');
         }
 
         if (singleUrl) {
@@ -5084,7 +5326,7 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(assignmentOverlaps, startMs, endMs));
+            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([singleActivity], startMs, endMs));
         };
     }
 
@@ -5131,6 +5373,7 @@ window.renderMemoryAidActivities = renderMemoryAidActivities;
 window.createActivityBlockHTML = createActivityBlockHTML;
 window.getActivitySummaryKey = getActivitySummaryKey;
 window.getActivitySimilarityKey = getActivitySimilarityKey;
+window.getActivitySimilarityKeyForMode = getActivitySimilarityKeyForMode;
 window.getActivityBlockSelectionKeys = getActivityBlockSelectionKeys;
 window.getActivityBlockSelectedSimilarityKeys = getActivityBlockSelectedSimilarityKeys;
 window.getActivityBlockDetailOverlaps = getActivityBlockDetailOverlaps;
@@ -5142,6 +5385,7 @@ window.attachMemoryAidInteractions = attachMemoryAidInteractions;
 window.setActivityBlockSelected = setActivityBlockSelected;
 window.toggleActivitySelection = toggleActivitySelection;
 window.clearActivitySelection = clearActivitySelection;
+window.openSimilarSelectionModal = openSimilarSelectionModal;
 window.selectSimilarActivities = selectSimilarActivities;
 window.updateMultiSelectBar = updateMultiSelectBar;
 window.renderLoggedTimeEntries = renderLoggedTimeEntries;

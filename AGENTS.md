@@ -5,6 +5,12 @@
 Oriel is a local-first macOS time tracker. Keep changes simple,
 maintainable, and easy to review.
 
+## Linear
+
+- Always create or use a Linear issue for new and existing implementation
+  work, and keep that issue updated as the work moves through active
+  development, review, completion, or blockage.
+
 ## Build And Test
 
 - Run `npm test` for frontend, bridge, and Node compatibility tests.

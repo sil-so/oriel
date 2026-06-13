@@ -444,21 +444,36 @@ test('timeline and sidebar chrome use semantic design-system classes', () => {
     'timeline-selection-bar',
     'timeline-selection-bar__summary',
     'side-summary-content',
-    'sidebar-stat-card',
-    'sidebar-stat-row',
-    'sidebar-progress-track',
-    'sidebar-progress-fill',
-    'sidebar-section-title'
+    'sidebar-section-title',
+    'project-summary-panel',
+    'project-summary-panel__header'
   ]) {
     assert.match(timelineMarkup, new RegExp(`\\b${className}\\b`), `expected timeline markup to use ${className}`);
     assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
   }
 
+  assert.doesNotMatch(timelineMarkup, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.ok(
+    timelineMarkup.indexOf('project-summary-panel') < timelineMarkup.indexOf('id="unlogged-work-review"'),
+    'expected Total Project Time panel before Unlogged Work'
+  );
   assert.doesNotMatch(timelineMarkup, /border-\[#2d2f34\]|bg-\[#0d0e10\]|text-\[(?:10|11|12)px\]|text-gray-|text-white|bg-emerald-|text-emerald-/);
   assert.match(css, /\.activity-details-popup__details\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.activity-details-popup__field\.hidden,\s*\.activity-details-popup__meta-item\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.sidebar-panel--work-times\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.unlogged-work-review\.hidden\s*\{[\s\S]*?display:\s*none/);
+});
+
+test('activity details popup reserves a fixed square close button column', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const headerRule = css.match(/\.activity-details-popup__header\s*\{[^}]*\}/)?.[0] || '';
+  const closeRule = css.match(/#popup-close-btn\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(headerRule, /display:\s*grid/);
+  assert.match(headerRule, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+30px/);
+  assert.match(closeRule, /width:\s*30px/);
+  assert.match(closeRule, /height:\s*30px/);
+  assert.match(closeRule, /min-height:\s*30px/);
 });
 
 test('timeline-rendered rows use semantic classes instead of one-off utilities', () => {
@@ -594,6 +609,158 @@ test('settings expose editable activity title cleanup rules with regex guidance'
     html.indexOf('Tracking Exclusions') < html.indexOf('Activity Title Cleanup'),
     'expected Activity Title Cleanup to render below Tracking Exclusions'
   );
+});
+
+test('project guidance requires Linear issue hygiene for implementation work', () => {
+  const agents = fs.readFileSync('AGENTS.md', 'utf8');
+
+  assert.match(agents, /Always create or use a Linear issue for new and existing implementation\s+work/);
+  assert.match(agents, /keep that issue updated as the work moves through active\s+development, review, completion, or blockage/);
+});
+
+test('time entry modal removes AI-coded snapshot icon and uses uniform section spacing', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const modalMarkup = html.match(/id="time-entry-modal"[\s\S]*?<!-- MODAL: Create Project -->/)?.[0] || '';
+  const projectGridClass = modalMarkup.match(/id="modal-project-grid"[^>]*class="([^"]*)"/)?.[1] || '';
+
+  assert.doesNotMatch(modalMarkup, /ph ph-sparkle[\s\S]{0,160}Recorded Activity Snapshot/);
+  assert.doesNotMatch(modalMarkup, /Recorded Activity Snapshot[\s\S]{0,160}ph ph-sparkle/);
+  assert.doesNotMatch(projectGridClass, /\bmt-1\b/);
+  assert.match(css, /\.time-entry-form\s*\{[\s\S]*gap:\s*16px/);
+  assert.match(css, /\.modal-field-group\s*\{[\s\S]*gap:\s*6px/);
+});
+
+test('activity title cleanup saved rules use a quiet editable list layout', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const cleanupRenderer = main.match(/function renderTitleCleanupRules\(\)[\s\S]*?setTitleCleanupStatus\(''\);/)?.[0] || '';
+
+  assert.match(html, /<div(?=[^>]*id="settings-title-cleanup-list")(?=[^>]*class="[^"]*\btitle-cleanup-list\b)[^>]*>/);
+  assert.match(css, /\.title-cleanup-list\b/);
+  for (const className of [
+    'title-cleanup-rule',
+    'title-cleanup-rule__header',
+    'title-cleanup-rule__summary',
+    'title-cleanup-rule__chips',
+    'title-cleanup-rule__editor',
+    'title-cleanup-rule__actions',
+    'title-cleanup-rule__field',
+    'title-cleanup-rule__label'
+  ]) {
+    assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
+    assert.match(cleanupRenderer, new RegExp(`\\b${className}\\b`), `expected rendered rule markup to use ${className}`);
+  }
+  assert.match(cleanupRenderer, /removeButton\.className = 'icon-button icon-button--danger/);
+  assert.doesNotMatch(cleanupRenderer, /surface-panel flex flex-col gap-2 px-3 py-2/);
+  assert.doesNotMatch(cleanupRenderer, /text-gray-500 hover:text-red-400/);
+});
+
+test('similar activity selection uses a modal with explicit match modes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+
+  assert.match(html, /id="similar-modal"/);
+  assert.match(html, /id="similar-mode-host"/);
+  assert.match(html, /id="similar-mode-url"/);
+  assert.match(html, /id="similar-mode-app"/);
+  assert.match(html, /id="similar-mode-app-title"/);
+  assert.match(css, /\.similar-options\b/);
+  assert.match(css, /\.similar-option\b/);
+  assert.match(css, /\.similar-option\.is-disabled\b/);
+  assert.match(main, /openSimilarSelectionModal\(\)/);
+  assert.match(timeline, /function openSimilarSelectionModal\(/);
+  assert.match(timeline, /function isBrowserLikeActivity\(/);
+  assert.match(timeline, /function updateSimilarModeAvailability\(/);
+  assert.match(timeline, /function getActivitySimilarityKeyForMode\(/);
+});
+
+test('project and AI Insights card grids keep a three-column layout', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projectsGridRule = css.match(/#projects-page-grid\s*\{[^}]*\}/)?.[0] || '';
+  const aiGridRule = css.match(/\.ai-insights-card-grid\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(html, /id="projects-page-grid"/);
+  assert.doesNotMatch(html, /grid-cols-1\s+md:grid-cols-2\s+lg:grid-cols-3/);
+  assert.match(projectsGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(aiGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(aiGridRule, /auto-fit/);
+});
+
+test('project cards avoid full-card hover and click affordances', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const projectCardTag = projects.match(/<div class="project-card[^>]*>/)?.[0] || '';
+
+  assert.doesNotMatch(css, /\.project-card:hover\b/);
+  assert.doesNotMatch(projectCardTag, /\bcursor-pointer\b/);
+  assert.doesNotMatch(projectCardTag, /onclick=/);
+  assert.match(projects, /<button class="button-secondary"[\s\S]*onclick="openProjectDetails\('\$\{proj\.id\}'\)"/);
+});
+
+test('AI and data settings sections share heading treatment without extra danger divider', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const aiSettingsMarkup = html.match(/data-settings-section-panel="ai"[\s\S]*?data-settings-section-panel="data"/)?.[0] || '';
+  const dangerZoneRule = css.match(/\.danger-zone\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(aiSettingsMarkup, /class="settings-card-title">Provider &amp; Key<\/span>\s*<span class="settings-helper">Choose a provider key/);
+  assert.match(aiSettingsMarkup, /class="settings-card-title">Ask AI &amp; AI Insights<\/span>\s*<span class="settings-helper">Used for chat/);
+  assert.doesNotMatch(html, /\bai-settings-heading\b/);
+  assert.doesNotMatch(css, /\.ai-settings-heading\b/);
+  assert.doesNotMatch(dangerZoneRule, /border-top/);
+  assert.doesNotMatch(dangerZoneRule, /padding-top/);
+});
+
+test('project details manual date uses the shared custom calendar popover pattern', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+
+  assert.doesNotMatch(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="date")[^>]*>/);
+  assert.match(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="hidden")[^>]*>/);
+  assert.match(html, /<button(?=[^>]*id="proj-details-manual-date-trigger")(?=[^>]*class="[^"]*\bproject-manual-date-trigger\b)[^>]*>/);
+  assert.match(html, /<div(?=[^>]*id="proj-details-manual-date-picker-popover")(?=[^>]*class="[^"]*\bpopover\b)[^>]*>/);
+  assert.match(html, /<div(?=[^>]*id="proj-details-manual-date-picker-days")(?=[^>]*class="[^"]*\bgrid\b[^"]*\bgrid-cols-7\b)[^>]*>/);
+  assert.match(css, /\.project-manual-date-picker\s*\{/);
+  assert.match(css, /\.project-manual-date-trigger\s*\{/);
+  assert.match(main, /setupDatePicker\('projectManual'\)/);
+  assert.match(main, /proj-details-manual-date-label/);
+});
+
+test('activity popup child rows remove favicon gutters and expose alignment contracts', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const childRenderer = timeline.match(/const renderPopupActivityChildRow[\s\S]*?const renderPopupActivityBreakdownRow/)?.[0] || '';
+
+  assert.doesNotMatch(childRenderer, /popup-activity-row__icon/);
+  assert.match(childRenderer, /popup-activity-row__main popup-activity-row__main--child/);
+  assert.match(timeline, /popup-activity-children--multi/);
+  assert.doesNotMatch(timeline, /popup-activity-children--single/);
+  assert.match(css, /\.popup-activity-children--multi\s*\{/);
+  assert.match(css, /\.popup-activity-row__main--child\s*\{/);
+  assert.match(css, /\.activity-mix-tooltip\s*\{[\s\S]*z-index:\s*var\(--z-tooltip\)/);
+});
+
+test('work times sidebar uses compact shared panel surfaces', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  assert.match(css, /\.side-summary-content\s*\{[\s\S]*letter-spacing:\s*0/);
+  assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*gap:\s*20px/);
+  assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*letter-spacing:\s*0/);
+  assert.doesNotMatch(html, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.match(css, /\.project-summary-panel\s*\{[\s\S]*padding:\s*16px/);
+  assert.match(css, /\.project-summary-panel__header\s*\{[\s\S]*align-items:\s*center/);
+  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*font-size:\s*11px/);
+  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*letter-spacing:\s*0\.04em/);
+  assert.match(css, /\.unlogged-work-review\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
+  assert.match(css, /\.project-breakdown-card\s*\{[\s\S]*background:\s*color-mix\(in oklch, var\(--surface-raised\)/);
+  assert.doesNotMatch(css, /\.project-breakdown-footer\b/);
 });
 
 test('web dropdowns use app-rendered menus instead of native select popups', () => {

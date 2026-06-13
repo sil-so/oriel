@@ -43,8 +43,10 @@ class FakeElement {
     this.innerText = '';
     this.value = '';
     this.checked = false;
+    this.disabled = false;
     this.style = {};
     this.listeners = {};
+    this.attributes = {};
   }
 
   addEventListener(type, listener) {
@@ -60,6 +62,22 @@ class FakeElement {
 
   querySelectorAll() {
     return [];
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return this.attributes[name] || null;
+  }
+
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+
+  closest() {
+    return null;
   }
 
   focus() {
@@ -101,6 +119,72 @@ function loadTimelineContext() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
   return context;
+}
+
+function createSimilarActivityBlock({
+  startCell,
+  app,
+  title = app,
+  url = '',
+  appPath = '',
+  bundleId = '',
+  selected = false
+}) {
+  const classes = new Set(selected ? ['activity-block', 'selected'] : ['activity-block']);
+  const checkboxClasses = new Set(selected ? ['activity-checkbox', 'is-selected'] : ['activity-checkbox']);
+  const icon = { className: selected ? 'ph-fill ph-check-square text-base' : 'ph ph-square text-base' };
+  const checkbox = {
+    classList: {
+      add: className => checkboxClasses.add(className),
+      remove: className => checkboxClasses.delete(className),
+      contains: className => checkboxClasses.has(className)
+    }
+  };
+
+  return {
+    dataset: { startCell: String(startCell), app, title, url, appPath, bundleId },
+    classList: {
+      add: className => classes.add(className),
+      remove: className => classes.delete(className),
+      contains: className => classes.has(className)
+    },
+    querySelector(selector) {
+      if (selector === '.activity-checkbox') return checkbox;
+      if (selector === '.activity-checkbox i') return icon;
+      return null;
+    }
+  };
+}
+
+function attachSimilarModalDom(context) {
+  function createRadio(id, value) {
+    const radio = new FakeElement(id);
+    const option = new FakeElement(`${id}-option`);
+    option.className = 'similar-option';
+    option.classList = new FakeClassList(option);
+    radio.value = value;
+    radio.closest = selector => selector === '.similar-option' ? option : null;
+    return { radio, option };
+  }
+
+  const host = createRadio('similar-mode-host', 'host');
+  const url = createRadio('similar-mode-url', 'url');
+  const app = createRadio('similar-mode-app', 'app');
+  const appTitle = createRadio('similar-mode-app-title', 'app-title');
+  const modal = new FakeElement('similar-modal');
+  modal.className = 'hidden';
+  modal.classList = new FakeClassList(modal);
+
+  context.DOM.elSimilarModal = modal;
+  context.DOM.elSimilarModeHost = host.radio;
+  context.DOM.elSimilarModeUrl = url.radio;
+  context.DOM.elSimilarModeApp = app.radio;
+  context.DOM.elSimilarModeAppTitle = appTitle.radio;
+  context.DOM.elSimilarModalBtnClose = new FakeElement('similar-modal-btn-close');
+  context.DOM.elSimilarModalBtnCancel = new FakeElement('similar-modal-btn-cancel');
+  context.DOM.elSimilarModalBtnApply = new FakeElement('similar-modal-btn-apply');
+
+  return { modal, host, url, app, appTitle };
 }
 
 function loadTitleCleaningContext() {
@@ -4185,7 +4269,7 @@ test('time entry hover preview snaps to one zoom row without initial duration', 
   assert.equal(items.child.removed, true);
 });
 
-test('similar selection expands to same app and host on the visible day', () => {
+test('similar selection can match browser activities by base URL on the visible day', () => {
   const context = loadTimelineContext();
 
   function fakeBlock({ startCell, app, url = '', bundleId = '', selected = false }) {
@@ -4235,7 +4319,7 @@ test('similar selection expands to same app and host on the visible day', () => 
   context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
   context.DOM.elSelectedCount = { innerText: '' };
 
-  assert.equal(context.selectSimilarActivities(), 2);
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
   assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [1, 8]);
   assert.equal(blocks[1].classList.contains('selected'), true);
   assert.equal(blocks[2].classList.contains('selected'), false);
@@ -4284,19 +4368,214 @@ test('similar selection treats native activities with the same app name as simil
   context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
   context.DOM.elSelectedCount = { innerText: '' };
 
-  assert.equal(context.selectSimilarActivities(), 2);
+  assert.equal(context.selectSimilarActivities({ mode: 'app' }), 2);
   assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [5, 12]);
   assert.equal(blocks[1].classList.contains('selected'), true);
   assert.equal(blocks[2].classList.contains('selected'), false);
 });
 
-test('similar selection includes mixed rows where the selected activity is secondary', () => {
+test('similar selection by exact URL does not select other pages on the same site', () => {
+  const context = loadTimelineContext();
+
+  function fakeBlock({ startCell, app, title = app, url = '', selected = false }) {
+    const classes = new Set(selected ? ['activity-block', 'selected'] : ['activity-block']);
+    const checkbox = { classList: { add() {}, remove() {} } };
+    const icon = { className: '' };
+
+    return {
+      dataset: { startCell: String(startCell), app, title, url, appPath: '', bundleId: '' },
+      classList: {
+        add: className => classes.add(className),
+        remove: className => classes.delete(className),
+        contains: className => classes.has(className)
+      },
+      querySelector(selector) {
+        if (selector === '.activity-checkbox') return checkbox;
+        if (selector === '.activity-checkbox i') return icon;
+        return null;
+      }
+    };
+  }
+
+  const blocks = [
+    fakeBlock({
+      startCell: 1,
+      app: 'Brave Browser',
+      title: 'AI bubble',
+      url: 'https://www.youtube.com/watch?v=one',
+      selected: true
+    }),
+    fakeBlock({
+      startCell: 8,
+      app: 'Brave Browser',
+      title: 'Another video',
+      url: 'https://www.youtube.com/watch?v=two'
+    }),
+    fakeBlock({
+      startCell: 12,
+      app: 'Brave Browser',
+      title: 'AI bubble',
+      url: 'https://www.youtube.com/watch?v=one'
+    })
+  ];
+
+  context.state.selectedActivities.add(1);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'url' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [1, 12]);
+  assert.equal(blocks[1].classList.contains('selected'), false);
+  assert.equal(blocks[2].classList.contains('selected'), true);
+});
+
+test('similar modal defaults native app selections to App Name and disables URL modes', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 16,
+      app: 'Codex',
+      title: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      selected: true
+    })
+  ];
+
+  context.state.selectedActivities.add(16);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.modal.classList.contains('hidden'), false);
+  assert.equal(modalDom.host.radio.disabled, true);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.host.option.classList.contains('is-disabled'), true);
+  assert.equal(modalDom.url.option.classList.contains('is-disabled'), true);
+  assert.equal(modalDom.host.option.getAttribute('aria-disabled'), 'true');
+  assert.equal(modalDom.url.option.getAttribute('aria-disabled'), 'true');
+  assert.equal(modalDom.app.radio.disabled, false);
+  assert.equal(modalDom.appTitle.radio.disabled, false);
+  assert.equal(modalDom.app.radio.checked, true);
+  assert.equal(modalDom.host.radio.checked, false);
+});
+
+test('similar modal keeps URL modes enabled for browser activity with a usable URL', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const activity = {
+    app: 'Firefox Developer Edition',
+    title: 'Docs',
+    url: 'https://developer.mozilla.org/en-US/',
+    appPath: '/Applications/Firefox Developer Edition.app',
+    bundleId: 'org.mozilla.firefoxdeveloperedition'
+  };
+  const blocks = [
+    createSimilarActivityBlock({ startCell: 22, ...activity, selected: true })
+  ];
+
+  context.state.selectedActivities.add(22);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.isBrowserLikeActivity(activity), true);
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, false);
+  assert.equal(modalDom.url.radio.disabled, false);
+  assert.equal(modalDom.host.option.classList.contains('is-disabled'), false);
+  assert.equal(modalDom.url.option.classList.contains('is-disabled'), false);
+  assert.equal(modalDom.host.radio.checked, true);
+  assert.equal(modalDom.app.radio.checked, false);
+});
+
+test('similar modal defaults browser apps without usable URLs to App Name', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const activity = {
+    app: 'Safari',
+    title: 'Private Window',
+    url: '',
+    appPath: '/Applications/Safari.app',
+    bundleId: 'com.apple.Safari'
+  };
+  const blocks = [
+    createSimilarActivityBlock({ startCell: 28, ...activity, selected: true })
+  ];
+
+  context.state.selectedActivities.add(28);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.isBrowserLikeActivity(activity), true);
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, true);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.app.radio.checked, true);
+});
+
+test('similar toolbar action is available only for one selected activity', () => {
+  const context = loadTimelineContext();
+  const bar = new FakeElement('multi-select-bar');
+  const similarButton = new FakeElement('btn-select-similar');
+  const modal = new FakeElement('similar-modal');
+  context.DOM.elMultiSelectBar = bar;
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elBtnSelectSimilar = similarButton;
+  context.DOM.elSimilarModal = modal;
+
+  context.state.selectedActivities.add(10);
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), false);
+  assert.equal(similarButton.classList.contains('hidden'), false);
+  assert.equal(similarButton.disabled, false);
+
+  context.state.selectedActivities.add(20);
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), false);
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+  assert.equal(modal.classList.contains('hidden'), true);
+
+  context.state.selectedActivities.clear();
+  context.updateMultiSelectBar();
+  assert.equal(bar.classList.contains('hidden'), true);
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+});
+
+test('similar selection ignores unrelated secondary overlaps for a selected visible activity', () => {
   const context = loadTimelineContext();
 
   function fakeBlock({
     startCell,
     app,
     title = app,
+    url = '',
     appPath = '',
     bundleId = '',
     selected = false,
@@ -4312,7 +4591,7 @@ test('similar selection includes mixed rows where the selected activity is secon
         span: '1',
         app,
         title,
-        url: '',
+        url,
         appPath,
         bundleId,
         overlaps: encodeURIComponent(JSON.stringify(overlaps))
@@ -4330,6 +4609,15 @@ test('similar selection includes mixed rows where the selected activity is secon
     };
   }
 
+  const youtubeOverlap = {
+    app: 'Brave Browser',
+    title: 'AI bubble',
+    url: 'https://www.youtube.com/watch?v=one',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: 0,
+    end: 12 * 60 * 1000
+  };
   const codexOverlap = {
     app: 'Codex',
     title: 'Codex',
@@ -4338,29 +4626,23 @@ test('similar selection includes mixed rows where the selected activity is secon
     start: 0,
     end: 2 * 60 * 1000
   };
-  const braveOverlap = {
-    app: 'Brave Browser',
-    title: 'Brave Browser',
-    appPath: '/Applications/Brave Browser.app',
-    bundleId: 'com.brave.Browser',
-    start: 0,
-    end: 12 * 60 * 1000
-  };
   const blocks = [
     fakeBlock({
       startCell: 18,
-      app: 'Codex',
-      appPath: '/Applications/Codex.app',
-      bundleId: 'com.openai.codex',
+      app: 'Brave Browser',
+      title: 'AI bubble',
+      url: 'https://www.youtube.com/watch?v=one',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
       selected: true,
-      overlaps: [codexOverlap]
+      overlaps: [youtubeOverlap, codexOverlap]
     }),
     fakeBlock({
       startCell: 37,
-      app: 'Brave Browser',
-      appPath: '/Applications/Brave Browser.app',
-      bundleId: 'com.brave.Browser',
-      overlaps: [braveOverlap, codexOverlap]
+      app: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      overlaps: [codexOverlap]
     }),
     fakeBlock({
       startCell: 48,
@@ -4391,10 +4673,9 @@ test('similar selection includes mixed rows where the selected activity is secon
   context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
   context.DOM.elSelectedCount = { innerText: '' };
 
-  assert.equal(context.selectSimilarActivities(), 2);
-  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [18, 37]);
-  assert.equal(blocks[1].classList.contains('selected'), true);
-  assert.deepEqual(Array.from(context.getActivityBlockSelectionKeys(blocks[1])), ['codex']);
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 1);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [18]);
+  assert.equal(blocks[1].classList.contains('selected'), false);
   assert.equal(blocks[2].classList.contains('selected'), false);
 });
 
@@ -6259,8 +6540,10 @@ test('Multiple Activities popup renders browser activity as a host session with 
 
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-children popup-activity-children--multi hidden/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Context Switching Simplification<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row[\s\S]{0,240}popup-activity-row__icon/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
   assert.match(popup.renderedMultiList, /<span class="popup-activity-title popup-activity-title--child" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
@@ -6272,63 +6555,89 @@ test('Multiple Activities popup renders browser activity as a host session with 
   }));
 });
 
-test('single host session with page children opens as one expanded session popup', () => {
+test('single browser activity popup shows the visible title and full URL without child rows', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 12 * 60 * 60 * 1000;
+  const videoTitle = "AI bubble: 'It's approaching vindication hour for me' | Ed Zitron";
+  const videoUrl = 'https://www.youtube.com/watch?v=VFBWfPQpGXc';
   const popup = renderMultipleActivitiesPopup({
     zoom: 1,
     startCell: 12 * 60,
-    span: 3,
+    span: 20,
     app: 'Brave Browser',
-    title: 'bol.com',
-    url: 'https://www.bol.com/',
+    title: videoTitle,
+    url: videoUrl,
     overlaps: [
       {
         app: 'Brave Browser',
-        title: 'BRASQ Verlengsnoer 5 meter Wit - Verlengkabel met randaarde | bol',
-        url: 'https://www.bol.com/nl/nl/p/brasq-verlengsnoer',
+        title: videoTitle,
+        url: videoUrl,
         start: blockStart,
-        end: blockStart + 65 * 1000,
-        duration: 65 * 1000
+        end: blockStart + 19 * 60 * 1000,
+        duration: 19 * 60 * 1000
       },
       {
         app: 'Brave Browser',
-        title: 'bol | Bestellen',
-        url: 'https://www.bol.com/nl/nl/checkout/',
-        start: blockStart + 65 * 1000,
-        end: blockStart + 124 * 1000,
-        duration: 59 * 1000
-      },
-      {
-        app: 'Brave Browser',
-        title: 'bol | Winkelwagen',
-        url: 'https://www.bol.com/nl/nl/winkelwagen/',
-        start: blockStart + 124 * 1000,
-        end: blockStart + 179 * 1000,
-        duration: 55 * 1000
+        title: 'YouTube',
+        url: 'https://www.youtube.com/',
+        start: blockStart + 19 * 60 * 1000,
+        end: blockStart + 20 * 60 * 1000,
+        duration: 60 * 1000
       }
     ]
   });
 
-  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'bol.com');
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, videoTitle);
   assert.equal(popup.context.DOM.elPopupTitle.innerText, 'Brave Browser');
+  assert.equal(popup.context.DOM.elPopupUrl.innerText, videoUrl);
+  assert.equal(popup.context.DOM.elPopupUrl.href, videoUrl);
   assert.equal(popup.renderedMultiList, '');
-  assert.match(popup.renderedSingleChildren, /popup-activity-children/);
-  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
-  assert.match(popup.renderedSingleChildren, /BRASQ Verlengsnoer 5 meter Wit/);
-  assert.match(popup.renderedSingleChildren, /bol \| Bestellen/);
-  assert.match(popup.renderedSingleChildren, /bol \| Winkelwagen/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /title="Brave Browser">Brave Browser<\/span>/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-select/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-quick-add/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /border-l|border-b|bg-\[#25272c\]|duration-pill/);
+  assert.equal(popup.renderedSingleChildren, '');
 
   popup.context.DOM.elPopupAssignBtn.onclick();
 
   assert.equal(popup.modalArgs[6].length, 1);
-  assert.equal(popup.modalArgs[6][0].title, 'bol.com');
-  assert.equal(popup.modalArgs[6][0].sources.length, 3);
+  assert.equal(popup.modalArgs[6][0].title, videoTitle);
+  assert.equal(popup.modalArgs[6][0].url, videoUrl);
+  assert.equal(popup.modalArgs[6][0].sources.length, 1);
+});
+
+test('single same-host browser popup does not collapse the visible Tweakers page into host children', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + (9 * 60 + 30) * 60 * 1000;
+  const articleTitle = "Apple maakt RAW-foto's veel scherper in RAW 9 - Tweakers";
+  const articleUrl = 'https://tweakers.net/nieuws/249066/apple-maakt-raw-fotos-veel-scherper-in-raw-9.html';
+  const popup = renderMultipleActivitiesPopup({
+    zoom: 5,
+    startCell: 9 * 12 + 6,
+    span: 1,
+    app: 'Brave Browser',
+    title: articleTitle,
+    url: articleUrl,
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: articleTitle,
+        url: articleUrl,
+        start: blockStart,
+        end: blockStart + 2 * 60 * 1000,
+        duration: 2 * 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Tweakers: tech-community, nieuws, reviews en de Pricewatch',
+        url: 'https://tweakers.net/',
+        start: blockStart + 2 * 60 * 1000,
+        end: blockStart + 3 * 60 * 1000,
+        duration: 60 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, articleTitle);
+  assert.equal(popup.context.DOM.elPopupUrl.innerText, articleUrl);
+  assert.equal(popup.renderedMultiList, '');
+  assert.equal(popup.renderedSingleChildren, '');
 });
 
 test('Multiple Activities popup collapses same-host browser rows into assignable children', () => {
@@ -6366,9 +6675,11 @@ test('Multiple Activities popup collapses same-host browser rows into assignable
 
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-children popup-activity-children--multi hidden/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Meal Ingredients List<\/span>/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>User Activity Analysis<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row[\s\S]{0,240}popup-activity-row__icon/);
   assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row hidden"[\s\S]*?popup-activity-secondary[^>]*title="Brave Browser">Brave Browser<\/span>/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com"/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/meal"/);
@@ -6443,12 +6754,15 @@ test('Activity Stream browser subtitles show only the app while preserving URL d
   assert.match(html, /data-url="https:\/\/www\.facebook\.com\/home"/);
 });
 
-test('same-host browser activity with different page titles opens one expanded session popup', () => {
+test('same-host browser activity with different page titles keeps the clicked page in single popup', () => {
   const titleCleaner = loadTitleCleaningContext().cleanTitle;
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 118 * 5 * 60 * 1000;
   const popup = renderMultipleActivitiesPopup({
     cleanTitle: titleCleaner,
+    app: 'Brave Browser',
+    title: 'Client Portal - Brave - Base',
+    url: 'https://client.example.com/dashboard',
     overlaps: [
       {
         app: 'Brave Browser',
@@ -6469,15 +6783,10 @@ test('same-host browser activity with different page titles opens one expanded s
     ]
   });
 
-  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'client.example.com');
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Client Portal');
+  assert.equal(popup.context.DOM.elPopupUrl.innerText, 'https://client.example.com/dashboard');
   assert.equal(popup.renderedMultiList, '');
-  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
-  assert.match(popup.renderedSingleChildren, /Client Portal/);
-  assert.match(popup.renderedSingleChildren, /Client Portal Settings/);
-  assert.match(popup.renderedSingleChildren, /href="https:\/\/client\.example\.com\/dashboard"/);
-  assert.match(popup.renderedSingleChildren, /href="https:\/\/client\.example\.com\/settings"/);
-  assert.equal((popup.renderedSingleChildren.match(/data-popup-child-index/g) || []).length, 2);
+  assert.equal(popup.renderedSingleChildren, '');
 });
 
 test('Multiple Activities popup host fallback strips leading www from browser labels', () => {
@@ -6721,7 +7030,7 @@ test('single sub-minute Activity Stream details popup still shows seconds', () =
   assert.equal(context.DOM.elPopupDuration.innerText, '23s');
 });
 
-test('activity details popup labels positive subsecond page children as one second', () => {
+test('multiple activity popup labels positive subsecond page children as one second', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const popup = renderMultipleActivitiesPopup({
     startCell: 0,
@@ -6745,15 +7054,21 @@ test('activity details popup labels positive subsecond page children as one seco
         start: dateStart + 60 * 1000,
         end: dateStart + 60 * 1000 + 400,
         duration: 400
+      },
+      {
+        app: 'Codex',
+        title: 'Codex',
+        start: dateStart + 61 * 1000,
+        end: dateStart + 3 * 60 * 1000,
+        duration: 119 * 1000
       }
     ]
   });
 
-  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'vinted.nl');
-  assert.equal(popup.renderedMultiList, '');
-  assert.match(popup.renderedSingleChildren, /Word lid en verkoop tweedehands kleding/);
-  assert.match(popup.renderedSingleChildren, />1s<\/span>/);
-  assert.doesNotMatch(popup.renderedSingleChildren, />0s<\/span>/);
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Multiple Activities');
+  assert.match(popup.renderedMultiList, /Word lid en verkoop tweedehands kleding/);
+  assert.match(popup.renderedMultiList, />1s<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, />0s<\/span>/);
 });
 
 test('Multiple Activities block duration matches popup-visible breakdown duration', () => {
@@ -8164,7 +8479,7 @@ test('recorded activity popup aggregates sub-minute context rows without droppin
   assert.equal(popup.modalArgs[6][1].sources.length, 6);
 });
 
-test('one-minute visible Vinted block with short page fragments opens a session popup', () => {
+test('one-minute visible browser block keeps the visible page as the single popup title', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + (14 * 60 + 2) * 60 * 1000;
   const popup = renderMultipleActivitiesPopup({
@@ -8215,27 +8530,18 @@ test('one-minute visible Vinted block with short page fragments opens a session 
     ]
   });
 
-  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'vinted.nl');
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted');
   assert.equal(popup.context.DOM.elPopupDuration.innerText, '2 min');
+  assert.equal(popup.context.DOM.elPopupUrl.innerText, 'https://www.vinted.nl/member/signup/select_type');
   assert.equal(popup.renderedMultiList, '');
-  assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
-  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
-  assert.match(popup.renderedSingleChildren, /Word lid en verkoop tweedehands kleding/);
-  assert.match(popup.renderedSingleChildren, /Apple Mac mini 1 model A2348/);
-  assert.equal((popup.renderedSingleChildren.match(/data-popup-child-index/g) || []).length, 4);
-  assert.ok(popup.renderedSingleChildren.indexOf('Apple Mac mini 1 model A2348') < popup.renderedSingleChildren.indexOf('Vinted | Een app, alles tweedehands'));
-  assert.ok(popup.renderedSingleChildren.indexOf('Vinted | Een app, alles tweedehands') < popup.renderedSingleChildren.indexOf('Artikelen | Vinted'));
-  assert.ok(popup.renderedSingleChildren.indexOf('Artikelen | Vinted') < popup.renderedSingleChildren.indexOf('Word lid en verkoop tweedehands kleding'));
-  assert.ok(popup.popupRows.filter(row => row.dataset.popupChildIndex !== undefined).every(row => {
-    return !row.querySelector('.popup-activity-select') && !row.querySelector('.popup-activity-quick-add');
-  }));
+  assert.equal(popup.renderedSingleChildren, '');
 
   popup.context.DOM.elPopupAssignBtn.onclick();
 
   assert.equal(popup.modalArgs[6].length, 1);
-  assert.equal(popup.modalArgs[6][0].title, 'vinted.nl');
+  assert.equal(popup.modalArgs[6][0].title, 'Word lid en verkoop tweedehands kleding zonder kosten | Vinted');
   assert.equal(popup.modalArgs[6][0].duration, 2 * 60 * 1000);
-  assert.equal(popup.modalArgs[6][0].sources.length, 4);
+  assert.equal(popup.modalArgs[6][0].sources.length, 1);
 });
 
 test('coarse block secondary badge and popup both include contextual short Vinted work', () => {

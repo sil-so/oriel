@@ -17,6 +17,7 @@ test('native app package targets macOS 14 and stages a standalone Oriel.app', ()
   assert.match(buildScript, /Oriel\.app/);
   assert.match(buildScript, /CONTENTS_DIR=.*Contents/);
   assert.match(buildScript, /WEB_DIR=.*Resources\/Web/);
+  assert.match(buildScript, /mkdir -p "\$\(dirname "\$APP_DIR"\)"/);
   assert.match(buildScript, /index\.html/);
   assert.match(buildScript, /css/);
   assert.match(buildScript, /js/);

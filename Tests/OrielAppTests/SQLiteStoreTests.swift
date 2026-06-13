@@ -131,6 +131,44 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(entries.first?["taskId"] as? String, "task-planning")
     }
 
+    func testTimeEntriesRejectNonPositiveRangesOnCreateAndUpdate() throws {
+        let projectID = try createProject()
+
+        XCTAssertThrowsError(
+            try store.request(
+                operation: "entries.create",
+                payload: [
+                    "start": 1_779_768_000_000 as Int64,
+                    "end": 1_779_768_000_000 as Int64,
+                    "projectId": projectID
+                ]
+            )
+        )
+
+        let validEntry = try XCTUnwrap(
+            try store.request(
+                operation: "entries.create",
+                payload: [
+                    "start": 1_779_768_000_000 as Int64,
+                    "end": 1_779_768_060_000 as Int64,
+                    "projectId": projectID
+                ]
+            ) as? [String: Any]
+        )
+        let validEntryID = try XCTUnwrap(validEntry["id"] as? String)
+
+        XCTAssertThrowsError(
+            try store.request(
+                operation: "entries.update",
+                payload: [
+                    "id": validEntryID,
+                    "start": 1_779_768_060_000 as Int64,
+                    "end": 1_779_768_060_000 as Int64
+                ]
+            )
+        )
+    }
+
     func testAssignmentRuleDoesNotBackfillExistingActivity() throws {
         let projectID = try createProject()
         try store.recordActivity(

@@ -298,35 +298,15 @@
             <div class="side-summary-content app-scrollbar-safe">
                 <div class="sidebar-panel sidebar-panel--work-times" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
 
-                <!-- Main Stats Panel -->
-                <div class="surface-panel sidebar-stat-card">
-
-                    <!-- Recorded Activity -->
-                    <div>
-                        <div class="sidebar-stat-row">
-                            <span class="sidebar-stat-label">Recorded Active Time</span>
-                            <span class="sidebar-stat-value" id="stat-captured-active">0h 0m</span>
-                        </div>
+                <!-- Projects Breakdown List -->
+                <div class="surface-panel project-summary-panel">
+                    <div class="project-summary-panel__header">
+                        <h3 class="sidebar-section-title">Total Project Time</h3>
+                        <span class="duration-pill project-summary-total" id="stat-project-total">0h 0m</span>
                     </div>
-
-                    <div class="sidebar-stat-divider"></div>
-
-                    <!-- Logged Projects -->
-                    <div>
-                        <div class="sidebar-stat-row">
-                            <span class="sidebar-stat-label">Project Logged Time</span>
-                            <span class="sidebar-stat-value sidebar-stat-value--success" id="stat-project-total">0h 0m</span>
-                        </div>
-                        <div class="sidebar-progress-track">
-                            <div class="sidebar-progress-fill" id="bar-project"></div>
-                        </div>
-                        <div class="work-breakdown-row">
-                            <span>Billable Hours</span>
-                            <span id="stat-billable">0h 0m</span>
-                        </div>
-                        <div class="work-breakdown-row">
-                            <span>Non-Billable</span>
-                            <span id="stat-nonbillable">0h 0m</span>
+                    <div class="sidebar-project-list" id="projects-breakdown-list">
+                        <div class="empty-state empty-state--compact">
+                            No time entries logged for this day.
                         </div>
                     </div>
                 </div>
@@ -339,17 +319,6 @@
                     <div class="unlogged-work-list app-scrollbar-safe" id="unlogged-work-review-list">
                         <div class="empty-state empty-state--compact">
                             All recorded source work is covered.
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Projects Breakdown List -->
-                <div class="sidebar-projects-section">
-                    <h3 class="sidebar-section-title sidebar-section-title--padded">Total Project Time</h3>
-                    <div class="sidebar-project-list" id="projects-breakdown-list">
-                        <!-- Project item seeded here -->
-                        <div class="empty-state empty-state--spacious">
-                            No time entries logged for this day. Click and drag in the scheduler to create one!
                         </div>
                     </div>
                 </div>
@@ -408,7 +377,7 @@
             </button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="projects-page-grid">
+        <div class="projects-card-grid" id="projects-page-grid">
             <!-- Injected dynamically by JS -->
         </div>
     </div>
@@ -557,6 +526,55 @@
         </div>
     </div>
 
+    <!-- MODAL: Similar Activity Selection -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="similar-modal" aria-modal="true" role="dialog" aria-labelledby="similar-modal-title">
+        <div class="modal-panel modal-size--sm relative flex flex-col gap-4">
+            <div class="modal-header">
+                <h3 class="modal-title truncate" id="similar-modal-title">Select Similar Activities</h3>
+                <button class="icon-button" id="similar-modal-btn-close" aria-label="Close similar activity selection">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="modal-field-group">
+                <label class="modal-field-label">Match By</label>
+                <div class="similar-options" role="radiogroup" aria-label="Similar activity match mode">
+                    <label class="similar-option" for="similar-mode-host">
+                        <input type="radio" id="similar-mode-host" name="similar-mode" value="host" checked>
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">Base URL</span>
+                            <span class="similar-option__description">Same browser app and website host.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-url">
+                        <input type="radio" id="similar-mode-url" name="similar-mode" value="url">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">Exact URL</span>
+                            <span class="similar-option__description">Same browser app and full page URL.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-app">
+                        <input type="radio" id="similar-mode-app" name="similar-mode" value="app">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">App Name</span>
+                            <span class="similar-option__description">Same foreground application.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-app-title">
+                        <input type="radio" id="similar-mode-app-title" name="similar-mode" value="app-title">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">App + Window Title</span>
+                            <span class="similar-option__description">Same app and exact displayed title.</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button-secondary" id="similar-modal-btn-cancel">Cancel</button>
+                <button class="button-primary" id="similar-modal-btn-apply">Select Similar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL: Create/Edit Time Entry -->
     <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="time-entry-modal">
         <div class="modal-panel modal-size--md relative flex flex-col gap-4 transition-all duration-200" id="time-entry-modal-content">
@@ -566,9 +584,9 @@
 
             <div class="time-entry-layout" id="modal-split-container">
                 <!-- Left Column: Recorded Activity Snapshot -->
-                <div class="time-entry-snapshot flex flex-col gap-2.5 app-scrollbar-safe hidden" id="modal-left-panel">
-                    <label class="section-label flex items-center gap-1.5 shrink-0">
-                        <i class="ph ph-sparkle"></i> Recorded Activity Snapshot
+                <div class="time-entry-snapshot flex flex-col app-scrollbar-safe hidden" id="modal-left-panel">
+                    <label class="section-label shrink-0">
+                        Recorded Activity Snapshot
                     </label>
                     <div class="flex flex-col gap-2" id="modal-memory-aid-list">
                         <!-- Snapshot of activities inside the range injected dynamically by JS -->
@@ -604,7 +622,7 @@
                     <!-- Project Selector Grid -->
                     <div class="modal-field-group">
                         <label class="modal-field-label">Allocate to Project</label>
-                        <div class="grid grid-cols-2 gap-2 mt-1 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
+                        <div class="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
                             <!-- Visual grid rendered by JS -->
                         </div>
                         <input type="hidden" id="modal-project-select" value="">
@@ -954,7 +972,7 @@
                         </button>
                     </div>
                     <div id="settings-title-cleanup-status" class="hidden text-[10px] text-gray-400" role="status" aria-live="polite"></div>
-                    <div class="flex flex-col gap-2 max-h-[220px] overflow-y-auto app-scrollbar-safe" id="settings-title-cleanup-list">
+                    <div class="title-cleanup-list app-scrollbar-safe" id="settings-title-cleanup-list">
                         <div class="text-[11px] text-gray-500 italic py-2 text-center">No title cleanup rules configured.</div>
                     </div>
                 </div>
@@ -962,10 +980,10 @@
 
                 <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="ai" role="tabpanel">
                     <div class="surface-panel settings-card">
-                        <div class="ai-settings-header">
-                            <div class="ai-settings-heading">
-                                <span>Provider &amp; Key</span>
-                                <span>Choose a provider key to view or edit. Keys stay in macOS Keychain.</span>
+                        <div class="settings-card-header">
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Provider &amp; Key</span>
+                                <span class="settings-helper">Choose a provider key to view or edit. Keys stay in macOS Keychain.</span>
                             </div>
                         </div>
                         <div class="ai-settings-grid ai-settings-grid--modal">
@@ -1018,9 +1036,11 @@
                     </div>
 
                     <div class="surface-panel settings-card">
-                        <div class="ai-settings-heading">
-                            <span>Ask AI &amp; AI Insights</span>
-                            <span>Used for chat in the Ask AI sidebar and generating daily summaries.</span>
+                        <div class="settings-card-header">
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Ask AI &amp; AI Insights</span>
+                                <span class="settings-helper">Used for chat in the Ask AI sidebar and generating daily summaries.</span>
+                            </div>
                         </div>
                         <label class="ai-field">
                             <span>Provider</span>
@@ -1158,9 +1178,9 @@
                         </label>
 
                         <div class="surface-panel surface-panel--inset p-3 flex flex-col gap-3">
-                            <div class="ai-settings-heading">
-                                <span>Sensitive Screenshot Exclusions</span>
-                                <span>Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Sensitive Screenshot Exclusions</span>
+                                <span class="settings-helper">Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
                             </div>
                             <div class="flex gap-2">
                                 <input type="text" id="settings-ai-screenshot-sensitive-input" class="field ai-settings-input flex-1" placeholder="App name or bundle ID" aria-label="Sensitive screenshot exclusion">
@@ -1287,9 +1307,32 @@
 
                     <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
                         <div class="grid grid-cols-3 gap-3">
-                            <div class="flex flex-col gap-1">
-                                <label class="metric-label">Date</label>
-                                <input type="date" class="field" id="proj-details-manual-date">
+                            <div class="project-manual-date-picker flex flex-col gap-1">
+                                <label class="metric-label" id="proj-details-manual-date-label-heading">Date</label>
+                                <input type="hidden" id="proj-details-manual-date">
+                                <div class="relative">
+                                    <button type="button" class="field project-manual-date-trigger" id="proj-details-manual-date-trigger" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="proj-details-manual-date-label-heading proj-details-manual-date-label">
+                                        <span id="proj-details-manual-date-label">Today</span>
+                                        <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                                    </button>
+                                    <div id="proj-details-manual-date-picker-popover" role="dialog" aria-label="Select manual entry date" class="popover project-manual-date-popover hidden absolute left-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
+                                        <div class="calendar-popover-header">
+                                            <button id="proj-details-manual-date-picker-prev-month" type="button" class="icon-button" aria-label="Previous month">
+                                                <i class="ph ph-caret-left"></i>
+                                            </button>
+                                            <div id="proj-details-manual-date-picker-month-label" class="calendar-month-label"></div>
+                                            <button id="proj-details-manual-date-picker-next-month" type="button" class="icon-button" aria-label="Next month">
+                                                <i class="ph ph-caret-right"></i>
+                                            </button>
+                                        </div>
+                                        <div id="proj-details-manual-date-picker-weekdays" class="calendar-weekdays grid grid-cols-7 gap-1"></div>
+                                        <div id="proj-details-manual-date-picker-days" class="grid grid-cols-7 gap-1"></div>
+                                        <div class="calendar-popover-actions">
+                                            <button id="proj-details-manual-date-picker-clear" type="button" class="calendar-popover-close">Close</button>
+                                            <button id="proj-details-manual-date-picker-today" type="button" class="button-primary">Today</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="metric-label">Hours Worked</label>

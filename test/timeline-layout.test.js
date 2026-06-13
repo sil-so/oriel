@@ -309,8 +309,8 @@ test('settings and Work Times panels keep controls aligned and collapsible', () 
   assert.match(topHeader, /id="btn-toggle-work-times"/);
   assert.ok(topHeader.indexOf('id="btn-settings"') < topHeader.indexOf('id="btn-toggle-work-times"'));
   assert.doesNotMatch(sidebarHeader, /id="btn-toggle-work-times"/);
-  assert.match(html, /class="[^"]*\bwork-breakdown-row\b[^"]*"/);
-  assert.match(css, /\.work-breakdown-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/s);
+  assert.match(html, /class="[^"]*\bproject-summary-panel\b[^"]*"/);
+  assert.match(css, /\.project-summary-panel__header\s*\{[\s\S]*align-items:\s*center/s);
   assert.match(css, /\.side-summary\.is-collapsed\s*\{[\s\S]*display:\s*none/s);
   assert.match(css, /#scheduler-workspace\.is-work-times-collapsed #timeline-selection-overlay\s*\{[\s\S]*right:\s*0/s);
   assert.match(main, /function setWorkTimesCollapsed\(collapsed\)/);
