@@ -4,27 +4,31 @@ import { test } from 'node:test';
 
 test('multi-select toolbar overlays both timeline panes without entering Work Times', () => {
   const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
   const overlayStart = html.indexOf('id="timeline-selection-overlay"');
   const toolbarStart = html.indexOf('id="multi-select-bar"');
   const workTimesStart = html.indexOf('Work Summary Statistics');
+  const overlayRule = css.match(/\.timeline-selection-overlay\s*\{([\s\S]*?)\}/)?.[1] || '';
+  const toolbarRule = css.match(/\.timeline-selection-bar\s*\{([\s\S]*?)\}/)?.[1] || '';
+  const countRule = css.match(/\.timeline-selection-bar__count\s*\{([\s\S]*?)\}/)?.[1] || '';
 
   assert.ok(overlayStart > -1, 'expected a timeline selection overlay');
   assert.ok(toolbarStart > overlayStart, 'expected the toolbar inside the timeline overlay');
   assert.ok(workTimesStart > toolbarStart, 'expected Work Times after the toolbar overlay');
-  assert.match(
-    html,
-    /id="timeline-selection-overlay" class="[^"]*absolute[^"]*right-\[340px\][^"]*pointer-events-none/
-  );
-  assert.match(html, /id="multi-select-bar" class="[^"]*pointer-events-auto/);
-  assert.match(
-    html,
-    /id="multi-select-bar" class="[^"]*left-1\/2[^"]*-translate-x-1\/2[^"]*w-max[^"]*gap-8/
-  );
+  assert.match(html, /id="timeline-selection-overlay" class="[^"]*\btimeline-selection-overlay\b/);
+  assert.match(overlayRule, /position:\s*absolute/);
+  assert.match(overlayRule, /inset:\s*0 340px 0 0/);
+  assert.match(overlayRule, /pointer-events:\s*none/);
+  assert.match(html, /id="multi-select-bar" class="[^"]*\btimeline-selection-bar\b/);
+  assert.match(toolbarRule, /pointer-events:\s*auto/);
+  assert.match(toolbarRule, /left:\s*50%/);
+  assert.match(toolbarRule, /width:\s*max-content/);
+  assert.match(toolbarRule, /gap:\s*32px/);
   assert.doesNotMatch(html, /id="multi-select-bar" class="[^"]*right-6/);
-  assert.match(
-    html,
-    /id="lbl-selected-count" class="[^"]*inline-block[^"]*w-\[4ch\][^"]*text-right[^"]*tabular-nums/
-  );
+  assert.match(html, /id="lbl-selected-count" class="[^"]*\btimeline-selection-bar__count\b/);
+  assert.match(countRule, /display:\s*inline-block/);
+  assert.match(countRule, /width:\s*4ch/);
+  assert.match(countRule, /text-align:\s*right/);
 });
 
 test('timeline controls use one visible scrollbar and compact stable controls', () => {

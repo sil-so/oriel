@@ -319,7 +319,7 @@ function renderMemoryAidHtml({ activities, timelineActivities, zoom, hideEmptyAc
 }
 
 function extractActivityStyles(html) {
-  return [...html.matchAll(/class="([^"]*activity-block[^"]*)"[\s\S]*?style="([^"]+)"[\s\S]*?data-start-cell="([^"]+)"[\s\S]*?data-span="([^"]+)"/g)]
+  return [...html.matchAll(/<div class="([^"]*\bactivity-block\b[^"]*)"[\s\S]*?style="([^"]+)"[\s\S]*?data-start-cell="([^"]+)"[\s\S]*?data-span="([^"]+)"/g)]
     .map(match => {
       const topPxMatch = match[2].match(/top:\s*([0-9.]+)px/);
       const heightPxMatch = match[2].match(/height:\s*([0-9.]+)px/);
@@ -6257,13 +6257,13 @@ test('Multiple Activities popup renders browser activity as a host session with 
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
-  assert.match(popup.renderedMultiList, /font-semibold[^>]*>Context Switching Simplification<\/span>/);
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Context Switching Simplification<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
-  assert.match(popup.renderedMultiList, /<span class="font-semibold[^"]*" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
+  assert.match(popup.renderedMultiList, /<span class="popup-activity-title popup-activity-title--child" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
   assert.match(popup.renderedMultiList, /<i class="ph ph-arrow-square-out/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/"/);
   assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 2);
@@ -6364,12 +6364,12 @@ test('Multiple Activities popup collapses same-host browser rows into assignable
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>chatgpt\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
-  assert.match(popup.renderedMultiList, /font-semibold[^>]*>Meal Ingredients List<\/span>/);
-  assert.match(popup.renderedMultiList, /font-semibold[^>]*>User Activity Analysis<\/span>/);
-  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row hidden"[\s\S]*?text-gray-500[^>]*title="Brave Browser">Brave Browser<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Meal Ingredients List<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>User Activity Analysis<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row hidden"[\s\S]*?popup-activity-secondary[^>]*title="Brave Browser">Brave Browser<\/span>/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com"/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/meal"/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/activity"/);
@@ -6410,7 +6410,7 @@ test('Multiple Activities popup falls back to host when browser titles are URL-l
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>app\.ynab\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>app\.ynab\.com<\/span>/);
   assert.doesNotMatch(popup.renderedMultiList, /title="app\.ynab\.com\/5f53b33e|>app\.ynab\.com\/5f53b33e/);
   assert.match(popup.renderedMultiList, /href="https:\/\/app\.ynab\.com"/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
@@ -6504,7 +6504,7 @@ test('Multiple Activities popup host fallback strips leading www from browser la
   });
 
   assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Multiple Activities');
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>facebook\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>facebook\.com<\/span>/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
   assert.doesNotMatch(popup.renderedMultiList, /title="www\.facebook\.com|>www\.facebook\.com/);
 });
@@ -6533,8 +6533,9 @@ test('Multiple Activities popup suppresses duplicate native app secondary labels
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>Codex<\/span>/);
-  assert.equal((popup.renderedMultiList.match(/title="Codex"/g) || []).length, 1);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>Codex<\/span>/);
+  assert.equal((popup.renderedMultiList.match(/class="popup-activity-title" title="Codex"/g) || []).length, 1);
+  assert.doesNotMatch(popup.renderedMultiList, /class="popup-activity-secondary" title="Codex">Codex<\/span>/);
 });
 
 test('Multiple Activities popup display labels do not rewrite assignment payloads', () => {
@@ -7500,8 +7501,8 @@ test('multiple activity popover aligns app names separately without dash separat
   });
 
   assert.equal(renderedMultiList.includes('—'), false);
-  assert.match(renderedMultiList, /<div class="flex items-center gap-1 min-w-0 flex-1">\s*<span class="font-bold text-gray-200 truncate min-w-0"/);
-  assert.match(renderedMultiList, /<span class="text-gray-400 text-right truncate shrink-0 max-w-\[42%\]"/);
+  assert.match(renderedMultiList, /<div class="popup-activity-row__label">\s*<span class="popup-activity-title" title="Reference Browser Tab">Reference Browser Tab<\/span>/);
+  assert.match(renderedMultiList, /<span class="popup-activity-secondary" title="Brave Browser">Brave Browser<\/span>/);
   assert.equal((renderedMultiList.match(/popup-activity-external-link/g) || []).length, 2);
 });
 
@@ -8059,7 +8060,7 @@ test('recorded activity popup renders different same-host page titles as session
     }
   });
 
-  assert.match(renderedMultiList, /font-bold[^>]*>vinted\.nl<\/span>/);
+  assert.match(renderedMultiList, /class="popup-activity-title"[^>]*>vinted\.nl<\/span>/);
   assert.match(renderedMultiList, /popup-activity-expand/);
   assert.match(renderedMultiList, /popup-activity-child-row hidden/);
   assert.match(renderedMultiList, /Apple Mac mini 1 model A2348 \| Vinted/);
@@ -8414,8 +8415,8 @@ test('popup sessions aggregate page children and omit short unrelated scraps', (
     ]
   });
 
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>mediamarkt\.nl<\/span>/);
-  assert.match(popup.renderedMultiList, /font-bold[^>]*>duckduckgo\.com<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>mediamarkt\.nl<\/span>/);
+  assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>duckduckgo\.com<\/span>/);
   assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
   assert.doesNotMatch(popup.renderedMultiList, /New Tab/);
   assert.doesNotMatch(popup.renderedMultiList, /Codex/);

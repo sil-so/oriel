@@ -3984,7 +3984,6 @@ function createActivityBlockHTML(block, rowLayout = null) {
         ? `activity:${blockStart}:${blockEnd}:${block.similarityKey || block.summaryKey || ''}`
         : startCell;
 
-    const textStyle = 'text-white font-semibold';
     const isSelected = state.selectedActivities.has(selectionId);
     const selectedClass = isSelected ? 'selected' : '';
 
@@ -4064,24 +4063,24 @@ function createActivityBlockHTML(block, rowLayout = null) {
              data-app-path="${escapeAttribute(appPath)}"
              data-bundle-id="${escapeAttribute(bundleId)}"
              ${overlapDataAttribute}>
-            <div class="activity-checkbox ${isSelected ? 'is-selected' : ''} mr-2 shrink-0 cursor-pointer z-20 flex items-center justify-center">
+            <div class="activity-checkbox activity-block__checkbox ${isSelected ? 'is-selected' : ''}">
                 <i class="${isSelected ? 'ph-fill ph-check-square' : 'ph ph-square'} text-base"></i>
             </div>
-            <div class="w-5 h-5 flex items-center justify-center mr-3 shrink-0">
+            <div class="activity-block__icon">
                 ${iconHTML}
             </div>
-            <div class="flex-1 min-w-0 flex items-center gap-1.5 text-[11px] leading-none pr-3">
-                <span class="${textStyle} truncate flex-1 min-w-0">${displayTitle}</span>
-                <span class="text-gray-400 font-normal text-[10px] shrink-0">${escapeTimelineText(app)}</span>
+            <div class="activity-block__content">
+                <span class="activity-block__title">${displayTitle}</span>
+                <span class="activity-block__subtitle">${escapeTimelineText(app)}</span>
             </div>
-            <div class="flex items-center gap-1.5 shrink-0 ml-auto z-20">
+            <div class="activity-block__actions">
                 ${visibleSecondaryOverlaps.length > 0 ? `
-                    <div class="flex items-center gap-1 mr-2">
+                    <div class="activity-block__secondary-icons">
                         ${inlineIconOverlaps.map(o => {
-                            return `<div class="w-5 h-5 flex items-center justify-center shrink-0">${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}</div>`;
+                            return `<div class="activity-block__secondary-icon">${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}</div>`;
                         }).join('')}
                         ${hiddenInlineIconCount > 0 ? `
-                            <div class="duration-pill h-4 ml-0.5 min-w-[14px]">
+                            <div class="duration-pill activity-block__overflow-pill">
                                 +${hiddenInlineIconCount}
                             </div>
                         ` : ''}
@@ -4090,7 +4089,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
                 <div class="${durationPillClass}"${durationPillAttributes}>
                     ${durationStr}
                 </div>
-                <button class="activity-quick-add bg-transparent w-7 h-7 rounded-full flex items-center justify-center" title="Assign to Project">
+                <button class="activity-quick-add activity-block__quick-add" title="Assign to Project">
                     <i class="ph ph-plus-circle text-lg"></i>
                 </button>
             </div>
@@ -4627,7 +4626,7 @@ function renderLoggedTimeEntries() {
         const floatingLabelClass = naturalHeightPx >= TIME_ENTRY_FLOATING_LABEL_MIN_HEIGHT_PX ? ' time-entry-main--floating' : '';
         const description = (entry.description || '').trim();
         const descriptionHtml = description
-            ? `<span class="time-entry-description truncate pr-2">${escapeTimelineText(description)}</span>`
+            ? `<span class="time-entry-description">${escapeTimelineText(description)}</span>`
             : '';
         const projectSummaryHtml = `
                     <span class="project-marker" style="background-color: ${project.color}"></span>
@@ -4635,19 +4634,19 @@ function renderLoggedTimeEntries() {
                     ${task ? `<span class="time-entry-task duration-pill shrink-0">${escapeTimelineText(task.name)}</span>` : ''}
         `;
         const mainContentHtml = descriptionHtml || `
-                    <span class="time-entry-project-summary min-w-0 flex items-center gap-1.5 truncate">
+                    <span class="time-entry-project-summary">
                         ${projectSummaryHtml}
                     </span>
         `;
         const timeEntryMainHtml = (extraClass = '', inlineStyle = '', ariaHidden = false) => `
-                <div class="time-entry-main${extraClass} flex justify-between items-start text-white text-[12px] font-semibold leading-tight pointer-events-none"${inlineStyle ? ` style="${inlineStyle}"` : ''}${ariaHidden ? ' aria-hidden="true"' : ''}>
+                <div class="time-entry-main${extraClass}"${inlineStyle ? ` style="${inlineStyle}"` : ''}${ariaHidden ? ' aria-hidden="true"' : ''}>
                     ${mainContentHtml}
                     <span class="duration-pill time-entry-duration shrink-0">${duration} min</span>
                 </div>
         `;
         const projectRowHtml = description
             ? `
-                <div class="time-entry-project text-[10px] font-bold mt-1 text-white/80 uppercase tracking-wider flex items-center gap-1.5 pointer-events-none">
+                <div class="time-entry-project">
                     ${projectSummaryHtml}
                 </div>
             `
@@ -4918,28 +4917,28 @@ function showActivityDetailsPopup(b) {
             ? `<a href="${escapeAttribute(displayLabels.externalUrl)}"
                    target="_blank"
                    rel="noopener noreferrer"
-                   class="popup-activity-external-link text-gray-400 hover:text-blue-300 focus-visible:text-blue-300 w-4 h-4 rounded-full flex items-center justify-center shrink-0"
+                   class="popup-activity-external-link"
                    title="Open in browser"
                    aria-label="Open ${escapeAttribute(displayLabels.primary)} in browser">
-                    <i class="ph ph-arrow-square-out text-[13px]" aria-hidden="true"></i>
+                    <i class="ph ph-arrow-square-out" aria-hidden="true"></i>
                </a>`
             : '';
         return `
-            <div class="flex items-center justify-between text-[10px] py-1.5 popup-activity-row popup-activity-child-row${hiddenClass}"
+            <div class="popup-activity-row popup-activity-child-row${hiddenClass}"
                  data-popup-overlap-index="${parentIndex}"
                  data-popup-child-index="${childIndex}"
                  data-popup-child-parent-index="${parentIndex}"
                  data-popup-similarity-key="${escapeAttribute(rowKey)}">
-                <div class="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                    <div class="w-5 h-5 flex items-center justify-center shrink-0 opacity-80">
+                <div class="popup-activity-row__main">
+                    <div class="popup-activity-row__icon popup-activity-row__icon--muted">
                         ${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}
                     </div>
-                    <div class="flex items-center gap-1 min-w-0 flex-1">
-                        <span class="font-semibold text-gray-300 truncate min-w-0" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
+                    <div class="popup-activity-row__label">
+                        <span class="popup-activity-title popup-activity-title--child" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
                         ${externalLinkHTML}
                     </div>
                 </div>
-                <span class="popup-activity-child-duration shrink-0 text-[10px] font-semibold tabular-nums">${oDurationStr}</span>
+                <span class="popup-activity-duration popup-activity-child-duration">${oDurationStr}</span>
             </div>
         `;
     };
@@ -4969,31 +4968,31 @@ function showActivityDetailsPopup(b) {
                 ? `<a href="${escapeAttribute(displayLabels.externalUrl)}"
                        target="_blank"
                        rel="noopener noreferrer"
-                       class="popup-activity-external-link text-gray-400 hover:text-blue-300 focus-visible:text-blue-300 w-4 h-4 rounded-full flex items-center justify-center shrink-0"
+                       class="popup-activity-external-link"
                        title="Open in browser"
                        aria-label="Open ${escapeAttribute(displayLabels.primary)} in browser">
-                        <i class="ph ph-arrow-square-out text-[13px]" aria-hidden="true"></i>
+                        <i class="ph ph-arrow-square-out" aria-hidden="true"></i>
                    </a>`
                 : '';
             const secondaryLabelHTML = displayLabels.secondary
-                ? `<span class="text-gray-400 text-right truncate shrink-0 max-w-[42%]" title="${escapeAttribute(displayLabels.secondary)}">${escapeTimelineText(displayLabels.secondary)}</span>`
+                ? `<span class="popup-activity-secondary" title="${escapeAttribute(displayLabels.secondary)}">${escapeTimelineText(displayLabels.secondary)}</span>`
                 : '';
             const rowDurationPillClass = activityMixPillClass(o.activityMix, 'shrink-0');
             const rowDurationPillAttributes = activityMixPillAttributes(o.activityMix);
             const expandButtonHTML = children.length > 0
                 ? `<button type="button"
-                           class="popup-activity-expand bg-transparent w-6 h-7 rounded-full flex items-center justify-center shrink-0 mr-0.5 text-gray-400 hover:text-gray-100"
+                           class="popup-activity-expand"
                            title="Show source rows"
                            aria-label="Show source rows for ${escapeAttribute(displayLabels.primary)}"
                            aria-expanded="false">
-                        <i class="ph ph-caret-right text-[13px]" aria-hidden="true"></i>
+                        <i class="ph ph-caret-right" aria-hidden="true"></i>
                    </button>`
                 : '';
             if (isChildRow) {
                 return renderPopupActivityChildRow(o, index, childIndex);
             }
 
-            const rowClass = `flex items-center justify-between text-[11px] py-1.5 border-b border-[#2d2f34]/40 last:border-b-0 popup-activity-row${rowSelectedClass}`;
+            const rowClass = `popup-activity-row${rowSelectedClass}`;
             const childRowsHTML = children.length > 0
                 ? `<div class="popup-activity-children hidden" data-popup-child-group-index="${index}">
                         ${children.map((child, nextChildIndex) => renderPopupActivityBreakdownRow(child, index, { childIndex: nextChildIndex })).join('')}
@@ -5006,25 +5005,25 @@ function showActivityDetailsPopup(b) {
                      data-popup-similarity-key="${escapeAttribute(rowKey)}">
                     ${expandButtonHTML}
                     <button type="button"
-                            class="popup-activity-select activity-checkbox ${isRowSelected ? 'is-selected ' : ''}w-7 h-7 rounded-full flex items-center justify-center shrink-0 mr-1"
+                            class="popup-activity-select activity-checkbox${isRowSelected ? ' is-selected' : ''}"
                             title="Select activity"
                             aria-label="Select activity"
                             aria-pressed="${String(isRowSelected)}">
                         <i class="${checkboxIconClass} text-base"></i>
                     </button>
-                    <div class="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                        <div class="w-5 h-5 flex items-center justify-center shrink-0">
+                    <div class="popup-activity-row__main">
+                        <div class="popup-activity-row__icon">
                             ${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}
                         </div>
-                        <div class="flex items-center gap-1 min-w-0 flex-1">
-                            <span class="font-bold text-gray-200 truncate min-w-0" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
+                        <div class="popup-activity-row__label">
+                            <span class="popup-activity-title" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
                             ${externalLinkHTML}
                         </div>
                         ${secondaryLabelHTML}
                     </div>
                     <span class="${rowDurationPillClass}"${rowDurationPillAttributes}>${oDurationStr}</span>
                     <button type="button"
-                            class="popup-activity-quick-add activity-quick-add bg-transparent w-7 h-7 rounded-full flex items-center justify-center shrink-0 ml-1"
+                            class="popup-activity-quick-add activity-quick-add"
                             title="Assign to Project"
                             aria-label="Assign activity to project">
                         <i class="ph ph-plus-circle text-lg"></i>
