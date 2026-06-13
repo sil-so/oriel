@@ -444,16 +444,19 @@ test('timeline and sidebar chrome use semantic design-system classes', () => {
     'timeline-selection-bar',
     'timeline-selection-bar__summary',
     'side-summary-content',
-    'sidebar-stat-card',
-    'sidebar-stat-row',
-    'sidebar-progress-track',
-    'sidebar-progress-fill',
-    'sidebar-section-title'
+    'sidebar-section-title',
+    'project-summary-panel',
+    'project-summary-panel__header'
   ]) {
     assert.match(timelineMarkup, new RegExp(`\\b${className}\\b`), `expected timeline markup to use ${className}`);
     assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
   }
 
+  assert.doesNotMatch(timelineMarkup, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.ok(
+    timelineMarkup.indexOf('project-summary-panel') < timelineMarkup.indexOf('id="unlogged-work-review"'),
+    'expected Total Project Time panel before Unlogged Work'
+  );
   assert.doesNotMatch(timelineMarkup, /border-\[#2d2f34\]|bg-\[#0d0e10\]|text-\[(?:10|11|12)px\]|text-gray-|text-white|bg-emerald-|text-emerald-/);
   assert.match(css, /\.activity-details-popup__details\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.activity-details-popup__field\.hidden,\s*\.activity-details-popup__meta-item\.hidden\s*\{[\s\S]*?display:\s*none/);
@@ -627,7 +630,10 @@ test('activity title cleanup saved rules use a quiet editable list layout', () =
   for (const className of [
     'title-cleanup-rule',
     'title-cleanup-rule__header',
-    'title-cleanup-rule__fields',
+    'title-cleanup-rule__summary',
+    'title-cleanup-rule__chips',
+    'title-cleanup-rule__editor',
+    'title-cleanup-rule__actions',
     'title-cleanup-rule__field',
     'title-cleanup-rule__label'
   ]) {
@@ -637,6 +643,24 @@ test('activity title cleanup saved rules use a quiet editable list layout', () =
   assert.match(cleanupRenderer, /removeButton\.className = 'icon-button icon-button--danger/);
   assert.doesNotMatch(cleanupRenderer, /surface-panel flex flex-col gap-2 px-3 py-2/);
   assert.doesNotMatch(cleanupRenderer, /text-gray-500 hover:text-red-400/);
+});
+
+test('similar activity selection uses a modal with explicit match modes', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+
+  assert.match(html, /id="similar-modal"/);
+  assert.match(html, /id="similar-mode-host"/);
+  assert.match(html, /id="similar-mode-url"/);
+  assert.match(html, /id="similar-mode-app"/);
+  assert.match(html, /id="similar-mode-app-title"/);
+  assert.match(css, /\.similar-options\b/);
+  assert.match(css, /\.similar-option\b/);
+  assert.match(main, /openSimilarSelectionModal\(\)/);
+  assert.match(timeline, /function openSimilarSelectionModal\(/);
+  assert.match(timeline, /function getActivitySimilarityKeyForMode\(/);
 });
 
 test('AI and data settings sections share heading treatment without extra danger divider', () => {
@@ -677,23 +701,27 @@ test('activity popup child rows remove favicon gutters and expose alignment cont
   assert.doesNotMatch(childRenderer, /popup-activity-row__icon/);
   assert.match(childRenderer, /popup-activity-row__main popup-activity-row__main--child/);
   assert.match(timeline, /popup-activity-children--multi/);
-  assert.match(css, /\.popup-activity-children--single\s*\{[\s\S]*margin-left:\s*0/);
+  assert.doesNotMatch(timeline, /popup-activity-children--single/);
   assert.match(css, /\.popup-activity-children--multi\s*\{/);
   assert.match(css, /\.popup-activity-row__main--child\s*\{/);
+  assert.match(css, /\.activity-mix-tooltip\s*\{[\s\S]*z-index:\s*var\(--z-tooltip\)/);
 });
 
 test('work times sidebar uses compact shared panel surfaces', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
 
   assert.match(css, /\.side-summary-content\s*\{[\s\S]*letter-spacing:\s*0/);
   assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*gap:\s*20px/);
   assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*letter-spacing:\s*0/);
-  assert.match(css, /\.sidebar-stat-card\s*\{[\s\S]*padding:\s*16px/);
-  assert.match(css, /\.sidebar-stat-row\s*\{[\s\S]*align-items:\s*center/);
+  assert.doesNotMatch(html, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.match(css, /\.project-summary-panel\s*\{[\s\S]*padding:\s*16px/);
+  assert.match(css, /\.project-summary-panel__header\s*\{[\s\S]*align-items:\s*center/);
   assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*font-size:\s*11px/);
   assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*letter-spacing:\s*0\.04em/);
   assert.match(css, /\.unlogged-work-review\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
-  assert.match(css, /\.project-breakdown-card\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
+  assert.match(css, /\.project-breakdown-card\s*\{[\s\S]*background:\s*color-mix\(in oklch, var\(--surface-raised\)/);
+  assert.doesNotMatch(css, /\.project-breakdown-footer\b/);
 });
 
 test('web dropdowns use app-rendered menus instead of native select popups', () => {

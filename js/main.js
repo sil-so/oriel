@@ -1019,6 +1019,7 @@ function closeTopModal() {
         'settings-modal',
         'rules-modal',
         'project-modal',
+        'similar-modal',
         'time-entry-modal'
     ];
 
@@ -1036,6 +1037,7 @@ function setupModalDismissalHandlers() {
         'settings-modal',
         'rules-modal',
         'project-modal',
+        'similar-modal',
         'time-entry-modal'
     ].forEach(modalId => {
         const modal = document.getElementById(modalId);
@@ -1172,6 +1174,7 @@ function setupMainEventListeners() {
     let logoDevKeySaved = false;
     let logoDevKeyEditMode = false;
     let logoDevKeyFeedbackTimer = null;
+    let expandedTitleCleanupRuleId = null;
 
     const exclusionFieldLabels = {
         app: 'Application',
@@ -1198,7 +1201,8 @@ function setupMainEventListeners() {
         if (window.OrielData && window.OrielData.isNative) {
             try {
                 const nativeSettings = await window.OrielData.request('settings.get', {});
-                Object.assign(state.settings, nativeSettings);
+                const reconciledSettings = await reconcileTitleCleanupRulesFromLocalStorage(nativeSettings);
+                Object.assign(state.settings, reconciledSettings);
                 if (typeof window.applyTheme === 'function') {
                     window.applyTheme(state.settings.theme);
                 }
@@ -1325,6 +1329,61 @@ function setupMainEventListeners() {
             : [];
     }
 
+    function comparableTitleCleanupRules(rules) {
+        return normalizeSettingsTitleCleanupRules(rules).map(rule => ({
+            id: rule.id,
+            name: rule.name,
+            enabled: rule.enabled !== false,
+            pattern: rule.pattern,
+            appContains: rule.appContains || '',
+            urlContains: rule.urlContains || ''
+        }));
+    }
+
+    function titleCleanupRulesEqual(leftRules, rightRules) {
+        return JSON.stringify(comparableTitleCleanupRules(leftRules)) === JSON.stringify(comparableTitleCleanupRules(rightRules));
+    }
+
+    function readStoredTitleCleanupRules() {
+        try {
+            const rawValue = localStorage.getItem('titleCleanupRules');
+            if (!rawValue) return [];
+            const parsedRules = JSON.parse(rawValue);
+            return normalizeSettingsTitleCleanupRules(parsedRules);
+        } catch {
+            return [];
+        }
+    }
+
+    async function reconcileTitleCleanupRulesFromLocalStorage(nativeSettings) {
+        const nextSettings = { ...(nativeSettings || {}) };
+        if (!window.OrielData?.isNative) return nextSettings;
+
+        const nativeRules = normalizeSettingsTitleCleanupRules(nextSettings.titleCleanupRules);
+        const storedRules = readStoredTitleCleanupRules();
+        const defaultRules = normalizeSettingsTitleCleanupRules(cloneSettingsDefaultTitleCleanupRules());
+
+        const hasRecoverableStoredRules = storedRules.length > 0
+            && !titleCleanupRulesEqual(storedRules, defaultRules)
+            && !titleCleanupRulesEqual(storedRules, nativeRules);
+        const nativeLooksUncustomized = defaultRules.length > 0
+            && titleCleanupRulesEqual(nativeRules, defaultRules);
+
+        if (!hasRecoverableStoredRules || !nativeLooksUncustomized) return nextSettings;
+
+        if (!titleCleanupRulesHaveValidPatterns(storedRules)) return nextSettings;
+
+        try {
+            const updatedSettings = await window.OrielData.request('settings.update', { titleCleanupRules: storedRules });
+            nextSettings.titleCleanupRules = normalizeSettingsTitleCleanupRules(updatedSettings?.titleCleanupRules || storedRules);
+            localStorage.setItem('titleCleanupRules', JSON.stringify(nextSettings.titleCleanupRules));
+        } catch (error) {
+            console.error('Error migrating title cleanup rules:', error);
+        }
+
+        return nextSettings;
+    }
+
     function validateTitleCleanupPattern(pattern) {
         try {
             // The cleaner applies rules with these flags, so validate the same shape here.
@@ -1389,9 +1448,29 @@ function setupMainEventListeners() {
             return;
         }
 
+        const createText = (className, text) => {
+            const element = document.createElement('span');
+            element.className = className;
+            element.textContent = text;
+            return element;
+        };
+
+        const createRuleField = (labelText, input) => {
+            const field = document.createElement('label');
+            field.className = 'title-cleanup-rule__field';
+            const label = document.createElement('span');
+            label.className = 'title-cleanup-rule__label';
+            label.textContent = labelText;
+            field.appendChild(label);
+            field.appendChild(input);
+            return field;
+        };
+
         rules.forEach((rule, index) => {
             const row = document.createElement('div');
             row.className = 'title-cleanup-rule';
+            const isExpanded = expandedTitleCleanupRuleId === rule.id;
+            row.classList.toggle('is-expanded', isExpanded);
 
             const top = document.createElement('div');
             top.className = 'title-cleanup-rule__header';
@@ -1410,19 +1489,36 @@ function setupMainEventListeners() {
             toggleLabel.appendChild(toggle);
             toggleLabel.appendChild(toggleTrack);
 
-            const name = document.createElement('input');
-            name.type = 'text';
-            name.className = 'field';
-            name.value = rule.name;
-            name.setAttribute('aria-label', 'Title cleanup rule name');
+            const summary = document.createElement('div');
+            summary.className = 'title-cleanup-rule__summary';
+            const summaryTitle = createText('title-cleanup-rule__name', rule.name);
+            const chips = document.createElement('div');
+            chips.className = 'title-cleanup-rule__chips';
+            const patternChip = createText('title-cleanup-rule__chip title-cleanup-rule__chip--pattern', 'Pattern set');
+            patternChip.title = rule.pattern;
+            chips.appendChild(patternChip);
+            if (rule.appContains) {
+                chips.appendChild(createText('title-cleanup-rule__chip', `App: ${rule.appContains}`));
+            }
+            if (rule.urlContains) {
+                chips.appendChild(createText('title-cleanup-rule__chip', `URL: ${rule.urlContains}`));
+            }
+            if (!rule.appContains && !rule.urlContains) {
+                chips.appendChild(createText('title-cleanup-rule__chip', 'All activity'));
+            }
+            summary.appendChild(summaryTitle);
+            summary.appendChild(chips);
 
-            const nameField = document.createElement('label');
-            nameField.className = 'title-cleanup-rule__field';
-            const nameLabel = document.createElement('span');
-            nameLabel.className = 'title-cleanup-rule__label';
-            nameLabel.textContent = 'Name';
-            nameField.appendChild(nameLabel);
-            nameField.appendChild(name);
+            const headerActions = document.createElement('div');
+            headerActions.className = 'title-cleanup-rule__actions';
+
+            const editButton = document.createElement('button');
+            editButton.type = 'button';
+            editButton.className = 'icon-button';
+            editButton.title = isExpanded ? 'Close title cleanup rule editor' : 'Edit title cleanup rule';
+            editButton.setAttribute('aria-label', 'Edit title cleanup rule');
+            editButton.setAttribute('aria-expanded', String(isExpanded));
+            editButton.innerHTML = `<i class="ph ph-${isExpanded ? 'caret-up' : 'pencil-simple'} text-sm" aria-hidden="true"></i>`;
 
             const removeButton = document.createElement('button');
             removeButton.type = 'button';
@@ -1432,8 +1528,20 @@ function setupMainEventListeners() {
             removeButton.innerHTML = '<i class="ph ph-trash text-sm" aria-hidden="true"></i>';
 
             top.appendChild(toggleLabel);
-            top.appendChild(nameField);
-            top.appendChild(removeButton);
+            top.appendChild(summary);
+            headerActions.appendChild(editButton);
+            headerActions.appendChild(removeButton);
+            top.appendChild(headerActions);
+
+            const editor = document.createElement('div');
+            editor.className = 'title-cleanup-rule__editor';
+            if (!isExpanded) editor.classList.add('hidden');
+
+            const name = document.createElement('input');
+            name.type = 'text';
+            name.className = 'field';
+            name.value = rule.name;
+            name.setAttribute('aria-label', 'Title cleanup rule name');
 
             const pattern = document.createElement('input');
             pattern.type = 'text';
@@ -1456,20 +1564,25 @@ function setupMainEventListeners() {
             urlScope.value = rule.urlContains || '';
             urlScope.setAttribute('aria-label', 'Optional URL scope');
 
-            const createRuleField = (labelText, input) => {
-                const field = document.createElement('label');
-                field.className = 'title-cleanup-rule__field';
-                const label = document.createElement('span');
-                label.className = 'title-cleanup-rule__label';
-                label.textContent = labelText;
-                field.appendChild(label);
-                field.appendChild(input);
-                return field;
-            };
-
+            scopes.appendChild(createRuleField('Name', name));
             scopes.appendChild(createRuleField('Regex Pattern', pattern));
             scopes.appendChild(createRuleField('App Scope', appScope));
             scopes.appendChild(createRuleField('URL Scope', urlScope));
+
+            const editorActions = document.createElement('div');
+            editorActions.className = 'title-cleanup-rule__editor-actions';
+            const cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'button-secondary';
+            cancelButton.textContent = 'Cancel';
+            const saveButton = document.createElement('button');
+            saveButton.type = 'button';
+            saveButton.className = 'button-primary';
+            saveButton.textContent = 'Save Rule';
+            editorActions.appendChild(cancelButton);
+            editorActions.appendChild(saveButton);
+            editor.appendChild(scopes);
+            editor.appendChild(editorActions);
 
             const saveEditedRule = async () => {
                 const nextRules = normalizeSettingsTitleCleanupRules(state.settings.titleCleanupRules);
@@ -1481,22 +1594,36 @@ function setupMainEventListeners() {
                     appContains: appScope.value,
                     urlContains: urlScope.value
                 };
-                await persistTitleCleanupRules(nextRules);
+                const saved = await persistTitleCleanupRules(nextRules, { rerender: false });
+                if (saved) {
+                    expandedTitleCleanupRuleId = null;
+                    renderTitleCleanupRules();
+                }
             };
 
-            toggle.addEventListener('change', saveEditedRule);
-            name.addEventListener('change', saveEditedRule);
-            pattern.addEventListener('change', saveEditedRule);
-            appScope.addEventListener('change', saveEditedRule);
-            urlScope.addEventListener('change', saveEditedRule);
+            toggle.addEventListener('change', async () => {
+                const nextRules = normalizeSettingsTitleCleanupRules(state.settings.titleCleanupRules);
+                nextRules[index] = { ...rule, enabled: toggle.checked };
+                await persistTitleCleanupRules(nextRules);
+            });
+            editButton.addEventListener('click', () => {
+                expandedTitleCleanupRuleId = isExpanded ? null : rule.id;
+                renderTitleCleanupRules();
+            });
+            cancelButton.addEventListener('click', () => {
+                expandedTitleCleanupRuleId = null;
+                renderTitleCleanupRules();
+            });
+            saveButton.addEventListener('click', saveEditedRule);
             removeButton.addEventListener('click', async () => {
                 const nextRules = normalizeSettingsTitleCleanupRules(state.settings.titleCleanupRules);
                 nextRules.splice(index, 1);
+                if (expandedTitleCleanupRuleId === rule.id) expandedTitleCleanupRuleId = null;
                 await persistTitleCleanupRules(nextRules);
             });
 
             row.appendChild(top);
-            row.appendChild(scopes);
+            row.appendChild(editor);
             settingsTitleCleanupList.appendChild(row);
         });
     }
@@ -2880,7 +3007,11 @@ function setupMainEventListeners() {
     });
 
     DOM.elBtnSelectSimilar?.addEventListener('click', () => {
-        selectSimilarActivities();
+        if (typeof openSimilarSelectionModal === 'function') {
+            openSimilarSelectionModal();
+        } else {
+            selectSimilarActivities();
+        }
     });
 
     DOM.elBtnAssignSelected.addEventListener('click', () => {

@@ -299,12 +299,12 @@ test('work times keeps legacy activity-stream totals on saved assigned duration'
   assert.equal(projectTotal.innerText, '0h 2m');
 });
 
-test('timeline UI exposes recorded active time without idle preference or idle total', () => {
+test('timeline UI omits recorded-active stats and idle preference totals', () => {
   const index = fs.readFileSync('index.html', 'utf8');
   const stateSource = fs.readFileSync('js/state.js', 'utf8');
   const timelineSource = fs.readFileSync('js/timeline.js', 'utf8');
 
-  assert.match(index, /Recorded Active Time/);
+  assert.doesNotMatch(index, /Recorded Active Time|Project Logged Time|stat-captured-active/);
   assert.doesNotMatch(index, /Hide Idle Activities|stat-idle|stat-attendance/);
   assert.doesNotMatch(stateSource, /hideIdle/);
   assert.doesNotMatch(timelineSource, /hideIdle/);

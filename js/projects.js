@@ -377,7 +377,7 @@ function recalculateStatistics() {
         return `${hours}h ${mins}m`;
     };
 
-    DOM.elStatCapturedActive.innerText = formatHoursMins(totalActiveMs);
+    if (DOM.elStatCapturedActive) DOM.elStatCapturedActive.innerText = formatHoursMins(totalActiveMs);
 
     // 2. Time Entries (Logged Projects Calculation)
     let totalProjectMs = 0;
@@ -403,7 +403,7 @@ function recalculateStatistics() {
         projectDurations[entry.projectId] += duration;
     }
 
-    DOM.elStatProjectTotal.innerText = formatHoursMins(totalProjectMs);
+    if (DOM.elStatProjectTotal) DOM.elStatProjectTotal.innerText = formatHoursMins(totalProjectMs);
 
     // Safety check for getElStatBillable vs elStatBillable in state.js
     const elBillableNode = DOM.getElStatBillable || document.getElementById('stat-billable');
@@ -412,14 +412,14 @@ function recalculateStatistics() {
 
     // Project bar visual update relative to recorded active time.
     const projectPct = totalActiveMs > 0 ? Math.min(100, Math.round((totalProjectMs / totalActiveMs) * 100)) : 0;
-    DOM.elBarProject.style.width = `${projectPct}%`;
+    if (DOM.elBarProject) DOM.elBarProject.style.width = `${projectPct}%`;
 
     // 3. Projects Breakdown render
     const projectIds = Object.keys(projectDurations);
     if (projectIds.length === 0) {
         DOM.elProjectsList.innerHTML = `
-            <div class="empty-state empty-state--spacious">
-                No time entries logged for this day. Click and drag in the scheduler to create one!
+            <div class="empty-state empty-state--compact">
+                No time entries logged for this day.
             </div>
         `;
         return;
@@ -431,7 +431,7 @@ function recalculateStatistics() {
         const pct = totalProjectMs > 0 ? Math.round((ms / totalProjectMs) * 100) : 0;
 
         return `
-            <div class="surface-panel project-breakdown-card">
+            <div class="project-breakdown-card">
                 <div class="project-breakdown-header">
                     <div class="project-breakdown-title">
                         <span class="project-marker" style="background-color: ${proj.color}"></span>
@@ -441,10 +441,6 @@ function recalculateStatistics() {
                 </div>
                 <div class="progress-track progress-track--thin">
                     <div class="progress-fill" style="background-color: ${proj.color}; width: ${pct}%"></div>
-                </div>
-                <div class="project-breakdown-footer">
-                    <span>Contribution</span>
-                    <span>${pct}%</span>
                 </div>
             </div>
         `;

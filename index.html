@@ -298,35 +298,15 @@
             <div class="side-summary-content app-scrollbar-safe">
                 <div class="sidebar-panel sidebar-panel--work-times" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
 
-                <!-- Main Stats Panel -->
-                <div class="surface-panel sidebar-stat-card">
-
-                    <!-- Recorded Activity -->
-                    <div>
-                        <div class="sidebar-stat-row">
-                            <span class="sidebar-stat-label">Recorded Active Time</span>
-                            <span class="sidebar-stat-value" id="stat-captured-active">0h 0m</span>
-                        </div>
+                <!-- Projects Breakdown List -->
+                <div class="surface-panel project-summary-panel">
+                    <div class="project-summary-panel__header">
+                        <h3 class="sidebar-section-title">Total Project Time</h3>
+                        <span class="duration-pill project-summary-total" id="stat-project-total">0h 0m</span>
                     </div>
-
-                    <div class="sidebar-stat-divider"></div>
-
-                    <!-- Logged Projects -->
-                    <div>
-                        <div class="sidebar-stat-row">
-                            <span class="sidebar-stat-label">Project Logged Time</span>
-                            <span class="sidebar-stat-value sidebar-stat-value--success" id="stat-project-total">0h 0m</span>
-                        </div>
-                        <div class="sidebar-progress-track">
-                            <div class="sidebar-progress-fill" id="bar-project"></div>
-                        </div>
-                        <div class="work-breakdown-row">
-                            <span>Billable Hours</span>
-                            <span id="stat-billable">0h 0m</span>
-                        </div>
-                        <div class="work-breakdown-row">
-                            <span>Non-Billable</span>
-                            <span id="stat-nonbillable">0h 0m</span>
+                    <div class="sidebar-project-list" id="projects-breakdown-list">
+                        <div class="empty-state empty-state--compact">
+                            No time entries logged for this day.
                         </div>
                     </div>
                 </div>
@@ -339,17 +319,6 @@
                     <div class="unlogged-work-list app-scrollbar-safe" id="unlogged-work-review-list">
                         <div class="empty-state empty-state--compact">
                             All recorded source work is covered.
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Projects Breakdown List -->
-                <div class="sidebar-projects-section">
-                    <h3 class="sidebar-section-title sidebar-section-title--padded">Total Project Time</h3>
-                    <div class="sidebar-project-list" id="projects-breakdown-list">
-                        <!-- Project item seeded here -->
-                        <div class="empty-state empty-state--spacious">
-                            No time entries logged for this day. Click and drag in the scheduler to create one!
                         </div>
                     </div>
                 </div>
@@ -554,6 +523,55 @@
                 </button>
             </div>
             <div id="ai-insights-detail-body" class="modal-scroll-content ai-insights-detail-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0"></div>
+        </div>
+    </div>
+
+    <!-- MODAL: Similar Activity Selection -->
+    <div class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden" id="similar-modal" aria-modal="true" role="dialog" aria-labelledby="similar-modal-title">
+        <div class="modal-panel modal-size--sm relative flex flex-col gap-4">
+            <div class="modal-header">
+                <h3 class="modal-title truncate" id="similar-modal-title">Select Similar Activities</h3>
+                <button class="icon-button" id="similar-modal-btn-close" aria-label="Close similar activity selection">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            </div>
+            <div class="modal-field-group">
+                <label class="modal-field-label">Match By</label>
+                <div class="similar-options" role="radiogroup" aria-label="Similar activity match mode">
+                    <label class="similar-option" for="similar-mode-host">
+                        <input type="radio" id="similar-mode-host" name="similar-mode" value="host" checked>
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">Base URL</span>
+                            <span class="similar-option__description">Same browser app and website host.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-url">
+                        <input type="radio" id="similar-mode-url" name="similar-mode" value="url">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">Exact URL</span>
+                            <span class="similar-option__description">Same browser app and full page URL.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-app">
+                        <input type="radio" id="similar-mode-app" name="similar-mode" value="app">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">App Name</span>
+                            <span class="similar-option__description">Same foreground application.</span>
+                        </span>
+                    </label>
+                    <label class="similar-option" for="similar-mode-app-title">
+                        <input type="radio" id="similar-mode-app-title" name="similar-mode" value="app-title">
+                        <span class="similar-option__body">
+                            <span class="similar-option__title">App + Window Title</span>
+                            <span class="similar-option__description">Same app and exact displayed title.</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button-secondary" id="similar-modal-btn-cancel">Cancel</button>
+                <button class="button-primary" id="similar-modal-btn-apply">Select Similar</button>
+            </div>
         </div>
     </div>
 

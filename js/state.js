@@ -293,6 +293,14 @@ const DOM = {
     get elBtnSelectSimilar() { return document.getElementById('btn-select-similar'); },
     get elBtnClearSelection() { return document.getElementById('btn-clear-selection'); },
     get elBtnAssignSelected() { return document.getElementById('btn-assign-selected'); },
+    get elSimilarModal() { return document.getElementById('similar-modal'); },
+    get elSimilarModeHost() { return document.getElementById('similar-mode-host'); },
+    get elSimilarModeUrl() { return document.getElementById('similar-mode-url'); },
+    get elSimilarModeApp() { return document.getElementById('similar-mode-app'); },
+    get elSimilarModeAppTitle() { return document.getElementById('similar-mode-app-title'); },
+    get elSimilarModalBtnClose() { return document.getElementById('similar-modal-btn-close'); },
+    get elSimilarModalBtnCancel() { return document.getElementById('similar-modal-btn-cancel'); },
+    get elSimilarModalBtnApply() { return document.getElementById('similar-modal-btn-apply'); },
 
     // Tabs & Workspaces
     get elTabTimeline() { return document.getElementById('tab-timeline'); },
