@@ -202,6 +202,33 @@ test('work times includes short auto-rule entries', () => {
   assert.doesNotMatch(projectsList.innerHTML, /No time entries logged/);
 });
 
+test('project historical entries render positive sub-minute durations and auto-rule description fallbacks', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+
+  assert.equal(context.formatProjectEntryDuration(18 * 1000), '<1 min');
+  assert.equal(context.formatProjectEntryDuration(90 * 1000), '2 min');
+  assert.equal(context.formatProjectEntryDuration(0), '0 min');
+
+  const fallback = context.getProjectEntryDescriptionHTML({
+    description: ' ',
+    createdBy: 'auto-rule',
+    activities: [{
+      title: 'Payment Page',
+      app: 'Brave Browser',
+      url: 'https://checkout.example/pay'
+    }]
+  });
+  assert.match(fallback, /Auto-assigned: Payment Page/);
+  assert.doesNotMatch(fallback, /No description provided/);
+
+  const manualFallback = context.getProjectEntryDescriptionHTML({
+    description: '',
+    createdBy: 'manual',
+    activities: []
+  });
+  assert.match(manualFallback, /No description provided/);
+});
+
 test('work times keeps legacy activity-stream totals on saved assigned duration', () => {
   const projectTotal = { innerText: '' };
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);

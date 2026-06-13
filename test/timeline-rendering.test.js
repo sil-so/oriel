@@ -6259,8 +6259,10 @@ test('Multiple Activities popup renders browser activity as a host session with 
 
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-children popup-activity-children--multi hidden/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Context Switching Simplification<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row[\s\S]{0,240}popup-activity-row__icon/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
   assert.match(popup.renderedMultiList, /<span class="popup-activity-title popup-activity-title--child" title="Context Switching Simplification">Context Switching Simplification<\/span>\s*<a href="https:\/\/chatgpt\.com\/c\/123"[^>]*class="popup-activity-external-link[^"]*"[^>]*>/);
@@ -6314,8 +6316,10 @@ test('single host session with page children opens as one expanded session popup
   assert.equal(popup.context.DOM.elPopupTitle.innerText, 'Brave Browser');
   assert.equal(popup.renderedMultiList, '');
   assert.match(popup.renderedSingleChildren, /popup-activity-children/);
+  assert.match(popup.renderedSingleChildren, /popup-activity-children--single/);
   assert.match(popup.renderedSingleChildren, /popup-activity-child-row/);
   assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-child-row hidden/);
+  assert.doesNotMatch(popup.renderedSingleChildren, /popup-activity-row__icon/);
   assert.match(popup.renderedSingleChildren, /BRASQ Verlengsnoer 5 meter Wit/);
   assert.match(popup.renderedSingleChildren, /bol \| Bestellen/);
   assert.match(popup.renderedSingleChildren, /bol \| Winkelwagen/);
@@ -6366,9 +6370,11 @@ test('Multiple Activities popup collapses same-host browser rows into assignable
 
   assert.match(popup.renderedMultiList, /class="popup-activity-title"[^>]*>chatgpt\.com<\/span>/);
   assert.match(popup.renderedMultiList, /popup-activity-expand/);
+  assert.match(popup.renderedMultiList, /popup-activity-children popup-activity-children--multi hidden/);
   assert.match(popup.renderedMultiList, /popup-activity-child-row hidden/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>Meal Ingredients List<\/span>/);
   assert.match(popup.renderedMultiList, /class="popup-activity-title popup-activity-title--child"[^>]*>User Activity Analysis<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row[\s\S]{0,240}popup-activity-row__icon/);
   assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row hidden"[\s\S]*?popup-activity-secondary[^>]*title="Brave Browser">Brave Browser<\/span>/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com"/);
   assert.match(popup.renderedMultiList, /href="https:\/\/chatgpt\.com\/c\/meal"/);

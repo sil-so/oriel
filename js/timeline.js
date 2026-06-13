@@ -4929,10 +4929,7 @@ function showActivityDetailsPopup(b) {
                  data-popup-child-index="${childIndex}"
                  data-popup-child-parent-index="${parentIndex}"
                  data-popup-similarity-key="${escapeAttribute(rowKey)}">
-                <div class="popup-activity-row__main">
-                    <div class="popup-activity-row__icon popup-activity-row__icon--muted">
-                        ${getActivityIconHTML(o.app, o.url, o.title, o.appPath, o.bundleId)}
-                    </div>
+                <div class="popup-activity-row__main popup-activity-row__main--child">
                     <div class="popup-activity-row__label">
                         <span class="popup-activity-title popup-activity-title--child" title="${escapeAttribute(displayLabels.primary)}">${escapeTimelineText(displayLabels.primary)}</span>
                         ${externalLinkHTML}
@@ -4994,7 +4991,7 @@ function showActivityDetailsPopup(b) {
 
             const rowClass = `popup-activity-row${rowSelectedClass}`;
             const childRowsHTML = children.length > 0
-                ? `<div class="popup-activity-children hidden" data-popup-child-group-index="${index}">
+                ? `<div class="popup-activity-children popup-activity-children--multi hidden" data-popup-child-group-index="${index}">
                         ${children.map((child, nextChildIndex) => renderPopupActivityBreakdownRow(child, index, { childIndex: nextChildIndex })).join('')}
                    </div>`
                 : '';

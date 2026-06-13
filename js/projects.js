@@ -125,6 +125,52 @@ function getProjectTimeEntryDurationMs(entry) {
         : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
 }
 
+function formatProjectEntryDuration(ms) {
+    const duration = Number(ms) || 0;
+    if (duration <= 0) return '0 min';
+    if (duration < 60 * 1000) return '<1 min';
+    return `${Math.max(1, Math.round(duration / (60 * 1000)))} min`;
+}
+
+function getProjectEntryActivityFallback(activity) {
+    if (!activity || typeof activity !== 'object') return '';
+
+    const title = String(activity.title || '').trim();
+    if (title) {
+        const cleaned = typeof cleanTitle === 'function' ? cleanTitle(title, activity) : title;
+        if (String(cleaned || '').trim()) return String(cleaned).trim();
+    }
+
+    const app = String(activity.app || '').trim();
+    if (app) return app;
+
+    const url = String(activity.url || '').trim();
+    if (url && typeof URL === 'function') {
+        try {
+            return new URL(url).hostname.replace(/^www\./i, '');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    return '';
+}
+
+function getProjectEntryDescriptionHTML(entry) {
+    const description = String(entry?.description || '').trim();
+    if (description) return escapeProjectText(description);
+
+    const isAutoRule = entry?.createdBy === 'auto-rule' || Boolean(entry?.autoRuleId);
+    if (isAutoRule && Array.isArray(entry?.activities)) {
+        const fallback = entry.activities
+            .map(getProjectEntryActivityFallback)
+            .find(Boolean);
+        if (fallback) return `Auto-assigned: ${escapeProjectText(fallback)}`;
+    }
+
+    return '<span class="project-entry-empty-description">No description provided</span>';
+}
+
 function renderProjectTasks(project, projectEntries = []) {
     const list = document.getElementById('proj-details-tasks-list');
     if (!list) return;
@@ -670,12 +716,15 @@ async function openProjectDetails(projectId) {
     const formCaret = document.getElementById('proj-details-form-caret');
 
     if (elManualDate) {
-        // Default to today's date in local YYYY-MM-DD format
         const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const dd = String(today.getDate()).padStart(2, '0');
-        elManualDate.value = `${yyyy}-\ ${mm}-\ ${dd}`.replace(/-\ /g, '-');
+        if (typeof window.setProjectManualDate === 'function') {
+            window.setProjectManualDate(today);
+        } else {
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            elManualDate.value = `${yyyy}-${mm}-${dd}`;
+        }
     }
     if (elManualHours) elManualHours.value = '';
     if (elManualMinutes) elManualMinutes.value = '';
@@ -871,19 +920,21 @@ async function openProjectDetails(projectId) {
             elList.innerHTML = projEntries.map(e => {
                 const dateObj = new Date(e.start);
                 const dateStr = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-                const durMin = Math.round(getProjectTimeEntryDurationMs(e) / (60 * 1000));
+                const entryDurationMs = getProjectTimeEntryDurationMs(e);
+                const durationLabel = formatProjectEntryDuration(entryDurationMs);
                 const task = getProjectTasks(proj).find(projectTask => projectTask.id === e.taskId);
                 const taskLabel = task
                     ? `<span class="duration-pill shrink-0">${escapeProjectText(task.name)}</span>`
                     : '';
 
-                let itemHrs = getProjectTimeEntryDurationMs(e) / (60 * 60 * 1000);
+                let itemHrs = entryDurationMs / (60 * 60 * 1000);
                 let itemEarningsStr = '';
                 if (proj.rateType === 'hourly') {
                     itemEarningsStr = `<span class="metric-value metric-value--success shrink-0">${currencySymbol}${(itemHrs * (proj.hourlyRate || 0)).toFixed(2)}</span>`;
                 } else if (proj.rateType === 'fixed') {
                     itemEarningsStr = `<span class="metric-value text-accent shrink-0">Fixed</span>`;
                 }
+                const descriptionHTML = getProjectEntryDescriptionHTML(e);
 
                 return `
                     <div class="surface-panel project-entry-row">
@@ -891,14 +942,14 @@ async function openProjectDetails(projectId) {
                             <span class="project-entry-meta">${dateStr}</span>
                             <div class="project-entry-actions">
                                 ${taskLabel}
-                                <span class="duration-pill shrink-0">${durMin} min</span>
+                                <span class="duration-pill shrink-0">${durationLabel}</span>
                                 ${itemEarningsStr}
                                 <button class="icon-button icon-button--danger" title="Delete entry" aria-label="Delete entry" onclick="deleteProjectDetailEntry(event, '${e.id}', '${projectId}')">
                                     <i class="ph ph-trash-simple text-sm"></i>
                                 </button>
                             </div>
                         </div>
-                        <p class="project-entry-description">${e.description || '<span class="project-entry-empty-description">No description provided</span>'}</p>
+                        <p class="project-entry-description">${descriptionHTML}</p>
                     </div>
                 `;
             }).join('');
@@ -965,4 +1016,6 @@ window.cancelProjectTaskRename = cancelProjectTaskRename;
 window.handleProjectTaskRenameKeydown = handleProjectTaskRenameKeydown;
 window.archiveProjectTask = archiveProjectTask;
 window.deleteProjectDetailEntry = deleteProjectDetailEntry;
+window.formatProjectEntryDuration = formatProjectEntryDuration;
+window.getProjectEntryDescriptionHTML = getProjectEntryDescriptionHTML;
 window.PRESET_COLORS = PRESET_COLORS;

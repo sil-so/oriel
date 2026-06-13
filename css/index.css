@@ -837,6 +837,7 @@ button:focus-visible {
 
 .time-entry-snapshot {
     flex: 1 1 0;
+    gap: 16px;
     max-height: 460px;
     padding-right: 12px;
     border-right: 1px solid var(--separator);
@@ -846,6 +847,7 @@ button:focus-visible {
 .time-entry-form {
     width: 370px;
     flex-shrink: 0;
+    gap: 16px;
 }
 
 .time-entry-summary {
@@ -1049,13 +1051,66 @@ button:focus-visible {
     text-underline-offset: 2px;
 }
 
+.title-cleanup-list {
+    max-height: 220px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border: 1px solid var(--separator);
+    border-radius: var(--radius-lg);
+    background: var(--control-surface);
+}
+
+.title-cleanup-rule {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+}
+
+.title-cleanup-rule + .title-cleanup-rule {
+    border-top: 1px solid var(--separator-muted);
+}
+
+.title-cleanup-rule__header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 10px;
+}
+
+.title-cleanup-rule__fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.title-cleanup-rule__field {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.title-cleanup-rule__label {
+    color: var(--text-tertiary);
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.title-cleanup-list .empty-state {
+    margin: 0;
+    border: 0;
+    background: transparent;
+}
+
 .danger-zone {
     display: flex;
     flex-direction: column;
     gap: 12px;
     margin-top: 4px;
-    padding-top: 16px;
-    border-top: 1px solid var(--separator);
 }
 
 .danger-zone__title {
@@ -1122,6 +1177,75 @@ button:focus-visible {
     background: var(--control-surface);
     transition: opacity 160ms var(--ease-out);
     animation: panel-enter 170ms var(--ease-out);
+}
+
+.project-manual-date-picker {
+    min-width: 0;
+}
+
+.project-manual-date-trigger {
+    width: 100%;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: left;
+}
+
+.project-manual-date-trigger i {
+    flex: 0 0 auto;
+    color: var(--text-tertiary);
+    font-size: 16px;
+}
+
+.project-manual-date-popover {
+    box-shadow: var(--shadow-popover);
+}
+
+.calendar-popover-header,
+.calendar-popover-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.calendar-popover-header {
+    margin-bottom: 8px;
+}
+
+.calendar-month-label {
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 700;
+}
+
+.calendar-weekdays {
+    margin-bottom: 4px;
+    color: var(--text-tertiary);
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.calendar-popover-actions {
+    margin-top: 12px;
+}
+
+.calendar-popover-close {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 650;
+    transition: color 150ms var(--ease-out);
+}
+
+.calendar-popover-close:hover,
+.calendar-popover-close:focus-visible {
+    color: var(--text-primary);
+    outline: none;
 }
 
 .section-label {
@@ -1623,7 +1747,7 @@ body.is-column-resizing * {
 
 .side-summary .surface-panel {
     border-color: var(--separator-soft);
-    background: color-mix(in oklch, var(--surface-panel) 76%, var(--surface-canvas) 24%);
+    background: var(--surface-panel);
 }
 
 .side-summary .surface-panel .border-t {
@@ -1640,9 +1764,10 @@ body.is-column-resizing * {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 20px;
     overflow-y: auto;
     padding: 20px;
+    letter-spacing: 0;
 }
 
 .sidebar-panel {
@@ -1652,7 +1777,8 @@ body.is-column-resizing * {
 .sidebar-panel--work-times {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 20px;
+    letter-spacing: 0;
 }
 
 .sidebar-panel--work-times.hidden {
@@ -1663,7 +1789,7 @@ body.is-column-resizing * {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding: 20px;
+    padding: 16px;
 }
 
 .sidebar-stat-row {
@@ -1716,8 +1842,10 @@ body.is-column-resizing * {
 
 .sidebar-section-title {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: 11px;
+    line-height: 16px;
     font-weight: 700;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
 }
 
@@ -1957,25 +2085,6 @@ body.is-column-resizing * {
     align-items: start;
     gap: 9px;
     margin-bottom: 11px;
-}
-
-.ai-settings-heading {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.ai-settings-heading span:first-child {
-    color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.ai-settings-heading span:last-child {
-    color: var(--text-tertiary);
-    font-size: 10px;
-    line-height: 1.35;
 }
 
 .ai-settings-close-button {
@@ -2897,6 +3006,7 @@ body.is-column-resizing * {
     flex-direction: column;
     gap: 12px;
     padding: 16px;
+    background: var(--surface-panel);
 }
 
 .unlogged-work-review.hidden {
@@ -3031,6 +3141,7 @@ body.is-column-resizing * {
     flex-direction: column;
     gap: 8px;
     padding: 16px;
+    background: var(--surface-panel);
 }
 
 .project-breakdown-header,
@@ -4543,6 +4654,10 @@ body.is-column-resizing * {
     padding-right: 8px;
 }
 
+.popup-activity-row__main--child {
+    gap: 0;
+}
+
 .popup-activity-row__icon {
     width: 20px;
     height: 20px;
@@ -4643,12 +4758,12 @@ body.is-column-resizing * {
 }
 
 .popup-activity-children {
-    margin-left: 2.25rem;
-    padding-left: 0.5rem;
+    margin-left: 0;
+    padding-left: 0;
 }
 
 .popup-activity-child-row {
-    padding-left: 0.25rem;
+    padding-left: 0;
     color: var(--text-secondary);
     font-size: 10px;
 }
@@ -4664,6 +4779,10 @@ body.is-column-resizing * {
 .popup-activity-children--single {
     margin-left: 0;
     padding-left: 0;
+}
+
+.popup-activity-children--multi {
+    margin-left: 60px;
 }
 
 @keyframes panel-enter {

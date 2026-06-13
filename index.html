@@ -566,9 +566,9 @@
 
             <div class="time-entry-layout" id="modal-split-container">
                 <!-- Left Column: Recorded Activity Snapshot -->
-                <div class="time-entry-snapshot flex flex-col gap-2.5 app-scrollbar-safe hidden" id="modal-left-panel">
-                    <label class="section-label flex items-center gap-1.5 shrink-0">
-                        <i class="ph ph-sparkle"></i> Recorded Activity Snapshot
+                <div class="time-entry-snapshot flex flex-col app-scrollbar-safe hidden" id="modal-left-panel">
+                    <label class="section-label shrink-0">
+                        Recorded Activity Snapshot
                     </label>
                     <div class="flex flex-col gap-2" id="modal-memory-aid-list">
                         <!-- Snapshot of activities inside the range injected dynamically by JS -->
@@ -604,7 +604,7 @@
                     <!-- Project Selector Grid -->
                     <div class="modal-field-group">
                         <label class="modal-field-label">Allocate to Project</label>
-                        <div class="grid grid-cols-2 gap-2 mt-1 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
+                        <div class="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1 app-scrollbar-safe" id="modal-project-grid">
                             <!-- Visual grid rendered by JS -->
                         </div>
                         <input type="hidden" id="modal-project-select" value="">
@@ -954,7 +954,7 @@
                         </button>
                     </div>
                     <div id="settings-title-cleanup-status" class="hidden text-[10px] text-gray-400" role="status" aria-live="polite"></div>
-                    <div class="flex flex-col gap-2 max-h-[220px] overflow-y-auto app-scrollbar-safe" id="settings-title-cleanup-list">
+                    <div class="title-cleanup-list app-scrollbar-safe" id="settings-title-cleanup-list">
                         <div class="text-[11px] text-gray-500 italic py-2 text-center">No title cleanup rules configured.</div>
                     </div>
                 </div>
@@ -962,10 +962,10 @@
 
                 <div class="settings-section-panel hidden flex-col gap-4" data-settings-section-panel="ai" role="tabpanel">
                     <div class="surface-panel settings-card">
-                        <div class="ai-settings-header">
-                            <div class="ai-settings-heading">
-                                <span>Provider &amp; Key</span>
-                                <span>Choose a provider key to view or edit. Keys stay in macOS Keychain.</span>
+                        <div class="settings-card-header">
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Provider &amp; Key</span>
+                                <span class="settings-helper">Choose a provider key to view or edit. Keys stay in macOS Keychain.</span>
                             </div>
                         </div>
                         <div class="ai-settings-grid ai-settings-grid--modal">
@@ -1018,9 +1018,11 @@
                     </div>
 
                     <div class="surface-panel settings-card">
-                        <div class="ai-settings-heading">
-                            <span>Ask AI &amp; AI Insights</span>
-                            <span>Used for chat in the Ask AI sidebar and generating daily summaries.</span>
+                        <div class="settings-card-header">
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Ask AI &amp; AI Insights</span>
+                                <span class="settings-helper">Used for chat in the Ask AI sidebar and generating daily summaries.</span>
+                            </div>
                         </div>
                         <label class="ai-field">
                             <span>Provider</span>
@@ -1158,9 +1160,9 @@
                         </label>
 
                         <div class="surface-panel surface-panel--inset p-3 flex flex-col gap-3">
-                            <div class="ai-settings-heading">
-                                <span>Sensitive Screenshot Exclusions</span>
-                                <span>Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
+                            <div class="flex flex-col gap-1">
+                                <span class="settings-card-title">Sensitive Screenshot Exclusions</span>
+                                <span class="settings-helper">Skip screenshot analysis for matching apps or bundle IDs. Activity tracking still records normally unless a tracking exclusion also matches.</span>
                             </div>
                             <div class="flex gap-2">
                                 <input type="text" id="settings-ai-screenshot-sensitive-input" class="field ai-settings-input flex-1" placeholder="App name or bundle ID" aria-label="Sensitive screenshot exclusion">
@@ -1287,9 +1289,32 @@
 
                     <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
                         <div class="grid grid-cols-3 gap-3">
-                            <div class="flex flex-col gap-1">
-                                <label class="metric-label">Date</label>
-                                <input type="date" class="field" id="proj-details-manual-date">
+                            <div class="project-manual-date-picker flex flex-col gap-1">
+                                <label class="metric-label" id="proj-details-manual-date-label-heading">Date</label>
+                                <input type="hidden" id="proj-details-manual-date">
+                                <div class="relative">
+                                    <button type="button" class="field project-manual-date-trigger" id="proj-details-manual-date-trigger" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="proj-details-manual-date-label-heading proj-details-manual-date-label">
+                                        <span id="proj-details-manual-date-label">Today</span>
+                                        <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                                    </button>
+                                    <div id="proj-details-manual-date-picker-popover" role="dialog" aria-label="Select manual entry date" class="popover project-manual-date-popover hidden absolute left-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
+                                        <div class="calendar-popover-header">
+                                            <button id="proj-details-manual-date-picker-prev-month" type="button" class="icon-button" aria-label="Previous month">
+                                                <i class="ph ph-caret-left"></i>
+                                            </button>
+                                            <div id="proj-details-manual-date-picker-month-label" class="calendar-month-label"></div>
+                                            <button id="proj-details-manual-date-picker-next-month" type="button" class="icon-button" aria-label="Next month">
+                                                <i class="ph ph-caret-right"></i>
+                                            </button>
+                                        </div>
+                                        <div id="proj-details-manual-date-picker-weekdays" class="calendar-weekdays grid grid-cols-7 gap-1"></div>
+                                        <div id="proj-details-manual-date-picker-days" class="grid grid-cols-7 gap-1"></div>
+                                        <div class="calendar-popover-actions">
+                                            <button id="proj-details-manual-date-picker-clear" type="button" class="calendar-popover-close">Close</button>
+                                            <button id="proj-details-manual-date-picker-today" type="button" class="button-primary">Today</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="metric-label">Hours Worked</label>

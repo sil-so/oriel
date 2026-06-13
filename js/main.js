@@ -570,7 +570,50 @@ function setupProjectRatesToggles() {
 
 const datePickerState = {
     viewedMonth: null,
+    activeKey: null,
     activeTrigger: null
+};
+
+const datePickerConfigs = {
+    header: {
+        triggerId: 'date-picker-trigger',
+        popoverId: 'date-picker-popover',
+        prevId: 'date-picker-prev-month',
+        nextId: 'date-picker-next-month',
+        closeId: 'date-picker-clear',
+        todayId: 'date-picker-today',
+        monthLabelId: 'date-picker-month-label',
+        weekdaysId: 'date-picker-weekdays',
+        daysId: 'date-picker-days',
+        getSelectedDate: () => state.currentDate,
+        onSelect: async date => {
+            state.currentDate = date;
+            await refreshCurrentDateView();
+        },
+        onToday: async () => {
+            await goToToday({ closePicker: true });
+        }
+    },
+    projectManual: {
+        triggerId: 'proj-details-manual-date-trigger',
+        popoverId: 'proj-details-manual-date-picker-popover',
+        prevId: 'proj-details-manual-date-picker-prev-month',
+        nextId: 'proj-details-manual-date-picker-next-month',
+        closeId: 'proj-details-manual-date-picker-clear',
+        todayId: 'proj-details-manual-date-picker-today',
+        monthLabelId: 'proj-details-manual-date-picker-month-label',
+        weekdaysId: 'proj-details-manual-date-picker-weekdays',
+        daysId: 'proj-details-manual-date-picker-days',
+        getSelectedDate: () => getProjectManualDate(),
+        onSelect: async date => {
+            setProjectManualDate(date);
+            closeDatePicker();
+        },
+        onToday: async () => {
+            setProjectManualDate(new Date());
+            closeDatePicker();
+        }
+    }
 };
 
 const aiInsightsState = {
@@ -1348,10 +1391,10 @@ function setupMainEventListeners() {
 
         rules.forEach((rule, index) => {
             const row = document.createElement('div');
-            row.className = 'surface-panel flex flex-col gap-2 px-3 py-2';
+            row.className = 'title-cleanup-rule';
 
             const top = document.createElement('div');
-            top.className = 'flex items-center gap-2';
+            top.className = 'title-cleanup-rule__header';
 
             const toggleLabel = document.createElement('label');
             toggleLabel.className = 'oriel-toggle oriel-toggle--sm shrink-0';
@@ -1369,18 +1412,27 @@ function setupMainEventListeners() {
 
             const name = document.createElement('input');
             name.type = 'text';
-            name.className = 'field flex-1';
+            name.className = 'field';
             name.value = rule.name;
             name.setAttribute('aria-label', 'Title cleanup rule name');
 
+            const nameField = document.createElement('label');
+            nameField.className = 'title-cleanup-rule__field';
+            const nameLabel = document.createElement('span');
+            nameLabel.className = 'title-cleanup-rule__label';
+            nameLabel.textContent = 'Name';
+            nameField.appendChild(nameLabel);
+            nameField.appendChild(name);
+
             const removeButton = document.createElement('button');
             removeButton.type = 'button';
-            removeButton.className = 'text-gray-500 hover:text-red-400 transition shrink-0';
+            removeButton.className = 'icon-button icon-button--danger shrink-0';
             removeButton.title = 'Remove title cleanup rule';
-            removeButton.innerHTML = '<i class="ph ph-trash text-sm"></i>';
+            removeButton.setAttribute('aria-label', 'Remove title cleanup rule');
+            removeButton.innerHTML = '<i class="ph ph-trash text-sm" aria-hidden="true"></i>';
 
             top.appendChild(toggleLabel);
-            top.appendChild(name);
+            top.appendChild(nameField);
             top.appendChild(removeButton);
 
             const pattern = document.createElement('input');
@@ -1390,7 +1442,7 @@ function setupMainEventListeners() {
             pattern.setAttribute('aria-label', 'Regex pattern to remove');
 
             const scopes = document.createElement('div');
-            scopes.className = 'grid grid-cols-2 gap-2';
+            scopes.className = 'title-cleanup-rule__fields';
             const appScope = document.createElement('input');
             appScope.type = 'text';
             appScope.className = 'field';
@@ -1403,8 +1455,21 @@ function setupMainEventListeners() {
             urlScope.placeholder = 'URL contains';
             urlScope.value = rule.urlContains || '';
             urlScope.setAttribute('aria-label', 'Optional URL scope');
-            scopes.appendChild(appScope);
-            scopes.appendChild(urlScope);
+
+            const createRuleField = (labelText, input) => {
+                const field = document.createElement('label');
+                field.className = 'title-cleanup-rule__field';
+                const label = document.createElement('span');
+                label.className = 'title-cleanup-rule__label';
+                label.textContent = labelText;
+                field.appendChild(label);
+                field.appendChild(input);
+                return field;
+            };
+
+            scopes.appendChild(createRuleField('Regex Pattern', pattern));
+            scopes.appendChild(createRuleField('App Scope', appScope));
+            scopes.appendChild(createRuleField('URL Scope', urlScope));
 
             const saveEditedRule = async () => {
                 const nextRules = normalizeSettingsTitleCleanupRules(state.settings.titleCleanupRules);
@@ -1431,7 +1496,6 @@ function setupMainEventListeners() {
             });
 
             row.appendChild(top);
-            row.appendChild(pattern);
             row.appendChild(scopes);
             settingsTitleCleanupList.appendChild(row);
         });
@@ -2181,52 +2245,13 @@ function setupMainEventListeners() {
         await refreshCurrentDateView();
     });
 
-    const datePickerTrigger = document.getElementById('date-picker-trigger');
-    if (datePickerTrigger) {
-        datePickerTrigger.addEventListener('click', (e) => {
-            if (e.target.closest('#date-picker-popover')) return;
-            openDatePicker(datePickerTrigger);
-        });
-    }
-
-    const datePickerPopover = document.getElementById('date-picker-popover');
-    if (datePickerPopover) {
-        datePickerPopover.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
-    }
-
-    const btnDatePickerPrev = document.getElementById('date-picker-prev-month');
-    if (btnDatePickerPrev) {
-        btnDatePickerPrev.addEventListener('click', () => {
-            shiftDatePickerMonth(-1);
-        });
-    }
-
-    const btnDatePickerNext = document.getElementById('date-picker-next-month');
-    if (btnDatePickerNext) {
-        btnDatePickerNext.addEventListener('click', () => {
-            shiftDatePickerMonth(1);
-        });
-    }
-
-    const btnDatePickerClose = document.getElementById('date-picker-clear');
-    if (btnDatePickerClose) {
-        btnDatePickerClose.addEventListener('click', () => {
-            closeDatePicker();
-        });
-    }
-
-    const btnDatePickerToday = document.getElementById('date-picker-today');
-    if (btnDatePickerToday) {
-        btnDatePickerToday.addEventListener('click', async () => {
-            await goToToday({ closePicker: true });
-        });
-    }
+    setupDatePicker('header');
+    setupDatePicker('projectManual');
 
     document.addEventListener('click', (e) => {
-        if (datePickerTrigger && e.target.closest('#date-picker-trigger')) return;
-        if (e.target.closest('#date-picker-popover')) return;
+        const elements = getDatePickerElements(datePickerState.activeKey);
+        if (elements.trigger && elements.trigger.contains(e.target)) return;
+        if (elements.popover && elements.popover.contains(e.target)) return;
         closeDatePicker();
     });
 
@@ -2927,6 +2952,87 @@ function setDateNavigationVisible(isVisible) {
     dateNavigation.classList.toggle('hidden', !isVisible);
 }
 
+function parseLocalDateValue(value) {
+    if (!value || typeof value !== 'string') return null;
+    const [year, month, day] = value.split('-').map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    const date = new Date(year, month - 1, day);
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatProjectManualDateLabel(date) {
+    if (!Number.isFinite(date?.getTime?.())) return 'Today';
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function getProjectManualDate() {
+    const input = document.getElementById('proj-details-manual-date');
+    return parseLocalDateValue(input?.value) || new Date();
+}
+
+function setProjectManualDate(date) {
+    const selectedDate = Number.isFinite(date?.getTime?.()) ? date : new Date();
+    const input = document.getElementById('proj-details-manual-date');
+    const label = document.getElementById('proj-details-manual-date-label');
+    if (input) input.value = getFormattedDate(selectedDate);
+    if (label) label.textContent = formatProjectManualDateLabel(selectedDate);
+}
+
+function getDatePickerConfig(key = datePickerState.activeKey || 'header') {
+    return datePickerConfigs[key] || null;
+}
+
+function getDatePickerElements(key = datePickerState.activeKey) {
+    const config = getDatePickerConfig(key);
+    if (!config) return {};
+    return {
+        trigger: document.getElementById(config.triggerId),
+        popover: document.getElementById(config.popoverId),
+        prev: document.getElementById(config.prevId),
+        next: document.getElementById(config.nextId),
+        close: document.getElementById(config.closeId),
+        today: document.getElementById(config.todayId),
+        monthLabel: document.getElementById(config.monthLabelId),
+        weekdays: document.getElementById(config.weekdaysId),
+        days: document.getElementById(config.daysId)
+    };
+}
+
+function setupDatePicker(key) {
+    const config = getDatePickerConfig(key);
+    const elements = getDatePickerElements(key);
+    if (!config || !elements.trigger || !elements.popover || elements.trigger.dataset.datePickerReady === 'true') return;
+    elements.trigger.dataset.datePickerReady = 'true';
+
+    elements.trigger.addEventListener('click', event => {
+        if (elements.popover.contains(event.target)) return;
+        event.stopPropagation();
+        openDatePicker(key, elements.trigger);
+    });
+
+    elements.popover.addEventListener('click', event => {
+        event.stopPropagation();
+    });
+
+    elements.prev?.addEventListener('click', () => {
+        shiftDatePickerMonth(-1);
+    });
+
+    elements.next?.addEventListener('click', () => {
+        shiftDatePickerMonth(1);
+    });
+
+    elements.close?.addEventListener('click', () => {
+        closeDatePicker();
+    });
+
+    elements.today?.addEventListener('click', async () => {
+        if (typeof config.onToday === 'function') {
+            await config.onToday();
+        }
+    });
+}
+
 function setDatePickerTriggerExpanded(trigger, expanded) {
     if (trigger && typeof trigger.setAttribute === 'function') {
         trigger.setAttribute('aria-expanded', String(expanded));
@@ -2940,59 +3046,79 @@ function resetDatePickerPopoverPosition(popover) {
     });
 }
 
-function openDatePicker(trigger = null) {
-    const popover = document.getElementById('date-picker-popover');
-    if (!popover) return;
-
-    setDatePickerTriggerExpanded(datePickerState.activeTrigger, false);
-    datePickerState.activeTrigger = trigger || document.getElementById('date-picker-trigger');
-    setDatePickerTriggerExpanded(datePickerState.activeTrigger, true);
-    datePickerState.viewedMonth = new Date(
-        state.currentDate.getFullYear(),
-        state.currentDate.getMonth(),
-        1
-    );
-    renderDatePicker();
-    resetDatePickerPopoverPosition(popover);
-    popover.classList.remove('hidden');
+function resolveDatePickerOpenArgs(keyOrTrigger, trigger = null) {
+    if (typeof keyOrTrigger === 'string') {
+        return { key: keyOrTrigger, trigger };
+    }
+    return { key: 'header', trigger: keyOrTrigger };
 }
 
-function closeDatePicker() {
-    const popover = document.getElementById('date-picker-popover');
-    if (!popover) return;
-    popover.classList.add('hidden');
+function openDatePicker(keyOrTrigger = 'header', trigger = null) {
+    const { key, trigger: resolvedTrigger } = resolveDatePickerOpenArgs(keyOrTrigger, trigger);
+    const config = getDatePickerConfig(key);
+    const elements = getDatePickerElements(key);
+    if (!config || !elements.popover) return;
+
+    if (datePickerState.activeKey && datePickerState.activeKey !== key) {
+        closeDatePicker(datePickerState.activeKey);
+    }
     setDatePickerTriggerExpanded(datePickerState.activeTrigger, false);
-    datePickerState.activeTrigger = null;
-    resetDatePickerPopoverPosition(popover);
+    datePickerState.activeKey = key;
+    datePickerState.activeTrigger = resolvedTrigger || elements.trigger;
+    setDatePickerTriggerExpanded(datePickerState.activeTrigger, true);
+    const selectedDate = config.getSelectedDate?.() || new Date();
+    datePickerState.viewedMonth = new Date(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        1
+    );
+    renderDatePicker(key);
+    resetDatePickerPopoverPosition(elements.popover);
+    elements.popover.classList.remove('hidden');
+}
+
+function closeDatePicker(key = datePickerState.activeKey || 'header') {
+    const elements = getDatePickerElements(key);
+    if (!elements.popover) return;
+    elements.popover.classList.add('hidden');
+    setDatePickerTriggerExpanded(datePickerState.activeTrigger, false);
+    if (!key || key === datePickerState.activeKey) {
+        datePickerState.activeKey = null;
+        datePickerState.activeTrigger = null;
+    }
+    resetDatePickerPopoverPosition(elements.popover);
 }
 
 function shiftDatePickerMonth(delta) {
+    const key = datePickerState.activeKey || 'header';
+    const config = getDatePickerConfig(key);
+    const selectedDate = config?.getSelectedDate?.() || new Date();
     if (!datePickerState.viewedMonth) {
         datePickerState.viewedMonth = new Date(
-            state.currentDate.getFullYear(),
-            state.currentDate.getMonth(),
+            selectedDate.getFullYear(),
+            selectedDate.getMonth(),
             1
         );
     }
     datePickerState.viewedMonth.setMonth(datePickerState.viewedMonth.getMonth() + delta);
-    renderDatePicker();
+    renderDatePicker(key);
 }
 
-function renderDatePicker() {
-    const monthLabel = document.getElementById('date-picker-month-label');
-    const weekdaysEl = document.getElementById('date-picker-weekdays');
-    const daysEl = document.getElementById('date-picker-days');
-    if (!monthLabel || !weekdaysEl || !daysEl) return;
+function renderDatePicker(key = datePickerState.activeKey || 'header') {
+    const config = getDatePickerConfig(key);
+    const elements = getDatePickerElements(key);
+    if (!config || !elements.monthLabel || !elements.weekdays || !elements.days) return;
+    const selectedDate = config.getSelectedDate?.() || new Date();
 
     const viewedMonth = datePickerState.viewedMonth || new Date(
-        state.currentDate.getFullYear(),
-        state.currentDate.getMonth(),
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
         1
     );
     const monthFormatter = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
-    monthLabel.innerText = monthFormatter.format(viewedMonth);
+    elements.monthLabel.innerText = monthFormatter.format(viewedMonth);
 
-    weekdaysEl.innerHTML = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+    elements.weekdays.innerHTML = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
         .map(day => `<div class="h-7 flex items-center justify-center">${day}</div>`)
         .join('');
 
@@ -3001,7 +3127,7 @@ function renderDatePicker() {
     gridStart.setDate(gridStart.getDate() - mondayOffset);
 
     const todayStr = getFormattedDate(new Date());
-    const selectedStr = getFormattedDate(state.currentDate);
+    const selectedStr = getFormattedDate(selectedDate);
     const currentMonth = viewedMonth.getMonth();
     const daysHtml = [];
 
@@ -3026,14 +3152,12 @@ function renderDatePicker() {
         `);
     }
 
-    daysEl.innerHTML = daysHtml.join('');
-    daysEl.querySelectorAll('button[data-date]').forEach(button => {
+    elements.days.innerHTML = daysHtml.join('');
+    elements.days.querySelectorAll('button[data-date]').forEach(button => {
         button.addEventListener('click', async (e) => {
             e.stopPropagation();
             const [year, month, day] = button.dataset.date.split('-').map(Number);
-            state.currentDate = new Date(year, month - 1, day);
-            await refreshCurrentDateView();
-            closeDatePicker();
+            await config.onSelect?.(new Date(year, month - 1, day));
         });
     });
 }
@@ -3100,6 +3224,7 @@ async function init() {
 
 // Bind to window
 window.goToToday = goToToday;
+window.setProjectManualDate = setProjectManualDate;
 window.setTimelineMode = setTimelineMode;
 window.syncTimelineModeControls = syncTimelineModeControls;
 window.init = init;

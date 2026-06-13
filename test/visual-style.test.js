@@ -596,6 +596,106 @@ test('settings expose editable activity title cleanup rules with regex guidance'
   );
 });
 
+test('project guidance requires Linear issue hygiene for implementation work', () => {
+  const agents = fs.readFileSync('AGENTS.md', 'utf8');
+
+  assert.match(agents, /Always create or use a Linear issue for new and existing implementation\s+work/);
+  assert.match(agents, /keep that issue updated as the work moves through active\s+development, review, completion, or blockage/);
+});
+
+test('time entry modal removes AI-coded snapshot icon and uses uniform section spacing', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const modalMarkup = html.match(/id="time-entry-modal"[\s\S]*?<!-- MODAL: Create Project -->/)?.[0] || '';
+  const projectGridClass = modalMarkup.match(/id="modal-project-grid"[^>]*class="([^"]*)"/)?.[1] || '';
+
+  assert.doesNotMatch(modalMarkup, /ph ph-sparkle[\s\S]{0,160}Recorded Activity Snapshot/);
+  assert.doesNotMatch(modalMarkup, /Recorded Activity Snapshot[\s\S]{0,160}ph ph-sparkle/);
+  assert.doesNotMatch(projectGridClass, /\bmt-1\b/);
+  assert.match(css, /\.time-entry-form\s*\{[\s\S]*gap:\s*16px/);
+  assert.match(css, /\.modal-field-group\s*\{[\s\S]*gap:\s*6px/);
+});
+
+test('activity title cleanup saved rules use a quiet editable list layout', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+  const cleanupRenderer = main.match(/function renderTitleCleanupRules\(\)[\s\S]*?setTitleCleanupStatus\(''\);/)?.[0] || '';
+
+  assert.match(html, /<div(?=[^>]*id="settings-title-cleanup-list")(?=[^>]*class="[^"]*\btitle-cleanup-list\b)[^>]*>/);
+  assert.match(css, /\.title-cleanup-list\b/);
+  for (const className of [
+    'title-cleanup-rule',
+    'title-cleanup-rule__header',
+    'title-cleanup-rule__fields',
+    'title-cleanup-rule__field',
+    'title-cleanup-rule__label'
+  ]) {
+    assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
+    assert.match(cleanupRenderer, new RegExp(`\\b${className}\\b`), `expected rendered rule markup to use ${className}`);
+  }
+  assert.match(cleanupRenderer, /removeButton\.className = 'icon-button icon-button--danger/);
+  assert.doesNotMatch(cleanupRenderer, /surface-panel flex flex-col gap-2 px-3 py-2/);
+  assert.doesNotMatch(cleanupRenderer, /text-gray-500 hover:text-red-400/);
+});
+
+test('AI and data settings sections share heading treatment without extra danger divider', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const aiSettingsMarkup = html.match(/data-settings-section-panel="ai"[\s\S]*?data-settings-section-panel="data"/)?.[0] || '';
+  const dangerZoneRule = css.match(/\.danger-zone\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(aiSettingsMarkup, /class="settings-card-title">Provider &amp; Key<\/span>\s*<span class="settings-helper">Choose a provider key/);
+  assert.match(aiSettingsMarkup, /class="settings-card-title">Ask AI &amp; AI Insights<\/span>\s*<span class="settings-helper">Used for chat/);
+  assert.doesNotMatch(html, /\bai-settings-heading\b/);
+  assert.doesNotMatch(css, /\.ai-settings-heading\b/);
+  assert.doesNotMatch(dangerZoneRule, /border-top/);
+  assert.doesNotMatch(dangerZoneRule, /padding-top/);
+});
+
+test('project details manual date uses the shared custom calendar popover pattern', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+
+  assert.doesNotMatch(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="date")[^>]*>/);
+  assert.match(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="hidden")[^>]*>/);
+  assert.match(html, /<button(?=[^>]*id="proj-details-manual-date-trigger")(?=[^>]*class="[^"]*\bproject-manual-date-trigger\b)[^>]*>/);
+  assert.match(html, /<div(?=[^>]*id="proj-details-manual-date-picker-popover")(?=[^>]*class="[^"]*\bpopover\b)[^>]*>/);
+  assert.match(html, /<div(?=[^>]*id="proj-details-manual-date-picker-days")(?=[^>]*class="[^"]*\bgrid\b[^"]*\bgrid-cols-7\b)[^>]*>/);
+  assert.match(css, /\.project-manual-date-picker\s*\{/);
+  assert.match(css, /\.project-manual-date-trigger\s*\{/);
+  assert.match(main, /setupDatePicker\('projectManual'\)/);
+  assert.match(main, /proj-details-manual-date-label/);
+});
+
+test('activity popup child rows remove favicon gutters and expose alignment contracts', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const childRenderer = timeline.match(/const renderPopupActivityChildRow[\s\S]*?const renderPopupActivityBreakdownRow/)?.[0] || '';
+
+  assert.doesNotMatch(childRenderer, /popup-activity-row__icon/);
+  assert.match(childRenderer, /popup-activity-row__main popup-activity-row__main--child/);
+  assert.match(timeline, /popup-activity-children--multi/);
+  assert.match(css, /\.popup-activity-children--single\s*\{[\s\S]*margin-left:\s*0/);
+  assert.match(css, /\.popup-activity-children--multi\s*\{/);
+  assert.match(css, /\.popup-activity-row__main--child\s*\{/);
+});
+
+test('work times sidebar uses compact shared panel surfaces', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+
+  assert.match(css, /\.side-summary-content\s*\{[\s\S]*letter-spacing:\s*0/);
+  assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*gap:\s*20px/);
+  assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*letter-spacing:\s*0/);
+  assert.match(css, /\.sidebar-stat-card\s*\{[\s\S]*padding:\s*16px/);
+  assert.match(css, /\.sidebar-stat-row\s*\{[\s\S]*align-items:\s*center/);
+  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*font-size:\s*11px/);
+  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*letter-spacing:\s*0\.04em/);
+  assert.match(css, /\.unlogged-work-review\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
+  assert.match(css, /\.project-breakdown-card\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
+});
+
 test('web dropdowns use app-rendered menus instead of native select popups', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
