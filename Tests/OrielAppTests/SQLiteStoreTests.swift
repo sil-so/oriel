@@ -799,6 +799,35 @@ final class SQLiteStoreTests: XCTestCase {
             "summary": [
                 "text": "Focused implementation work.",
                 "highlights": ["Implemented AI settings"],
+                "metrics": [
+                    "version": 1,
+                    "totalRecordedMs": 3_600_000,
+                    "longestFocusSession": [
+                        "start": 1_780_810_800_000 as Int64,
+                        "end": 1_780_814_400_000 as Int64,
+                        "durationMs": 3_600_000,
+                        "app": "Codex",
+                        "title": "Oriel",
+                        "label": "Oriel"
+                    ],
+                    "focusSessions": [
+                        "count": 1,
+                        "totalDurationMs": 3_600_000,
+                        "averageDurationMs": 3_600_000
+                    ],
+                    "fragmentation": [
+                        "activityFragmentCount": 2,
+                        "sessionCount": 1,
+                        "contextSwitchCount": 0,
+                        "interruptionCount": 0
+                    ],
+                    "appBreakdown": [
+                        ["name": "Codex", "durationMs": 3_600_000, "percent": 100]
+                    ],
+                    "categoryBreakdown": [
+                        ["name": "engineering", "summaryCount": 1]
+                    ]
+                ],
                 "uncertainties": []
             ],
             "sourceSummaryCount": 3
@@ -810,6 +839,8 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(row["sourceSummaryCount"] as? Int64, 3)
         let summary = try XCTUnwrap(row["summary"] as? [String: Any])
         XCTAssertEqual(summary["text"] as? String, "Focused implementation work.")
+        let metrics = try XCTUnwrap(summary["metrics"] as? [String: Any])
+        XCTAssertEqual(metrics["totalRecordedMs"] as? Int64, 3_600_000)
 
         let archive = try XCTUnwrap(try store.request(operation: "data.export", payload: [:]) as? [String: Any])
         let encoded = String(data: try JSONSerialization.data(withJSONObject: archive), encoding: .utf8) ?? ""
@@ -824,6 +855,8 @@ final class SQLiteStoreTests: XCTestCase {
         let restoredRow = try XCTUnwrap(try restored.request(operation: "dailyAISummaries.get", payload: ["date": "2026-06-07"]) as? [String: Any])
         XCTAssertEqual(restoredRow["status"] as? String, "succeeded")
         XCTAssertEqual((restoredRow["summary"] as? [String: Any])?["text"] as? String, "Focused implementation work.")
+        let restoredMetrics = try XCTUnwrap((restoredRow["summary"] as? [String: Any])?["metrics"] as? [String: Any])
+        XCTAssertEqual(restoredMetrics["totalRecordedMs"] as? Int64, 3_600_000)
     }
 
     func testDailyAISummariesListMergesGeneratedFailedAndReadyDays() throws {

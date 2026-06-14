@@ -203,6 +203,24 @@ final class AIServiceTests: XCTestCase {
                     "dayparts": [["name": "morning", "durationMs": 3_600_000, "percent": 100]],
                     "summaryCategories": [["name": "engineering", "summaryCount": 2]]
                 ],
+                "metrics": [
+                    "version": 1,
+                    "longestFocusSession": [
+                        "durationMs": 3_600_000,
+                        "app": "Xcode",
+                        "label": "AI settings implementation"
+                    ],
+                    "focusSessions": [
+                        "count": 1,
+                        "totalDurationMs": 3_600_000,
+                        "averageDurationMs": 3_600_000
+                    ],
+                    "fragmentation": [
+                        "contextSwitchCount": 0,
+                        "interruptionCount": 0
+                    ],
+                    "appBreakdown": [["name": "Xcode", "durationMs": 3_600_000, "percent": 100]]
+                ],
                 "recentSummaryOpeners": [
                     "Your tracked day centered on Oriel implementation."
                 ]
@@ -216,6 +234,10 @@ final class AIServiceTests: XCTestCase {
         XCTAssertTrue(requestBody.contains("Use only the provided JSON"))
         XCTAssertTrue(requestBody.contains("Treat activity-summary clusters as high-detail sampled evidence"))
         XCTAssertTrue(requestBody.contains("Use activityStats as precomputed local context"))
+        XCTAssertTrue(requestBody.contains("Use dayContext.metrics as precomputed local context"))
+        XCTAssertTrue(requestBody.contains("longestFocusSession"))
+        XCTAssertTrue(requestBody.contains("contextSwitchCount"))
+        XCTAssertFalse(requestBody.contains("focusScore"))
         XCTAssertTrue(requestBody.contains("Use activity-summary clusters as representative evidence"))
         XCTAssertTrue(requestBody.contains("recentSummaryOpeners"))
         XCTAssertTrue(requestBody.contains("Do not reuse or closely paraphrase recentSummaryOpeners"))

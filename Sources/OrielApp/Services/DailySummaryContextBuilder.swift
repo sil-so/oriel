@@ -3,6 +3,7 @@ import Foundation
 struct DailySummaryContextPayload {
     let activitySummaries: [[String: Any]]
     let dayContext: [String: Any]
+    let metrics: [String: Any]?
 }
 
 enum DailySummaryContextBuilder {
@@ -10,6 +11,8 @@ enum DailySummaryContextBuilder {
     private static let maxClusterValues = 5
     private static let maxRecentOpeners = 5
     private static let maxTopStats = 8
+    private static let focusSessionMergeGapMs: Int64 = 15 * 1000
+    private static let focusSessionMinDurationMs: Int64 = 60 * 1000
     private static let sensitiveKeys: Set<String> = [
         "appPath",
         "bundleId",
@@ -27,14 +30,20 @@ enum DailySummaryContextBuilder {
     ) -> DailySummaryContextPayload {
         let sanitizedActivities = activities.map(sanitizedActivity)
         let clusters = clusteredActivitySummaries(activitySummaries)
+        let metrics = summaryMetrics(activities: sanitizedActivities, clusters: clusters)
         let dayContext: [String: Any] = [
             "date": date,
             "activities": sanitizedActivities,
             "timeEntries": sanitizedObject(timeEntries),
             "activityStats": activityStats(activities: sanitizedActivities, clusters: clusters),
+            "metrics": metrics,
             "recentSummaryOpeners": recentSummaryOpeners(recentDailySummaries)
         ]
-        return DailySummaryContextPayload(activitySummaries: clusters, dayContext: dayContext)
+        return DailySummaryContextPayload(
+            activitySummaries: clusters,
+            dayContext: dayContext,
+            metrics: metrics
+        )
     }
 
     private static func clusteredActivitySummaries(_ rows: [[String: Any]]) -> [[String: Any]] {
@@ -84,6 +93,142 @@ enum DailySummaryContextBuilder {
             "summaryCategories": categories,
             "summaryActions": actions
         ]
+    }
+
+    private static func summaryMetrics(
+        activities: [[String: Any]],
+        clusters: [[String: Any]]
+    ) -> [String: Any] {
+        let metricActivities = metricSources(from: activities)
+        let totalRecordedMs = metricActivities.reduce(Int64(0)) { $0 + $1.durationMs }
+        let sessions = focusSessions(from: metricActivities)
+        let longest = sessions.max { first, second in
+            if first.durationMs != second.durationMs {
+                return first.durationMs < second.durationMs
+            }
+            return first.start > second.start
+        }
+        let focusTotalMs = sessions.reduce(Int64(0)) { $0 + $1.durationMs }
+        let appDurations = groupedDurations(activities, key: "app")
+
+        return [
+            "version": 1,
+            "totalRecordedMs": totalRecordedMs,
+            "longestFocusSession": longest?.output() ?? [:],
+            "focusSessions": [
+                "count": sessions.count,
+                "totalDurationMs": focusTotalMs,
+                "averageDurationMs": sessions.isEmpty ? 0 : focusTotalMs / Int64(sessions.count)
+            ],
+            "fragmentation": [
+                "activityFragmentCount": metricActivities.count,
+                "sessionCount": sessions.count,
+                "contextSwitchCount": contextSwitchCount(metricActivities),
+                "interruptionCount": sessions.reduce(0) { $0 + $1.interruptionCount }
+            ],
+            "appBreakdown": rankedDurations(appDurations, totalDuration: totalRecordedMs),
+            "categoryBreakdown": groupedSummaryCounts(clusters, key: "category")
+        ]
+    }
+
+    private static func metricSources(from activities: [[String: Any]]) -> [MetricActivity] {
+        activities.compactMap { activity in
+            guard let start = int64(activity["start"]),
+                  let end = int64(activity["end"]),
+                  end > start else {
+                return nil
+            }
+            let app = string(activity["app"]) ?? ""
+            let title = string(activity["title"]) ?? ""
+            let domain = string(activity["domain"]) ?? ""
+            let key = focusSessionKey(app: app, domain: domain)
+            guard !key.isEmpty else { return nil }
+            return MetricActivity(
+                start: start,
+                end: end,
+                app: app,
+                title: title,
+                label: focusSessionLabel(app: app, title: title, domain: domain),
+                key: key
+            )
+        }
+        .sorted { first, second in
+            if first.start != second.start { return first.start < second.start }
+            return first.end < second.end
+        }
+    }
+
+    private static func focusSessions(from sources: [MetricActivity]) -> [FocusSession] {
+        var sessions: [FocusSession] = []
+        var current: FocusSession?
+
+        func flushCurrent() {
+            guard let session = current else { return }
+            if session.durationMs >= focusSessionMinDurationMs {
+                sessions.append(session)
+            }
+            current = nil
+        }
+
+        for source in sources {
+            guard var session = current else {
+                current = FocusSession(source: source)
+                continue
+            }
+
+            let isNearCurrent = source.start <= session.end + focusSessionMergeGapMs
+            if source.key == session.key && isNearCurrent {
+                session.add(source)
+                current = session
+                continue
+            }
+
+            if source.key != session.key
+                && isNearCurrent
+                && source.durationMs < focusSessionMinDurationMs {
+                session.interruptionCount += 1
+                session.end = max(session.end, source.end)
+                current = session
+                continue
+            }
+
+            flushCurrent()
+            current = FocusSession(source: source)
+        }
+
+        flushCurrent()
+        return sessions
+    }
+
+    private static func contextSwitchCount(_ sources: [MetricActivity]) -> Int {
+        guard sources.count > 1 else { return 0 }
+        var switches = 0
+        var previousKey = sources[0].key
+        for source in sources.dropFirst() {
+            if source.key != previousKey {
+                switches += 1
+                previousKey = source.key
+            }
+        }
+        return switches
+    }
+
+    private static func focusSessionKey(app: String, domain: String) -> String {
+        let normalizedApp = normalizedKey(app)
+        let normalizedDomain = normalizedKey(domain)
+        if normalizedApp.isEmpty { return normalizedDomain }
+        return normalizedDomain.isEmpty ? normalizedApp : "\(normalizedApp)|||\(normalizedDomain)"
+    }
+
+    private static func focusSessionLabel(app: String, title: String, domain: String) -> String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedApp = app.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty && normalizedKey(trimmedTitle) != normalizedKey(trimmedApp) {
+            return trimmedTitle
+        }
+        if !trimmedApp.isEmpty { return trimmedApp }
+        if !domain.isEmpty { return domain }
+        return "Recorded activity"
     }
 
     private static func groupedDurations(_ activities: [[String: Any]], key: String) -> [String: Int64] {
@@ -381,6 +526,61 @@ enum DailySummaryContextBuilder {
         private func appendUnique(_ value: String?, to values: inout [String]) {
             guard let value, !values.contains(value) else { return }
             values.append(value)
+        }
+    }
+
+    private struct MetricActivity {
+        let start: Int64
+        let end: Int64
+        let app: String
+        let title: String
+        let label: String
+        let key: String
+
+        var durationMs: Int64 {
+            max(0, end - start)
+        }
+    }
+
+    private struct FocusSession {
+        let key: String
+        let app: String
+        let title: String
+        let label: String
+        var start: Int64
+        var end: Int64
+        var durationMs: Int64
+        var sourceCount: Int
+        var interruptionCount: Int
+
+        init(source: MetricActivity) {
+            key = source.key
+            app = source.app
+            title = source.title
+            label = source.label
+            start = source.start
+            end = source.end
+            durationMs = source.durationMs
+            sourceCount = 1
+            interruptionCount = 0
+        }
+
+        mutating func add(_ source: MetricActivity) {
+            start = min(start, source.start)
+            end = max(end, source.end)
+            durationMs += source.durationMs
+            sourceCount += 1
+        }
+
+        func output() -> [String: Any] {
+            [
+                "start": start,
+                "end": end,
+                "durationMs": durationMs,
+                "app": app,
+                "title": title,
+                "label": label
+            ]
         }
     }
 }

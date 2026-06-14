@@ -77,7 +77,7 @@ final class OrielBridgeDailySummaryTests: XCTestCase {
         var capturedRequest: URLRequest?
         let service = AIService(keyStore: BridgeFakeAPIKeyStore(keys: ["openai": "openai-key"])) { request in
             capturedRequest = request
-            let data = #"{"output_text":"{\"text\":\"You refined AI summary context.\",\"highlights\":[\"Clustered summary evidence\"]}"}"#.data(using: .utf8)!
+            let data = #"{"output_text":"{\"text\":\"You refined AI summary context.\",\"highlights\":[\"Clustered summary evidence\"],\"metrics\":{\"version\":999,\"totalRecordedMs\":1}}"}"#.data(using: .utf8)!
             return (data, bridgeHTTPResponse(for: request.url!, status: 200))
         }
         let bridge = OrielBridge(store: store, aiService: service, statusProvider: { [:] })
@@ -85,12 +85,25 @@ final class OrielBridgeDailySummaryTests: XCTestCase {
         let row = try await bridge.generateDailyAISummary(payload: ["date": "2026-06-07"])
 
         XCTAssertEqual(row["status"] as? String, "succeeded")
+        let summary = try XCTUnwrap(row["summary"] as? [String: Any])
+        let metrics = try XCTUnwrap(summary["metrics"] as? [String: Any])
+        XCTAssertEqual(metrics["version"] as? Int, 1)
+        XCTAssertEqual(metrics["totalRecordedMs"] as? Int64, 150 * 60 * 1000)
+        let longest = try XCTUnwrap(metrics["longestFocusSession"] as? [String: Any])
+        XCTAssertEqual(longest["app"] as? String, "Xcode")
+        XCTAssertEqual(longest["durationMs"] as? Int64, 2 * 60 * 60 * 1000)
+        let categories = try XCTUnwrap(metrics["categoryBreakdown"] as? [[String: Any]])
+        XCTAssertEqual(categories.first?["name"] as? String, "engineering")
         let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
         XCTAssertTrue(requestBody.contains("activityStats"))
         XCTAssertTrue(requestBody.contains("recentSummaryOpeners"))
         XCTAssertTrue(requestBody.contains("summaryCount"))
         XCTAssertTrue(requestBody.contains("shop.example.com"))
         XCTAssertTrue(requestBody.contains("Your tracked day centered on Oriel implementation."))
+        XCTAssertTrue(requestBody.contains("metrics"))
+        XCTAssertTrue(requestBody.contains("longestFocusSession"))
+        XCTAssertTrue(requestBody.contains("contextSwitchCount"))
+        XCTAssertFalse(requestBody.contains("focusScore"))
         XCTAssertFalse(requestBody.contains("token=secret"))
         XCTAssertFalse(requestBody.contains("appPath"))
         XCTAssertFalse(requestBody.contains("bundleId"))

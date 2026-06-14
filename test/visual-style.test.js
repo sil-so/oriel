@@ -362,14 +362,46 @@ test('AI Insights detail modal puts bottom spacing inside the scroll content', (
   assert.doesNotMatch(css.match(/\.ai-insights-detail-body\s*\{[^}]*\}/)?.[0] || '', /padding-bottom:/);
 });
 
-test('AI Insights card previews fade after two readable lines', () => {
+test('AI Insights generated card preview fade starts at the second visible content line', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
-  const previewRule = css.match(/\.ai-insights-card-summary--fade\s*\{[^}]*\}/)?.[0] || '';
-  const fadeRule = css.match(/\.ai-insights-card-summary--fade::after\s*\{[^}]*\}/)?.[0] || '';
+  const previewRule = css.match(/\.ai-insights-card-preview--fade\s*\{[^}]*\}/)?.[0] || '';
+  const fadeRule = css.match(/\.ai-insights-card-preview--fade::after\s*\{[^}]*\}/)?.[0] || '';
+  const legacySummaryFadeRule = css.match(/\.ai-insights-card-summary--fade\s*\{[^}]*\}/)?.[0] || '';
+  const previewBaseRule = css.match(/\.ai-insights-card-preview\s*\{[^}]*\}/)?.[0] || '';
+  const previewLineRules = css.match(/\.ai-insights-card-preview \.ai-insights-card-summary,[\s\S]*?line-height:\s*var\(--ai-insights-preview-line-height\);[\s\S]*?\}/)?.[0] || '';
 
-  assert.match(previewRule, /height:\s*calc\(1\.55em \* 4\)/);
-  assert.match(previewRule, /max-height:\s*calc\(1\.55em \* 4\)/);
-  assert.match(fadeRule, /height:\s*calc\(1\.55em \* 2\)/);
+  assert.match(previewBaseRule, /--ai-insights-preview-line-height:\s*18px/);
+  assert.match(previewBaseRule, /gap:\s*0/);
+  assert.match(previewRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 6\)/);
+  assert.match(previewRule, /max-height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 6\)/);
+  assert.match(fadeRule, /top:\s*calc\(var\(--ai-insights-preview-line-height\) \* 1\)/);
+  assert.match(fadeRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 5\)/);
+  assert.match(previewLineRules, /ai-insights-tldr-list li/);
+  assert.equal(legacySummaryFadeRule, '');
+});
+
+test('AI Insights card TLDR bullets are single-line while detail bullets wrap', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const cardRule = css.match(/\.ai-insights-card \.ai-insights-tldr-list li\s*\{[^}]*\}/)?.[0] || '';
+  const cardListRule = css.match(/\.ai-insights-card \.ai-insights-tldr-list\s*\{[^}]*\}/)?.[0] || '';
+  const detailRule = css.match(/\.ai-insights-detail-tldr \.ai-insights-tldr-list li\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(cardListRule, /list-style-position:\s*inside/);
+  assert.match(cardRule, /white-space:\s*nowrap/);
+  assert.match(cardRule, /overflow:\s*hidden/);
+  assert.match(cardRule, /text-overflow:\s*ellipsis/);
+  assert.match(detailRule, /white-space:\s*normal/);
+  assert.match(detailRule, /overflow:\s*visible/);
+});
+
+test('AI Insights does not render structured metrics as a visible visual component', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const script = fs.readFileSync('js/main.js', 'utf8');
+
+  assert.doesNotMatch(css, /ai-insights-metrics/);
+  assert.doesNotMatch(script, /renderAiInsightsMetrics/);
+  assert.doesNotMatch(script, /ai-insights-card-metrics/);
+  assert.doesNotMatch(script, /ai-insights-detail-metrics/);
 });
 
 test('settings tooltip is not nested inside the hideable scheduler workspace', () => {

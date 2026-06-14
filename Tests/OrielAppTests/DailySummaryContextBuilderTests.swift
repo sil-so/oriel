@@ -146,6 +146,132 @@ final class DailySummaryContextBuilderTests: XCTestCase {
         XCTAssertNil(activities[1]["url"])
     }
 
+    func testBuildComputesDailyFocusMetrics() throws {
+        let base = try millis(2026, 6, 7, hour: 9, minute: 0)
+        let codexFirstStart = base
+        let codexFirstEnd = codexFirstStart + 20 * 60 * 1000
+        let slackStart = codexFirstEnd
+        let slackEnd = slackStart + 10 * 1000
+        let codexSecondStart = slackEnd
+        let codexSecondEnd = codexSecondStart + 29 * 60 * 1000 + 50 * 1000
+        let codexThirdStart = codexSecondEnd + 5 * 1000
+        let codexThirdEnd = codexThirdStart + 15 * 60 * 1000
+        let safariStart = base + 2 * 60 * 60 * 1000
+        let safariEnd = safariStart + 45 * 60 * 1000
+
+        let output = DailySummaryContextBuilder.build(
+            date: "2026-06-07",
+            activitySummaries: [
+                [
+                    "activityId": "summary-a",
+                    "start": codexFirstStart,
+                    "end": codexFirstEnd,
+                    "app": "Codex",
+                    "title": "Oriel metrics plan",
+                    "summary": [
+                        "project_or_context": "Oriel",
+                        "category": "engineering",
+                        "action": "implementing",
+                        "cloud_safe_summary": "Implemented summary metrics."
+                    ]
+                ],
+                [
+                    "activityId": "summary-b",
+                    "start": safariStart,
+                    "end": safariEnd,
+                    "app": "Safari",
+                    "title": "Research notes",
+                    "summary": [
+                        "project_or_context": "Research",
+                        "category": "research",
+                        "action": "reviewing",
+                        "cloud_safe_summary": "Reviewed research notes."
+                    ]
+                ]
+            ],
+            activities: [
+                [
+                    "start": codexFirstStart,
+                    "end": codexFirstEnd,
+                    "app": "Codex",
+                    "title": "Oriel metrics plan"
+                ],
+                [
+                    "start": slackStart,
+                    "end": slackEnd,
+                    "app": "Slack",
+                    "title": "Short interruption"
+                ],
+                [
+                    "start": codexSecondStart,
+                    "end": codexSecondEnd,
+                    "app": "Codex",
+                    "title": "Oriel metrics plan"
+                ],
+                [
+                    "start": codexThirdStart,
+                    "end": codexThirdEnd,
+                    "app": "Codex",
+                    "title": "Oriel metrics plan"
+                ],
+                [
+                    "start": safariStart,
+                    "end": safariEnd,
+                    "app": "Safari",
+                    "title": "Research notes",
+                    "url": "https://example.com/research?token=private"
+                ]
+            ],
+            timeEntries: [],
+            recentDailySummaries: []
+        )
+
+        let codexFocusMs = (codexFirstEnd - codexFirstStart)
+            + (codexSecondEnd - codexSecondStart)
+            + (codexThirdEnd - codexThirdStart)
+        let safariFocusMs = safariEnd - safariStart
+        let interruptionMs = slackEnd - slackStart
+        let totalRecordedMs = codexFocusMs + interruptionMs + safariFocusMs
+        let focusTotalMs = codexFocusMs + safariFocusMs
+
+        let metrics = try XCTUnwrap(output.metrics)
+        XCTAssertEqual(metrics["version"] as? Int, 1)
+        XCTAssertEqual(metrics["totalRecordedMs"] as? Int64, totalRecordedMs)
+
+        let longest = try XCTUnwrap(metrics["longestFocusSession"] as? [String: Any])
+        XCTAssertEqual(longest["app"] as? String, "Codex")
+        XCTAssertEqual(longest["title"] as? String, "Oriel metrics plan")
+        XCTAssertEqual(longest["label"] as? String, "Oriel metrics plan")
+        XCTAssertEqual(longest["start"] as? Int64, codexFirstStart)
+        XCTAssertEqual(longest["end"] as? Int64, codexThirdEnd)
+        XCTAssertEqual(longest["durationMs"] as? Int64, codexFocusMs)
+
+        let focusSessions = try XCTUnwrap(metrics["focusSessions"] as? [String: Any])
+        XCTAssertEqual(focusSessions["count"] as? Int, 2)
+        XCTAssertEqual(focusSessions["totalDurationMs"] as? Int64, focusTotalMs)
+        XCTAssertEqual(focusSessions["averageDurationMs"] as? Int64, focusTotalMs / 2)
+
+        let fragmentation = try XCTUnwrap(metrics["fragmentation"] as? [String: Any])
+        XCTAssertEqual(fragmentation["activityFragmentCount"] as? Int, 5)
+        XCTAssertEqual(fragmentation["sessionCount"] as? Int, 2)
+        XCTAssertEqual(fragmentation["contextSwitchCount"] as? Int, 3)
+        XCTAssertEqual(fragmentation["interruptionCount"] as? Int, 1)
+
+        let apps = try XCTUnwrap(metrics["appBreakdown"] as? [[String: Any]])
+        XCTAssertEqual(apps.first?["name"] as? String, "Codex")
+        XCTAssertEqual(apps.first?["durationMs"] as? Int64, codexFocusMs)
+
+        let categories = try XCTUnwrap(metrics["categoryBreakdown"] as? [[String: Any]])
+        XCTAssertTrue(categories.contains { category in
+            (category["name"] as? String) == "engineering"
+                && (category["summaryCount"] as? Int) == 1
+        })
+
+        let serializedMetrics = try serializedJSONObject(metrics)
+        XCTAssertFalse(serializedMetrics.contains("token=private"))
+        XCTAssertFalse(serializedMetrics.contains("https://example.com"))
+    }
+
     private func millis(
         _ year: Int,
         _ month: Int,

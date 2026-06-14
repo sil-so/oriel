@@ -751,8 +751,9 @@ test('AI Insights generated cards render TLDR highlights before narrative previe
           summary: {
             text: 'Focused implementation work.\n\nAdditional details stayed readable.',
             highlights: [
-              'Improved card interactions',
+              'Improved **card interactions**',
               'Rendered recap bullets',
+              'Used `summary.metrics` in the prompt',
               'Linked [daily recap](https://example.com/recap)'
             ]
           }
@@ -763,25 +764,106 @@ test('AI Insights generated cards render TLDR highlights before narrative previe
 
   await dom.elTabAiInsights.click();
   const card = element('ai-insights-card-grid').children[0];
+  const preview = findChild(card, child => String(child.className || '').includes('ai-insights-card-preview'));
+  assert.ok(preview);
   assert.match(card.textContent, /TL;DR/);
   assert.match(card.textContent, /Improved card interactions/);
   assert.match(card.textContent, /Rendered recap bullets/);
   assert.match(card.textContent, /Focused implementation work/);
   assert.ok(card.textContent.indexOf('Rendered recap bullets') < card.textContent.indexOf('Focused implementation work'));
   assert.doesNotMatch(card.textContent, /Additional details stayed readable/);
+  const cardHeading = findChild(card, child => child.tagName === 'H3' && String(child.className || '').includes('ai-insights-tldr-heading'));
+  assert.ok(cardHeading);
+  assert.equal(cardHeading.textContent, 'TL;DR');
   const cardList = findChild(card, child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
   assert.ok(cardList);
-  assert.equal(cardList.children.length, 3);
+  assert.equal(cardList.children.length, 4);
+  const cardStrong = findChild(card, child => child.tagName === 'STRONG' && child.textContent === 'card interactions');
+  assert.ok(cardStrong);
+  const cardCode = findChild(card, child => child.tagName === 'CODE' && child.textContent === 'summary.metrics');
+  assert.ok(cardCode);
   const cardLink = findChild(card, child => child.tagName === 'A' && child.textContent === 'daily recap');
   assert.equal(cardLink?.attributes.href, 'https://example.com/recap');
 
   await findChild(card, child => child.textContent === 'Open').click();
+  const detailHeading = findChild(element('ai-insights-detail-body'), child => child.tagName === 'H3' && String(child.className || '').includes('ai-insights-tldr-heading'));
+  assert.ok(detailHeading);
+  assert.equal(detailHeading.textContent, 'TL;DR');
   const detailList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
   assert.ok(detailList);
-  assert.equal(detailList.children.length, 3);
+  assert.equal(detailList.children.length, 4);
   assert.match(detailList.textContent, /Improved card interactions/);
   assert.match(detailList.textContent, /Rendered recap bullets/);
   assert.match(element('ai-insights-detail-body').textContent, /Additional details stayed readable/);
+});
+
+test('AI Insights generated cards and detail modal keep summary metrics hidden', async () => {
+  const metrics = {
+    version: 1,
+    totalRecordedMs: 6_610_000,
+    longestFocusSession: {
+      start: 1_780_828_400_000,
+      end: 1_780_832_300_000,
+      durationMs: 3_900_000,
+      app: 'Codex',
+      title: 'Oriel metrics plan',
+      label: 'Oriel metrics plan'
+    },
+    focusSessions: {
+      count: 2,
+      totalDurationMs: 6_600_000,
+      averageDurationMs: 3_300_000
+    },
+    fragmentation: {
+      activityFragmentCount: 5,
+      sessionCount: 2,
+      contextSwitchCount: 3,
+      interruptionCount: 1
+    },
+    appBreakdown: [
+      { name: 'Codex', durationMs: 3_900_000, percent: 59 },
+      { name: 'Safari', durationMs: 2_700_000, percent: 41 }
+    ],
+    categoryBreakdown: [
+      { name: 'engineering', summaryCount: 3 },
+      { name: 'research', summaryCount: 1 }
+    ]
+  };
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-07',
+          status: 'succeeded',
+          sourceSummaryCount: 4,
+          summary: {
+            text: 'Focused implementation work with research follow-up.',
+            highlights: ['Implemented metrics visual'],
+            metrics
+          }
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+
+  const card = element('ai-insights-card-grid').children[0];
+  const cardMetrics = findChild(card, child => String(child.className || '').includes('ai-insights-card-metrics'));
+  assert.equal(cardMetrics, null);
+  assert.doesNotMatch(card.textContent, /Longest focus/);
+  assert.doesNotMatch(card.textContent, /Oriel metrics plan/);
+  assert.doesNotMatch(card.textContent, /1h 5m/);
+  assert.doesNotMatch(card.textContent, /3 switches/);
+
+  await findChild(card, child => child.textContent === 'Open').click();
+
+  const detailMetrics = findChild(element('ai-insights-detail-body'), child => String(child.className || '').includes('ai-insights-detail-metrics'));
+  assert.equal(detailMetrics, null);
+  assert.doesNotMatch(element('ai-insights-detail-body').textContent, /Longest focus/);
+  assert.doesNotMatch(element('ai-insights-detail-body').textContent, /Oriel metrics plan/);
+  assert.doesNotMatch(element('ai-insights-detail-body').textContent, /Average session/);
+  assert.doesNotMatch(element('ai-insights-detail-body').textContent, /55m/);
 });
 
 test('AI Insights generation buttons show loading state while a request is pending', async () => {

@@ -2159,7 +2159,7 @@ function setupMainEventListeners() {
     function renderAiInsightsPreview(text) {
         return renderAiInsightsMarkdown(
             aiInsightsPreviewMarkdown(text),
-            'ai-insights-card-summary ai-insights-card-summary--fade ai-insights-card-markdown'
+            'ai-insights-card-summary ai-insights-card-markdown'
         );
     }
 
@@ -2223,7 +2223,7 @@ function setupMainEventListeners() {
         const cleanHighlights = highlights.map(item => String(item || '').trim()).filter(Boolean);
         if (cleanHighlights.length === 0) return;
         const section = createAiInsightsElement('div', className);
-        section.appendChild(createAiInsightsElement('div', 'ai-insights-tldr-label', 'TL;DR'));
+        section.appendChild(createAiInsightsElement('h3', 'ai-insights-tldr-heading', 'TL;DR'));
         const list = createAiInsightsElement('ul', 'ai-insights-tldr-list');
         cleanHighlights.forEach(item => {
             const listItem = createAiInsightsElement('li', '');
@@ -2253,9 +2253,11 @@ function setupMainEventListeners() {
     function appendGeneratedAiInsightsContent(card, row) {
         const summary = row.summary || {};
         const text = String(summary.text || 'Daily summary generated.').trim();
+        const preview = createAiInsightsElement('div', 'ai-insights-card-preview ai-insights-card-preview--fade');
         const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-card-tldr ai-insights-tldr');
-        if (tldr) card.appendChild(tldr);
-        card.appendChild(renderAiInsightsPreview(text));
+        if (tldr) preview.appendChild(tldr);
+        preview.appendChild(renderAiInsightsPreview(text));
+        card.appendChild(preview);
 
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
         const openButton = createAiInsightsElement('button', 'button-secondary', 'Open');
