@@ -517,6 +517,30 @@ test('timeline-rendered rows use semantic classes instead of one-off utilities',
   assert.doesNotMatch(popupTemplate, /border-\[#2d2f34\]|text-blue-|text-gray-|text-\[(?:10|11|13)px\]|w-[4567] h-[4567]|bg-transparent/);
 });
 
+test('activity stream checkboxes use the shared circular hover affordance', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const checkboxRule = css.match(/\.activity-checkbox\s*\{[^}]*\}/)?.[0] || '';
+  const blockCheckboxRule = css.match(/\.activity-block__checkbox\s*\{[^}]*\}/)?.[0] || '';
+  const blockControlsRule = css.match(/\.activity-block \.activity-checkbox,\s*\.activity-block \.activity-quick-add\s*\{[^}]*\}/)?.[0] || '';
+  const hoverRule = css.match(/\.activity-checkbox:hover,\s*\.activity-checkbox:focus-visible\s*\{[^}]*\}/)?.[0] || '';
+  const timelineHoverRule = css.match(/\.activity-block \.activity-checkbox:hover,\s*\.activity-block \.activity-checkbox:focus-visible\s*\{[^}]*\}/)?.[0] || '';
+
+  assert.match(checkboxRule, /width:\s*28px/);
+  assert.match(checkboxRule, /height:\s*28px/);
+  assert.match(checkboxRule, /border-radius:\s*var\(--radius-pill\)/);
+  assert.match(blockCheckboxRule, /margin-left:\s*-6px/);
+  assert.match(blockCheckboxRule, /margin-right:\s*2px/);
+  assert.match(blockControlsRule, /background\s+150ms\s+var\(--ease-out\)/);
+  assert.match(hoverRule, /background:\s*var\(--control-surface-hover\)/);
+  assert.match(hoverRule, /outline:\s*none/);
+  assert.match(css, /--activity-checkbox-hover-surface:/);
+  assert.match(css, /--activity-checkbox-hover-surface:\s*color-mix\(in oklch,\s*var\(--surface-hover\)\s+86\.6667%,\s*black\s+13\.3333%\)/);
+  assert.match(css, /:root\[data-theme="light"\][\s\S]*--activity-checkbox-hover-surface:\s*color-mix\(in oklch,\s*var\(--surface-hover\)\s+96\.9136%,\s*black\s+3\.0864%\)/);
+  assert.match(css, /:root\[data-theme="reference"\][\s\S]*--activity-checkbox-hover-surface:\s*color-mix\(in srgb,\s*var\(--surface-hover\)\s+89\.6552%,\s*black\s+10\.3448%\)/);
+  assert.doesNotMatch(css, /--activity-checkbox-hover-surface:[^;]*surface-recessed/);
+  assert.match(timelineHoverRule, /background:\s*var\(--activity-checkbox-hover-surface\)/);
+});
+
 test('projects statistics and AI insights use semantic design-system classes', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
@@ -751,6 +775,9 @@ test('activity popup child rows remove favicon gutters and expose alignment cont
   const css = fs.readFileSync('css/index.css', 'utf8');
   const timeline = fs.readFileSync('js/timeline.js', 'utf8');
   const childRenderer = timeline.match(/const renderPopupActivityChildRow[\s\S]*?const renderPopupActivityBreakdownRow/)?.[0] || '';
+  const expandRule = css.match(/\.popup-activity-expand\s*\{[^}]*\}/)?.[0] || '';
+  const multiChildrenRule = css.match(/\.popup-activity-children--multi\s*\{[^}]*\}/)?.[0] || '';
+  const childRowRule = css.match(/\.popup-activity-child-row\s*\{[^}]*\}/)?.[0] || '';
 
   assert.doesNotMatch(childRenderer, /popup-activity-row__icon/);
   assert.match(childRenderer, /popup-activity-row__main popup-activity-row__main--child/);
@@ -758,6 +785,10 @@ test('activity popup child rows remove favicon gutters and expose alignment cont
   assert.doesNotMatch(timeline, /popup-activity-children--single/);
   assert.match(css, /\.popup-activity-children--multi\s*\{/);
   assert.match(css, /\.popup-activity-row__main--child\s*\{/);
+  assert.match(expandRule, /width:\s*24px/);
+  assert.match(expandRule, /margin-right:\s*0/);
+  assert.match(multiChildrenRule, /margin-left:\s*0/);
+  assert.match(childRowRule, /padding-left:\s*0/);
   assert.match(css, /\.activity-mix-tooltip\s*\{[\s\S]*z-index:\s*var\(--z-tooltip\)/);
 });
 

@@ -10,6 +10,7 @@
     --surface-hover: oklch(0.25 0.009 260);
     --control-surface: var(--surface-recessed);
     --control-surface-hover: var(--surface-panel);
+    --activity-checkbox-hover-surface: color-mix(in oklch, var(--surface-hover) 86.6667%, black 13.3333%);
     --modal-surface: var(--surface-raised);
 
     /* Border and divider roles. */
@@ -108,6 +109,7 @@
     --surface-raised: oklch(0.972 0.004 260);
     --surface-recessed: oklch(0.892 0.006 260);
     --surface-hover: oklch(0.865 0.008 260);
+    --activity-checkbox-hover-surface: color-mix(in oklch, var(--surface-hover) 96.9136%, black 3.0864%);
     --border: oklch(0.70 0.010 260 / 0.54);
     --border-strong: oklch(0.58 0.014 260 / 0.70);
     --grid-line: oklch(0.78 0.009 260 / 0.40);
@@ -155,6 +157,7 @@
     --grid-line: rgb(255 255 255 / 0.07);
     --control-surface: #303030;
     --control-surface-hover: #343434;
+    --activity-checkbox-hover-surface: color-mix(in srgb, var(--surface-hover) 89.6552%, black 10.3448%);
     --modal-surface: #3a3a3a;
     --text-primary: #eaeaea;
     --text-secondary: #b8b8b8;
@@ -3830,7 +3833,7 @@ body.is-column-resizing * {
 .activity-block .activity-quick-add {
     opacity: 0;
     pointer-events: none;
-    transition: opacity 150ms var(--ease-out);
+    transition: opacity 150ms var(--ease-out), color 150ms var(--ease-out), background 150ms var(--ease-out);
 }
 
 .activity-block:hover .activity-checkbox,
@@ -3853,7 +3856,8 @@ body.is-column-resizing * {
 .activity-block__checkbox {
     position: relative;
     z-index: var(--z-inline);
-    margin-right: 8px;
+    margin-left: -6px;
+    margin-right: 2px;
     cursor: pointer;
 }
 
@@ -3978,8 +3982,37 @@ body.is-column-resizing * {
     color: var(--text-secondary);
 }
 
+.activity-checkbox {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    transition: color 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+
+.activity-checkbox:hover,
+.activity-checkbox:focus-visible {
+    color: var(--text-primary);
+    background: var(--control-surface-hover);
+    outline: none;
+}
+
+.activity-block .activity-checkbox:hover,
+.activity-block .activity-checkbox:focus-visible {
+    background: var(--activity-checkbox-hover-surface);
+}
+
 .activity-checkbox.is-selected,
 .activity-quick-add:hover {
+    color: var(--info-text);
+}
+
+.activity-checkbox.is-selected:hover,
+.activity-checkbox.is-selected:focus-visible {
     color: var(--info-text);
 }
 
@@ -4868,7 +4901,7 @@ body.is-column-resizing * {
 .popup-activity-expand {
     width: 24px;
     height: 28px;
-    margin-right: 2px;
+    margin-right: 0;
 }
 
 .popup-activity-external-link {
@@ -4926,7 +4959,7 @@ body.is-column-resizing * {
 }
 
 .popup-activity-children--multi {
-    margin-left: 60px;
+    margin-left: 0;
 }
 
 @keyframes panel-enter {
