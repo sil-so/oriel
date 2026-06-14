@@ -23,6 +23,8 @@ skills-lock.json
 
 # Runtime data is recreated locally and may contain private activity history.
 data/
+screenshots/
+docs/timeline-decisions.md
 *.sqlite
 *.sqlite-*
 *.db
