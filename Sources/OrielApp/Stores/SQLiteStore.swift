@@ -1741,6 +1741,10 @@ final class SQLiteStore {
                 }
                 continue
             }
+            if key == "theme" {
+                output[key] = normalizedTheme(value)
+                continue
+            }
             output[key] = value
         }
         return output
@@ -1774,7 +1778,9 @@ final class SQLiteStore {
         ]
         for (key, value) in payload where accepted.contains(key) {
             let settingValue: Any
-            if key == "minActivityThreshold" {
+            if key == "theme" {
+                settingValue = normalizedTheme(value)
+            } else if key == "minActivityThreshold" {
                 settingValue = normalizedMinActivityThreshold(value)
             } else if key == "titleCleanupRules" {
                 settingValue = try normalizedTitleCleanupRules(value)
@@ -1800,6 +1806,14 @@ final class SQLiteStore {
             )
         }
         return try settings()
+    }
+
+    private func normalizedTheme(_ value: Any) -> String {
+        let raw = stringValue(value) ?? "graphite"
+        if raw == "variant" {
+            return "reference"
+        }
+        return ["graphite", "light", "reference"].contains(raw) ? raw : "graphite"
     }
 
     private func normalizedScreenshotFrequency(_ value: Any) -> String {

@@ -43,12 +43,14 @@ The main problem is hierarchy and component vocabulary, not the neutral palette.
 
 Theme and tokens:
 
-- `css/index.css` defines a useful neutral token base, but also carries `light`
-  and `reference` variants. Tests currently assert multiple themes, so removal
-  should be intentional and separate from the docs foundation.
-- `index.html` and `js/state.js` still initialize and persist theme choices.
-  Preserve compatibility until a focused theme-removal PR updates behavior and
-  tests.
+- `css/index.css` defines a useful neutral token base, and still carries
+  `light` and `reference` variants for compatibility.
+- Theme compatibility cleanup keeps the selector while treating `light` and
+  `reference` as compatibility themes. `graphite` remains the only design target
+  for new UI work.
+- `index.html`, `js/state.js`, and native settings storage normalize legacy
+  theme values so `variant` maps to `reference` and unsupported values fall back
+  to `graphite`.
 - Token roles need clearer meaning: accent, focus, selection, info, and project
   identity should not all collapse into generic blue.
 
@@ -139,7 +141,8 @@ cleanup in existing JS modules, not a new component framework.
 5. Settings sections and provider/key controls.
 6. Timeline, Activity Stream, Work Times, Unlogged Work, and activity popovers.
 7. Projects, project detail modal, statistics cards/charts, and AI Insights.
-8. Theme compatibility cleanup once neutral `graphite` is fully coherent.
+8. Keep theme compatibility explicit: `graphite` is the design target, while
+   `light` and `reference` remain selectable compatibility themes.
 
 ## Verification Commands
 

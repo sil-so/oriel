@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 
-test('Oriel themes define dark, light, and neutral visual systems', () => {
+test('Oriel theme compatibility keeps graphite as the design target', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
+  const designSystem = fs.readFileSync('docs/design-system.md', 'utf8');
+  const audit = fs.readFileSync('docs/ui-consistency-audit.md', 'utf8');
 
   assert.match(html, /\/assets\/vendor\/inter\/400\.css/);
   assert.match(html, /\/assets\/vendor\/inter\/500\.css/);
@@ -36,6 +38,9 @@ test('Oriel themes define dark, light, and neutral visual systems', () => {
   assert.match(html, /value="graphite">Dark</);
   assert.match(html, /value="light">Light</);
   assert.match(html, /value="reference">Neutral</);
+  assert.match(designSystem, /`graphite` theme is the only design target/);
+  assert.match(designSystem, /`light` and `reference` remain selectable compatibility themes/);
+  assert.match(audit, /Theme compatibility cleanup keeps the selector while treating `light` and\s+`reference` as compatibility themes/);
   assert.doesNotMatch(html, />Variant Grey</);
   assert.doesNotMatch(html, />Graphite</);
   assert.doesNotMatch(html, />Soft Light</);
@@ -678,16 +683,26 @@ test('similar activity selection uses a modal with explicit match modes', () => 
   assert.match(timeline, /function getActivitySimilarityKeyForMode\(/);
 });
 
-test('project and AI Insights card grids keep a three-column layout', () => {
+test('project and AI Insights card grids share the workspace grid primitive', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
+  const projectsMarkup = html.match(/id="projects-workspace"[\s\S]*?<!-- Reporting workspace -->/)?.[0] || '';
+  const aiMarkup = html.match(/id="ai-insights-workspace"[\s\S]*?<!-- MODAL: AI Insights Daily Summary -->/)?.[0] || '';
+  const sharedGridRule = css.match(/\.workspace-card-grid\s*\{[^}]*\}/)?.[0] || '';
   const projectsGridRule = css.match(/#projects-page-grid\s*\{[^}]*\}/)?.[0] || '';
   const aiGridRule = css.match(/\.ai-insights-card-grid\s*\{[^}]*\}/)?.[0] || '';
 
-  assert.match(html, /id="projects-page-grid"/);
+  assert.match(projectsMarkup, /class="[^"]*\bworkspace-card-grid\b[^"]*\bprojects-card-grid\b[^"]*"[^>]*id="projects-page-grid"/);
+  assert.match(aiMarkup, /class="[^"]*\bworkspace-card-grid\b[^"]*\bai-insights-card-grid\b[^"]*"[^>]*id="ai-insights-card-grid"/);
+  assert.match(sharedGridRule, /display:\s*grid/);
+  assert.match(sharedGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(sharedGridRule, /gap:\s*24px/);
+  assert.match(sharedGridRule, /min-width:\s*0/);
   assert.doesNotMatch(html, /grid-cols-1\s+md:grid-cols-2\s+lg:grid-cols-3/);
-  assert.match(projectsGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(aiGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(projectsGridRule, /gap:/);
+  assert.doesNotMatch(aiGridRule, /gap:/);
+  assert.doesNotMatch(projectsGridRule, /grid-template-columns:/);
+  assert.doesNotMatch(aiGridRule, /grid-template-columns:/);
   assert.doesNotMatch(aiGridRule, /auto-fit/);
 });
 
@@ -815,10 +830,47 @@ test('theme preference initializes safely and persists explicit changes', () => 
 
   assert.equal(context.state.settings.theme, 'reference');
   assert.equal(context.document.documentElement.dataset.theme, 'reference');
+  assert.equal(context.normalizeTheme('light'), 'light');
+  assert.equal(context.normalizeTheme('reference'), 'reference');
+  assert.equal(context.normalizeTheme('variant'), 'reference');
+  assert.equal(context.normalizeTheme('unknown'), 'graphite');
+
+  context.applyTheme('variant', { persist: true });
+  assert.equal(context.document.documentElement.dataset.theme, 'reference');
+  assert.equal(stored.get('theme'), 'reference');
 
   context.applyTheme('graphite', { persist: true });
   assert.equal(context.document.documentElement.dataset.theme, 'graphite');
   assert.equal(stored.get('theme'), 'graphite');
+});
+
+test('theme preload script normalizes before first paint', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const preloadScript = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1] || '';
+
+  function preloadTheme(storedTheme, { throws = false } = {}) {
+    const context = {
+      document: { documentElement: { dataset: {} } },
+      localStorage: {
+        getItem(key) {
+          assert.equal(key, 'theme');
+          if (throws) throw new Error('storage unavailable');
+          return storedTheme;
+        }
+      },
+      Set
+    };
+    vm.createContext(context);
+    vm.runInContext(preloadScript, context);
+    return context.document.documentElement.dataset.theme;
+  }
+
+  assert.equal(preloadTheme('light'), 'light');
+  assert.equal(preloadTheme('reference'), 'reference');
+  assert.equal(preloadTheme('variant'), 'reference');
+  assert.equal(preloadTheme('blueprint'), 'graphite');
+  assert.equal(preloadTheme(null), 'graphite');
+  assert.equal(preloadTheme('light', { throws: true }), 'graphite');
 });
 
 test('deprecated minActivityThreshold compatibility normalizes unsupported values', () => {
