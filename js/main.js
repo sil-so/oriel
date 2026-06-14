@@ -1960,10 +1960,94 @@ function setupMainEventListeners() {
         return element;
     }
 
+    function appendAiInsightsInlineText(container, text) {
+        if (!text) return;
+        container.appendChild(createAiInsightsElement('span', '', text));
+    }
+
+    function safeAiInsightsMarkdownUrl(url) {
+        try {
+            const parsed = new URL(String(url || ''));
+            return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : '';
+        } catch {
+            return '';
+        }
+    }
+
+    function appendAiInsightsInlineMarkdown(container, text) {
+        const source = String(text || '');
+        let index = 0;
+
+        const appendPlainUntil = nextIndex => {
+            if (nextIndex > index) {
+                appendAiInsightsInlineText(container, source.slice(index, nextIndex));
+                index = nextIndex;
+            }
+        };
+
+        while (index < source.length) {
+            if (source.startsWith('**', index)) {
+                const end = source.indexOf('**', index + 2);
+                if (end > index + 2) {
+                    const strong = createAiInsightsElement('strong', '');
+                    appendAiInsightsInlineMarkdown(strong, source.slice(index + 2, end));
+                    container.appendChild(strong);
+                    index = end + 2;
+                    continue;
+                }
+            }
+
+            if (source[index] === '`') {
+                const end = source.indexOf('`', index + 1);
+                if (end > index + 1) {
+                    container.appendChild(createAiInsightsElement('code', '', source.slice(index + 1, end)));
+                    index = end + 1;
+                    continue;
+                }
+            }
+
+            if (source[index] === '[') {
+                const match = source.slice(index).match(/^\[([^\]]+)\]\(([^)]+)\)/);
+                if (match) {
+                    const href = safeAiInsightsMarkdownUrl(match[2]);
+                    if (href) {
+                        const link = createAiInsightsElement('a', '');
+                        link.setAttribute('href', href);
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                        appendAiInsightsInlineMarkdown(link, match[1]);
+                        container.appendChild(link);
+                        index += match[0].length;
+                        continue;
+                    }
+                }
+            }
+
+            if (source[index] === '*') {
+                const end = source.indexOf('*', index + 1);
+                if (end > index + 1 && source[index + 1] !== '*') {
+                    const emphasis = createAiInsightsElement('em', '');
+                    appendAiInsightsInlineMarkdown(emphasis, source.slice(index + 1, end));
+                    container.appendChild(emphasis);
+                    index = end + 1;
+                    continue;
+                }
+            }
+
+            const nextSpecial = ['**', '`', '[', '*']
+                .map(token => source.indexOf(token, index + 1))
+                .filter(position => position >= 0)
+                .sort((first, second) => first - second)[0] ?? source.length;
+            appendPlainUntil(nextSpecial);
+        }
+    }
+
     function appendAiInsightsMarkdownParagraph(container, lines) {
         const text = lines.join(' ').replace(/\s+/g, ' ').trim();
         if (!text) return;
-        container.appendChild(createAiInsightsElement('p', '', text));
+        const paragraph = createAiInsightsElement('p', '');
+        appendAiInsightsInlineMarkdown(paragraph, text);
+        container.appendChild(paragraph);
     }
 
     function appendAiInsightsMarkdownList(container, items, ordered = false) {
@@ -1972,11 +2056,23 @@ function setupMainEventListeners() {
             .map(item => String(item || '').trim())
             .filter(Boolean)
             .forEach(item => {
-                list.appendChild(createAiInsightsElement('li', '', item));
+                const listItem = createAiInsightsElement('li', '');
+                appendAiInsightsInlineMarkdown(listItem, item);
+                list.appendChild(listItem);
             });
         if (list.children?.length) {
             container.appendChild(list);
         }
+    }
+
+    function appendAiInsightsMarkdownHeading(container, line) {
+        const match = String(line || '').trim().match(/^(#{1,6})\s+(.+)$/);
+        if (!match) return false;
+        const level = Math.min(6, Math.max(4, match[1].length));
+        const heading = createAiInsightsElement(`h${level}`, 'ai-insights-card-markdown-heading');
+        appendAiInsightsInlineMarkdown(heading, match[2]);
+        container.appendChild(heading);
+        return true;
     }
 
     function renderAiInsightsMarkdown(text, className = 'ai-insights-card-summary ai-insights-card-markdown') {
@@ -2005,6 +2101,13 @@ function setupMainEventListeners() {
                 return;
             }
 
+            if (/^#{1,6}\s+/.test(trimmed)) {
+                flushParagraph();
+                flushList();
+                appendAiInsightsMarkdownHeading(container, trimmed);
+                return;
+            }
+
             const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
             const orderedMatch = trimmed.match(/^\d+[.)]\s+(.+)$/);
             if (unorderedMatch || orderedMatch) {
@@ -2019,7 +2122,7 @@ function setupMainEventListeners() {
             }
 
             flushList();
-            paragraphLines.push(trimmed.replace(/^#{1,6}\s+/, ''));
+            paragraphLines.push(trimmed);
         });
 
         flushParagraph();
@@ -2031,33 +2134,33 @@ function setupMainEventListeners() {
         return container;
     }
 
-    function aiInsightsPreviewText(text) {
+    function aiInsightsPreviewMarkdown(text) {
         const lines = String(text || '')
             .replace(/\r\n?/g, '\n')
             .split('\n');
-        const paragraphLines = [];
+        const blockLines = [];
 
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed) {
-                if (paragraphLines.length > 0) break;
+                if (blockLines.length > 0) break;
                 continue;
             }
-            if (/^[-*]\s+/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed) || /^(highlights?|uncertainties):$/i.test(trimmed)) {
-                if (paragraphLines.length > 0) break;
+            if (/^(highlights?|uncertainties):$/i.test(trimmed)) {
+                if (blockLines.length > 0) break;
                 continue;
             }
-            paragraphLines.push(trimmed.replace(/^#{1,6}\s+/, ''));
+            blockLines.push(trimmed);
         }
 
-        return paragraphLines.join(' ').replace(/\s+/g, ' ').trim() || 'Daily summary generated.';
+        return blockLines.join('\n').trim() || 'Daily summary generated.';
     }
 
     function renderAiInsightsPreview(text) {
-        const previewText = aiInsightsPreviewText(text);
-        const preview = createAiInsightsElement('div', 'ai-insights-card-summary ai-insights-card-summary--fade');
-        preview.appendChild(createAiInsightsElement('p', '', previewText));
-        return preview;
+        return renderAiInsightsMarkdown(
+            aiInsightsPreviewMarkdown(text),
+            'ai-insights-card-summary ai-insights-card-summary--fade ai-insights-card-markdown'
+        );
     }
 
     function visibleAiInsightsRows() {
@@ -2115,15 +2218,20 @@ function setupMainEventListeners() {
         return card;
     }
 
-    function appendAiInsightsHighlights(container, highlights, className = 'ai-insights-card-highlights') {
+    function renderAiInsightsTldr(highlights, className = 'ai-insights-tldr') {
         if (!Array.isArray(highlights)) return;
         const cleanHighlights = highlights.map(item => String(item || '').trim()).filter(Boolean);
         if (cleanHighlights.length === 0) return;
-        const list = createAiInsightsElement('ul', className);
+        const section = createAiInsightsElement('div', className);
+        section.appendChild(createAiInsightsElement('div', 'ai-insights-tldr-label', 'TL;DR'));
+        const list = createAiInsightsElement('ul', 'ai-insights-tldr-list');
         cleanHighlights.forEach(item => {
-            list.appendChild(createAiInsightsElement('li', '', item));
+            const listItem = createAiInsightsElement('li', '');
+            appendAiInsightsInlineMarkdown(listItem, item);
+            list.appendChild(listItem);
         });
-        container.appendChild(list);
+        section.appendChild(list);
+        return section;
     }
 
     function openAiInsightsDetail(row) {
@@ -2136,14 +2244,17 @@ function setupMainEventListeners() {
         const summary = row?.summary || {};
         const text = String(summary.text || 'Daily summary generated.').trim();
         body.replaceChildren();
+        const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-detail-tldr ai-insights-tldr');
+        if (tldr) body.appendChild(tldr);
         body.appendChild(renderAiInsightsMarkdown(text, 'ai-insights-detail-summary ai-insights-card-markdown'));
-        appendAiInsightsHighlights(body, summary.highlights, 'ai-insights-detail-highlights');
         modal.classList.remove('hidden');
     }
 
     function appendGeneratedAiInsightsContent(card, row) {
         const summary = row.summary || {};
         const text = String(summary.text || 'Daily summary generated.').trim();
+        const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-card-tldr ai-insights-tldr');
+        if (tldr) card.appendChild(tldr);
         card.appendChild(renderAiInsightsPreview(text));
 
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');

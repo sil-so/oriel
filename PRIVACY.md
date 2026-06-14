@@ -56,6 +56,11 @@ Network access is limited to explicit user-enabled features:
   validated summary JSON, provider/model name, status, sanitized error text,
   dimensions, compressed byte count, and request metadata needed for later
   local summaries.
+- **AI daily insights:** generated manually by the user. Oriel sends clustered
+  validated screenshot-summary text, sanitized selected-day activity context,
+  recent daily-summary opening sentences, and local aggregate timing statistics
+  to the configured Ask AI provider. Oriel does not send raw screenshots, raw
+  images, full URL lists, app paths, or bundle paths for daily recap generation.
 - **AI model refresh:** when requested by the user, Oriel contacts the selected
   provider to list available models.
 
@@ -80,8 +85,8 @@ be used to prune matching historical activity where the app exposes that flow.
 Local data can also be removed by deleting the Oriel database and caches from
 the paths listed above. Backup archives should be treated as private because
 they can contain activity history, projects, settings, time entries, and
-validated AI screenshot summaries. Archives do not include API keys or raw
-screenshots.
+validated AI screenshot summaries and generated AI daily insights. Archives do
+not include API keys or raw screenshots.
 
 ## Development And Contributions
 

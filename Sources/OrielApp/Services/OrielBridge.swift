@@ -150,7 +150,7 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         ]
     }
 
-    private func generateDailyAISummary(payload: [String: Any]) async throws -> [String: Any] {
+    func generateDailyAISummary(payload: [String: Any]) async throws -> [String: Any] {
         let date = stringValue(payload["date"]) ?? todayString()
         let activitySummaries = try store.request(operation: "activityAISummaries.list", payload: ["date": date]) as? [[String: Any]] ?? []
         let succeededSummaries = activitySummaries.filter { ($0["status"] as? String) == "succeeded" }
@@ -176,15 +176,21 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         let model = askAIModel(provider: provider, settings: settings)
         do {
+            let activities = try store.request(operation: "activities.list", payload: ["date": date]) as? [[String: Any]] ?? []
+            let timeEntries = try store.request(operation: "entries.list", payload: ["date": date]) as? [[String: Any]] ?? []
+            let context = DailySummaryContextBuilder.build(
+                date: date,
+                activitySummaries: succeededSummaries.map(sanitizedDailySummarySource),
+                activities: activities,
+                timeEntries: timeEntries,
+                recentDailySummaries: try recentDailySummaries(before: date)
+            )
             let summary = try await aiService.dailySummary(payload: [
                 "provider": provider.rawValue,
                 "model": model,
                 "date": date,
-                "activitySummaries": succeededSummaries.map(sanitizedDailySummarySource),
-                "dayContext": [
-                    "activities": try store.request(operation: "activities.list", payload: ["date": date]) as? [[String: Any]] ?? [],
-                    "timeEntries": try store.request(operation: "entries.list", payload: ["date": date]) as? [[String: Any]] ?? []
-                ]
+                "activitySummaries": context.activitySummaries,
+                "dayContext": context.dayContext
             ])
             try store.upsertDailyAISummary([
                 "date": date,
@@ -232,6 +238,23 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             "title": row["title"] as? String ?? "",
             "summary": row["summary"] as? [String: Any] ?? [:]
         ]
+    }
+
+    private func recentDailySummaries(before date: String) throws -> [[String: Any]] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let selectedDate = formatter.date(from: date),
+              let endDate = formatter.calendar.date(byAdding: .day, value: -1, to: selectedDate),
+              let startDate = formatter.calendar.date(byAdding: .day, value: -14, to: selectedDate) else {
+            return []
+        }
+        let rows = try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": formatter.string(from: startDate),
+            "endDate": formatter.string(from: endDate)
+        ]) as? [[String: Any]] ?? []
+        return rows.filter { ($0["status"] as? String) == "succeeded" }
     }
 
     private func testScreenshotSummary(payload: [String: Any]) async throws -> [String: Any] {
