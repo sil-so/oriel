@@ -2791,26 +2791,31 @@ body.is-column-resizing * {
     font-weight: 500;
 }
 
-.ai-insights-card-summary {
+.ai-insights-card-preview {
+    --ai-insights-preview-line-height: 18px;
     position: relative;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
     color: var(--text-secondary);
     font-size: 12px;
-    line-height: 1.55;
+    line-height: var(--ai-insights-preview-line-height);
+}
+
+.ai-insights-card-preview--fade {
+    height: calc(var(--ai-insights-preview-line-height) * 6);
+    max-height: calc(var(--ai-insights-preview-line-height) * 6);
     overflow: hidden;
 }
 
-.ai-insights-card-summary--fade {
-    height: calc(1.55em * 4);
-    max-height: calc(1.55em * 4);
-}
-
-.ai-insights-card-summary--fade::after {
+.ai-insights-card-preview--fade::after {
     content: "";
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
-    height: calc(1.55em * 2);
+    top: calc(var(--ai-insights-preview-line-height) * 1);
+    height: calc(var(--ai-insights-preview-line-height) * 5);
     pointer-events: none;
     background: linear-gradient(
         to bottom,
@@ -2820,8 +2825,24 @@ body.is-column-resizing * {
     );
 }
 
+.ai-insights-card-summary {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
 .ai-insights-card-summary p {
     margin: 0;
+}
+
+.ai-insights-card-preview .ai-insights-card-summary,
+.ai-insights-card-preview .ai-insights-card-summary p,
+.ai-insights-card-preview .ai-insights-card-markdown-heading,
+.ai-insights-card-preview .ai-insights-tldr-heading,
+.ai-insights-card-preview .ai-insights-tldr-list,
+.ai-insights-card-preview .ai-insights-tldr-list li {
+    line-height: var(--ai-insights-preview-line-height);
 }
 
 .ai-insights-card-markdown-heading {
@@ -2882,7 +2903,8 @@ body.is-column-resizing * {
     gap: 6px;
 }
 
-.ai-insights-tldr-label {
+.ai-insights-tldr-heading {
+    margin: 0;
     color: var(--text-primary);
     font-size: 11px;
     line-height: 1.25;
@@ -2904,6 +2926,30 @@ body.is-column-resizing * {
 
 .ai-insights-tldr-list li {
     padding-left: 2px;
+}
+
+.ai-insights-card-preview .ai-insights-tldr,
+.ai-insights-card-preview .ai-insights-tldr-list {
+    gap: 0;
+}
+
+.ai-insights-card .ai-insights-tldr-list {
+    padding-left: 0;
+    list-style-position: inside;
+}
+
+.ai-insights-card .ai-insights-tldr-list li {
+    min-width: 0;
+    padding-left: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-insights-detail-tldr .ai-insights-tldr-list li {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
 }
 
 .ai-insights-card-highlights {

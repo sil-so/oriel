@@ -150,6 +150,7 @@ final class AIService {
         * Treat activity-summary clusters as high-detail sampled evidence, not a complete record of the day.
         * Use activity-summary clusters as representative evidence; summaryCount, titles, actions, objects, and representativeSummaries describe repeated related activity without listing every sample.
         * Use activityStats as precomputed local context for top apps, category/action emphasis, and daypart proportions. Do not recalculate totals from individual timestamps when activityStats provides them.
+        * Use dayContext.metrics as precomputed local context for longest focus block, session continuity, app/category proportions, context switches, and interruptions. Weave these metrics into the narrative only when they add useful shape to the tracked day.
         * Treat local activity and time-entry context as the broader tracked-day scaffold.
         * Use activity-summary clusters for concrete details, task descriptions, recurring themes, and specific work evidence.
         * Use local activity context to understand chronology, relative emphasis, app/title patterns, and broader recorded activity that may not have an activity summary.
@@ -174,6 +175,7 @@ final class AIService {
         * Preserve concrete details when clearly supported, such as project names, apps, product categories, purchases, recurring topics, or time-entry labels.
         * Merge repeated or adjacent activity into a single coherent theme when it clearly refers to the same task.
         * Mention approximate time proportions when activityStats supports them, such as "most of the morning", "a shorter afternoon block", or "the largest recorded block".
+        * Do not present metrics as a table, audit, dashboard, or numeric focus score. Use them as supporting evidence for natural phrasing like "your longest focus block" or "you split time roughly between".
         * Use recentSummaryOpeners only as anti-repetition context. Do not reuse or closely paraphrase recentSummaryOpeners.
         * Start with the strongest concrete supported activity, object, project, product, transition, or theme rather than a generic template opener.
         * Distinguish long same-theme work from fragmented context switching only when the clusters or activityStats support that distinction.

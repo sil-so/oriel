@@ -192,12 +192,16 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
                 "activitySummaries": context.activitySummaries,
                 "dayContext": context.dayContext
             ])
+            var storedSummary = summary
+            if let metrics = context.metrics {
+                storedSummary["metrics"] = metrics
+            }
             try store.upsertDailyAISummary([
                 "date": date,
                 "status": "succeeded",
                 "provider": provider.rawValue,
                 "model": model,
-                "summary": summary,
+                "summary": storedSummary,
                 "sourceSummaryCount": succeededSummaries.count
             ])
         } catch {
