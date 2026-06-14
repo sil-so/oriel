@@ -3,12 +3,12 @@ import ApplicationServices
 import Foundation
 
 final class TrackingController {
-    private enum InteractionState: String {
+    enum InteractionState: String {
         case handsOn
         case handsOff
     }
 
-    private struct ActiveSegment {
+    struct ActiveSegment {
         let start: Int64
         let app: String
         let title: String
@@ -348,11 +348,49 @@ final class TrackingController {
     }
 
     private func transition(to snapshot: ActiveSegment) {
-        if let currentSegment, currentSegment.matches(snapshot) {
+        let resolvedSnapshot = Self.resolvedSnapshot(current: currentSegment, incoming: snapshot)
+        if let currentSegment, currentSegment.matches(resolvedSnapshot) {
             return
         }
         flush()
-        self.currentSegment = snapshot
+        self.currentSegment = resolvedSnapshot
+    }
+
+    static func resolvedSnapshot(current: ActiveSegment?, incoming: ActiveSegment) -> ActiveSegment {
+        guard let current,
+              current.app == incoming.app,
+              isBrowserApp(incoming.app),
+              hasBrowserURL(current),
+              !hasBrowserURL(incoming),
+              isGenericBrowserTitle(incoming.title, app: incoming.app) else {
+            return incoming
+        }
+
+        return ActiveSegment(
+            start: incoming.start,
+            app: incoming.app,
+            title: current.title,
+            url: current.url,
+            bundleIdentifier: incoming.bundleIdentifier ?? current.bundleIdentifier,
+            appPath: incoming.appPath ?? current.appPath,
+            processIdentifier: incoming.processIdentifier ?? current.processIdentifier,
+            interactionState: incoming.interactionState
+        )
+    }
+
+    private static func isBrowserApp(_ app: String) -> Bool {
+        app == "Brave Browser" || app == "Google Chrome"
+    }
+
+    private static func hasBrowserURL(_ segment: ActiveSegment) -> Bool {
+        guard let url = segment.url?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !url.isEmpty
+    }
+
+    private static func isGenericBrowserTitle(_ title: String, app: String) -> Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines) == app
     }
 
     private func snapshot(
