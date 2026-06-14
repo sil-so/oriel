@@ -6555,6 +6555,97 @@ test('Multiple Activities popup renders browser activity as a host session with 
   }));
 });
 
+test('Multiple Activities popup promotes a single website page instead of rendering one child', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 255 * 5 * 60 * 1000;
+  const pageTitle = 'The AI question no one wants to ask';
+  const pageUrl = 'https://www.youtube.com/watch?v=single-page';
+  const popup = renderMultipleActivitiesPopup({
+    startCell: 255,
+    app: 'Brave Browser',
+    title: 'Multiple Activities',
+    url: '',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: pageTitle,
+        url: pageUrl,
+        start: blockStart,
+        end: blockStart + 2 * 60 * 1000,
+        duration: 2 * 60 * 1000
+      },
+      {
+        app: 'Oriel',
+        title: 'Oriel',
+        start: blockStart + 2 * 60 * 1000,
+        end: blockStart + 3 * 60 * 1000,
+        duration: 60 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, 'Multiple Activities');
+  assert.match(popup.renderedMultiList, new RegExp(`class="popup-activity-title"[^>]*>${pageTitle}<\\/span>`));
+  assert.ok(popup.renderedMultiList.includes(`href="${pageUrl}"`));
+  assert.match(popup.renderedMultiList, /title="Brave Browser">Brave Browser<\/span>/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-expand/);
+  assert.doesNotMatch(popup.renderedMultiList, /popup-activity-child-row/);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 0);
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 2);
+  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
+  assert.equal(popup.modalArgs[6][0].sources.length, 1);
+  assert.equal(popup.modalArgs[6][0].sources[0].title, pageTitle);
+  assert.equal(popup.modalArgs[6][0].sources[0].url, pageUrl);
+});
+
+test('single host-primary browser popup promotes one unique page without child rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 21 * 60 * 60 * 1000;
+  const pageTitle = 'The AI question no one wants to ask';
+  const pageUrl = 'https://www.youtube.com/watch?v=single-page';
+  const popup = renderMultipleActivitiesPopup({
+    zoom: 5,
+    startCell: 21 * 12,
+    span: 1,
+    app: 'Brave Browser',
+    title: 'youtube.com',
+    url: 'https://www.youtube.com/',
+    datasetOverrides: {
+      startMs: String(blockStart),
+      endMs: String(blockStart + 5 * 60 * 1000),
+      activeDurationMs: String(2 * 60 * 1000)
+    },
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: pageTitle,
+        url: pageUrl,
+        start: blockStart,
+        end: blockStart + 2 * 60 * 1000,
+        duration: 2 * 60 * 1000
+      }
+    ]
+  });
+
+  assert.equal(popup.context.DOM.elPopupAppName.innerText, pageTitle);
+  assert.equal(popup.context.DOM.elPopupTitle.innerText, 'Brave Browser');
+  assert.equal(popup.context.DOM.elPopupUrl.innerText, pageUrl);
+  assert.equal(popup.context.DOM.elPopupUrl.href, pageUrl);
+  assert.equal(popup.renderedMultiList, '');
+  assert.equal(popup.renderedSingleChildren, '');
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
+  assert.equal(popup.modalArgs[6][0].sources.length, 1);
+  assert.equal(popup.modalArgs[6][0].sources[0].title, pageTitle);
+  assert.equal(popup.modalArgs[6][0].sources[0].url, pageUrl);
+});
+
 test('single browser activity popup shows the visible title and full URL without child rows', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const blockStart = dateStart + 12 * 60 * 60 * 1000;
@@ -7818,7 +7909,7 @@ test('multiple activity popover aligns app names separately without dash separat
   assert.equal(renderedMultiList.includes('—'), false);
   assert.match(renderedMultiList, /<div class="popup-activity-row__label">\s*<span class="popup-activity-title" title="Reference Browser Tab">Reference Browser Tab<\/span>/);
   assert.match(renderedMultiList, /<span class="popup-activity-secondary" title="Brave Browser">Brave Browser<\/span>/);
-  assert.equal((renderedMultiList.match(/popup-activity-external-link/g) || []).length, 2);
+  assert.equal((renderedMultiList.match(/popup-activity-external-link/g) || []).length, 1);
 });
 
 test('multiple activity popover moves Activity Mix text to the footer', () => {
@@ -8381,7 +8472,7 @@ test('recorded activity popup renders different same-host page titles as session
   assert.match(renderedMultiList, /Apple Mac mini 1 model A2348 \| Vinted/);
   assert.match(renderedMultiList, /Word lid en verkoop tweedehands kleding zonder kosten \| Vinted/);
   assert.match(renderedMultiList, /Transient Vinted Tab/);
-  assert.equal((renderedMultiList.match(/data-popup-child-index/g) || []).length, 4);
+  assert.equal((renderedMultiList.match(/data-popup-child-index/g) || []).length, 3);
 });
 
 test('recorded activity popup aggregates sub-minute context rows without dropping assignment sources', () => {
@@ -8464,7 +8555,7 @@ test('recorded activity popup aggregates sub-minute context rows without droppin
   assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
   assert.match(popup.renderedMultiList, />3s<\/span>/);
   assert.equal((popup.renderedMultiList.match(/title="vinted\.nl">vinted\.nl<\/span>/g) || []).length, 2);
-  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 6);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 5);
   assert.ok(popup.renderedMultiList.indexOf('Apple Mac mini 1 model A2348') < popup.renderedMultiList.indexOf('Vinted | Een app, alles tweedehands'));
   assert.ok(popup.renderedMultiList.indexOf('Vinted | Een app, alles tweedehands') < popup.renderedMultiList.indexOf('Artikelen | Vinted'));
   assert.ok(popup.renderedMultiList.indexOf('Artikelen | Vinted') < popup.renderedMultiList.indexOf('Word lid en verkoop tweedehands kleding'));
@@ -8626,12 +8717,13 @@ test('coarse block secondary badge and popup both include contextual short Vinte
   assert.match(popup.renderedMultiList, /Word lid en verkoop tweedehands kleding/);
   assert.doesNotMatch(popup.renderedMultiList, /Other activity/);
   assert.doesNotMatch(popup.renderedMultiList, /Inbox/);
-  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 5);
+  assert.equal((popup.renderedMultiList.match(/data-popup-child-index/g) || []).length, 4);
 
   popup.context.DOM.elPopupAssignBtn.onclick();
 
   assert.equal(popup.modalArgs[6].length, 2);
-  assert.equal(popup.modalArgs[6][0].title, 'youtube.com');
+  assert.equal(popup.modalArgs[6][0].title, "coulou's vinyl cafe (no. 4) - rainy day selections");
+  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
   assert.equal(popup.modalArgs[6][0].sources.length, 1);
   assert.equal(popup.modalArgs[6][1].title, 'vinted.nl');
   assert.equal(popup.modalArgs[6][1].sources.length, 4);

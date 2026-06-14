@@ -3929,18 +3929,34 @@ function getPopupSessionDisplayTitle(rows, host) {
     return app || title || 'Recorded Activity';
 }
 
-function doesPopupSessionChildAddContext(parent, child) {
+function getRenderablePopupSessionChildren(children) {
+    const childRows = Array.isArray(children) ? children.filter(child => Number(child?.duration) > 0) : [];
+    if (childRows.length >= 2) return childRows;
+    return [];
+}
+
+function doesPopupSessionChildAddDisplayContext(parent, child) {
     const parentLabel = getPopupActivityDisplayLabels(parent).primary.trim().toLowerCase();
-    const childLabel = getPopupActivityDisplayLabels(child).primary.trim().toLowerCase();
-    if (!childLabel || childLabel === parentLabel) return false;
+    const childLabel = getPopupActivityDisplayLabels(child).primary.trim();
+    const normalizedChildLabel = childLabel.toLowerCase();
+    if (!normalizedChildLabel || normalizedChildLabel === parentLabel) return false;
     return !isWeakPopupActivityTitle(childLabel, child);
 }
 
-function getRenderablePopupSessionChildren(parent, children) {
-    const childRows = Array.isArray(children) ? children.filter(child => Number(child?.duration) > 0) : [];
-    if (childRows.length >= 2) return childRows;
-    if (childRows.length === 1 && doesPopupSessionChildAddContext(parent, childRows[0])) return childRows;
-    return [];
+function promoteSinglePopupSessionChild(row, children) {
+    const childRows = Array.isArray(children) ? children.filter(nextChild => Number(nextChild?.duration) > 0) : [];
+    if (childRows.length !== 1) return row;
+    const [child] = childRows;
+    if (!doesPopupSessionChildAddDisplayContext(row, child)) return row;
+
+    return {
+        ...row,
+        app: child.app || row.app,
+        title: getActivityDisplayTitle(child) || row.title,
+        url: child.url || row.url,
+        appPath: child.appPath || row.appPath,
+        bundleId: child.bundleId || row.bundleId
+    };
 }
 
 function buildPopupSessionSummaryRow(rows, contextKey, rangeStart, rangeEnd) {
@@ -3974,11 +3990,20 @@ function buildPopupSessionSummaryRow(rows, contextKey, rangeStart, rangeEnd) {
         popupSessionSummary: true,
         popupContextKey: contextKey
     };
+    const displayRow = promoteSinglePopupSessionChild(row, pageChildren);
 
     return {
-        ...row,
-        children: getRenderablePopupSessionChildren(row, pageChildren)
+        ...displayRow,
+        children: getRenderablePopupSessionChildren(pageChildren)
     };
+}
+
+function getSinglePopupDisplayActivity(activity) {
+    if (!activity?.popupContextSummary || !getActivitySummaryHostname(activity)) return activity;
+    if (Array.isArray(activity.children) && activity.children.length > 0) return activity;
+
+    const pageChildren = buildPopupPageChildRows(getPopupRowSources(activity), activity.start, activity.end);
+    return promoteSinglePopupSessionChild(activity, pageChildren);
 }
 
 function sortPopupDisplayRows(rows) {
@@ -5269,30 +5294,34 @@ function showActivityDetailsPopup(b) {
         const visibleActivity = { app, title, url, appPath, bundleId };
         const exactRow = (Array.isArray(popupDisplayModel.exactRows) ? popupDisplayModel.exactRows : [])
             .find(row => getPopupActivityExactGroupingKey(row) === getPopupActivityExactGroupingKey(visibleActivity));
+        const displayPrimaryRow = getSinglePopupDisplayActivity(popupDisplayModel.primaryRow || {});
+        const sourceActivity = exactRow || displayPrimaryRow || {};
+        const sourceTitle = getActivityDisplayTitle(sourceActivity) || sourceActivity.title || title;
         const singleSource = {
-            ...(exactRow || {}),
-            app,
-            title,
-            url,
-            appPath,
-            bundleId,
+            ...sourceActivity,
+            app: sourceActivity.app || app,
+            title: sourceTitle,
+            url: sourceActivity.url || url,
+            appPath: sourceActivity.appPath || appPath,
+            bundleId: sourceActivity.bundleId || bundleId,
             start: startMs,
             end: endMs,
             duration: totalMs,
             activityMix: popupActivityMix
         };
         const singleActivity = {
-            ...(exactRow || popupDisplayModel.primaryRow || {}),
-            app,
-            title,
-            url,
-            appPath,
-            bundleId,
+            ...sourceActivity,
+            app: sourceActivity.app || app,
+            title: sourceTitle,
+            url: sourceActivity.url || url,
+            appPath: sourceActivity.appPath || appPath,
+            bundleId: sourceActivity.bundleId || bundleId,
             start: startMs,
             end: endMs,
             duration: totalMs,
             activityMix: popupActivityMix,
             popupContextSummary: true,
+            popupContextKey: sourceActivity.popupContextKey || popupDisplayModel.primaryRow?.popupContextKey,
             sources: [singleSource]
         };
         const singleApp = normalizeActivityText(singleActivity.app || app);
