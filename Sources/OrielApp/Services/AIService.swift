@@ -147,12 +147,14 @@ final class AIService {
 
         Source interpretation:
 
-        * Treat activity summaries as high-detail sampled evidence, not a complete record of the day.
+        * Treat activity-summary clusters as high-detail sampled evidence, not a complete record of the day.
+        * Use activity-summary clusters as representative evidence; summaryCount, titles, actions, objects, and representativeSummaries describe repeated related activity without listing every sample.
+        * Use activityStats as precomputed local context for top apps, category/action emphasis, and daypart proportions. Do not recalculate totals from individual timestamps when activityStats provides them.
         * Treat local activity and time-entry context as the broader tracked-day scaffold.
-        * Use activity summaries for concrete details, task descriptions, recurring themes, and specific work evidence.
+        * Use activity-summary clusters for concrete details, task descriptions, recurring themes, and specific work evidence.
         * Use local activity context to understand chronology, relative emphasis, app/title patterns, and broader recorded activity that may not have an activity summary.
         * Use time-entry context to understand user-labeled work categories, projects, tasks, or manual corrections when present.
-        * Do not overfocus on only the sampled activity summaries when the local context shows broader tracked activity.
+        * Do not overfocus on only the sampled activity-summary clusters when the local context shows broader tracked activity.
         * Do not claim full real-world day coverage. Prefer phrasing like "your tracked day", "your recorded activity", "most of the recorded work", or "the clearest thread".
 
         Voice and tone:
@@ -171,6 +173,10 @@ final class AIService {
         * Prefer a coherent narrative over app-by-app narration.
         * Preserve concrete details when clearly supported, such as project names, apps, product categories, purchases, recurring topics, or time-entry labels.
         * Merge repeated or adjacent activity into a single coherent theme when it clearly refers to the same task.
+        * Mention approximate time proportions when activityStats supports them, such as "most of the morning", "a shorter afternoon block", or "the largest recorded block".
+        * Use recentSummaryOpeners only as anti-repetition context. Do not reuse or closely paraphrase recentSummaryOpeners.
+        * Start with a concrete activity, object, project, product, transition, or theme. Avoid generic formulas like "Your tracked day centered on" when a more specific opener is supported.
+        * Distinguish long same-theme work from fragmented context switching only when the clusters or activityStats support that distinction.
         * Include secondary themes when they are meaningful in the broader local context, even if they are less detailed than the sampled activity summaries.
         * Avoid flattening specific activity into vague categories. For example, prefer "comparing portable monitors and monitor arms" over "online shopping" when the context supports it.
         * Do not overfit to a single low-confidence source if stronger or repeated evidence points elsewhere.
@@ -208,6 +214,7 @@ final class AIService {
         {"text":"daily recap","highlights":["short highlight"]}
         * "text" must be a concise paragraph, not a list.
         * "highlights" must contain 0 to 5 short strings.
+        * Highlights must name concrete deliverables, decisions, transitions, objects, or specific threads.
         * Each highlight must be specific, factual, and no longer than 12 words.
         * Do not include empty, generic, or duplicate highlights.
 

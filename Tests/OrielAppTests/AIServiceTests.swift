@@ -188,6 +188,8 @@ final class AIServiceTests: XCTestCase {
             "date": "2026-06-07",
             "activitySummaries": [[
                 "activityId": "activity-1",
+                "summaryCount": 2,
+                "representativeSummaries": ["Edited AI settings."],
                 "summary": [
                     "cloud_safe_summary": "Edited AI settings.",
                     "activity": "implementation",
@@ -195,7 +197,15 @@ final class AIServiceTests: XCTestCase {
                 ]
             ]],
             "dayContext": [
-                "totals": ["recordedMs": 3_600_000]
+                "totals": ["recordedMs": 3_600_000],
+                "activityStats": [
+                    "topApps": [["name": "Xcode", "durationMs": 3_600_000, "percent": 100]],
+                    "dayparts": [["name": "morning", "durationMs": 3_600_000, "percent": 100]],
+                    "summaryCategories": [["name": "engineering", "summaryCount": 2]]
+                ],
+                "recentSummaryOpeners": [
+                    "Your tracked day centered on Oriel implementation."
+                ]
             ]
         ])
 
@@ -204,12 +214,21 @@ final class AIServiceTests: XCTestCase {
         let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
         XCTAssertTrue(requestBody.contains("structured activity summaries and local activity context"))
         XCTAssertTrue(requestBody.contains("Use only the provided JSON"))
-        XCTAssertTrue(requestBody.contains("Treat activity summaries as high-detail sampled evidence"))
+        XCTAssertTrue(requestBody.contains("Treat activity-summary clusters as high-detail sampled evidence"))
+        XCTAssertTrue(requestBody.contains("Use activityStats as precomputed local context"))
+        XCTAssertTrue(requestBody.contains("Use activity-summary clusters as representative evidence"))
+        XCTAssertTrue(requestBody.contains("recentSummaryOpeners"))
+        XCTAssertTrue(requestBody.contains("Do not reuse or closely paraphrase recentSummaryOpeners"))
+        XCTAssertTrue(requestBody.contains("Mention approximate time proportions"))
+        XCTAssertTrue(requestBody.contains("Highlights must name concrete deliverables, decisions, transitions, objects, or specific threads"))
         XCTAssertTrue(requestBody.contains("Write directly to the user using"))
         XCTAssertTrue(requestBody.contains("Do not invent goals, emotions, productivity judgments"))
         XCTAssertTrue(requestBody.contains("Do not start with, repeat, or name the selected date"))
         XCTAssertTrue(requestBody.contains("the screenshots show"))
         XCTAssertTrue(requestBody.contains("Structured activity-summary sources for the selected date"))
+        XCTAssertTrue(requestBody.contains("representativeSummaries"))
+        XCTAssertTrue(requestBody.contains("activityStats"))
+        XCTAssertTrue(requestBody.contains("Your tracked day centered on Oriel implementation."))
         XCTAssertTrue(requestBody.contains("Generate the daily recap JSON now."))
         XCTAssertFalse(requestBody.contains("\"uncertainties\""))
         XCTAssertTrue(requestBody.contains("Edited AI settings."))

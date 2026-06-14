@@ -53,6 +53,7 @@ into project, task, billable, and reporting entries.
 | Logo.dev icons | Off | Website domains, only when enabled |
 | Ask AI | Off until a provider key is configured | Selected-day context when the user asks |
 | AI screenshot summaries | Off | Compressed screenshots and activity metadata when enabled |
+| AI daily insights | Manual | Clustered text summaries and local time statistics when generated |
 | AI model refresh | Manual | Provider model-list request when requested |
 
 Oriel stores API keys in macOS Keychain. It does not store raw screenshots or
@@ -74,6 +75,11 @@ Oriel's networked features are opt-in and provider-specific:
   screenshot in memory, then sends it with activity metadata to the selected
   provider. Oriel stores only validated summary JSON and request metadata needed
   for local summaries.
+- **AI daily insights:** sends clustered validated screenshot-summary text,
+  sanitized activity context, recent summary opening sentences, and local
+  aggregate timing statistics to the configured Ask AI provider when the user
+  generates a daily recap. Raw screenshots, full URLs, app paths, and bundle
+  paths are not sent for daily recap generation.
 - **AI model refresh:** contacts the selected provider only when the user asks
   Oriel to refresh available models.
 
