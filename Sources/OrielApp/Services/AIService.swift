@@ -175,7 +175,7 @@ final class AIService {
         * Merge repeated or adjacent activity into a single coherent theme when it clearly refers to the same task.
         * Mention approximate time proportions when activityStats supports them, such as "most of the morning", "a shorter afternoon block", or "the largest recorded block".
         * Use recentSummaryOpeners only as anti-repetition context. Do not reuse or closely paraphrase recentSummaryOpeners.
-        * Start with a concrete activity, object, project, product, transition, or theme. Avoid generic formulas like "Your tracked day centered on" when a more specific opener is supported.
+        * Start with the strongest concrete supported activity, object, project, product, transition, or theme rather than a generic template opener.
         * Distinguish long same-theme work from fragmented context switching only when the clusters or activityStats support that distinction.
         * Include secondary themes when they are meaningful in the broader local context, even if they are less detailed than the sampled activity summaries.
         * Avoid flattening specific activity into vague categories. For example, prefer "comparing portable monitors and monitor arms" over "online shopping" when the context supports it.
@@ -188,11 +188,16 @@ final class AIService {
         * If many summaries describe the same activity, merge them into one theme.
         * If the local context shows meaningful activity that is not deeply covered by activity summaries, mention it briefly without inventing details.
         * Use more detail only when the input supports it clearly.
+        * Treat highlights as the TL;DR: they are the primary scannable summary, not secondary bullets.
+        * For normal or rich evidence, write 3 to 5 concrete TL;DR items in highlights. Sparse evidence may use 1 to 3.
+        * Each highlight should name a concrete theme with useful specificity at a glance, such as a workstream, purchase, research thread, deliverable, or transition.
+        * text must be one concise narrative paragraph that adds value beyond the highlights through chronology, transitions, time proportions, or what came before and after each major block.
+        * Do not restate highlights in sentence form. Use text to connect the TL;DR items into the shape of the tracked day.
         * Keep the recap readable as a daily card first, not as a full audit log.
         * Adapt the length to the amount of distinct supported activity:
 
-          * Sparse evidence: 1 to 2 sentences.
-          * Normal evidence: 2 to 3 sentences.
+          * Sparse evidence: 1 to 2 sentences and 1 to 3 highlights.
+          * Normal evidence: 2 to 3 sentences and 3 to 5 highlights.
           * Rich evidence with several distinct themes: 3 to 5 sentences.
         * Do not make the recap longer just because there are many repeated summaries of the same task.
         * Prefer staying under 140 words unless the input contains several clearly distinct work themes.
@@ -202,8 +207,9 @@ final class AIService {
         * Do not mention screenshots, raw images, stored artifacts, providers, models, schemas, metadata conflicts, confidence scores, evidence fields, sensitivity labels, debug fields, or internal processing.
         * Oriel does not store raw screenshots, so never imply that screenshots were stored or reviewed directly.
         * Do not start with, repeat, or name the selected date, weekday, or calendar day. General phrasing like "your tracked day" is allowed.
-        * Do not include Markdown formatting inside "text".
-        * Do not prefix highlight strings with bullets, hyphens, numbers, or Markdown syntax. The app renders the highlights array as a bullet list.
+        * Light inline Markdown is allowed inside text and highlights when it improves readability, such as bold text, inline code, or links that are already present in the input.
+        * Do not add a TL;DR heading in text or highlights. The app renders that heading.
+        * Do not prefix highlight strings with bullets, hyphens, or numbers. The app renders the highlights array as a bullet list.
 
         Output requirements:
 
@@ -212,10 +218,10 @@ final class AIService {
         * Do not include commentary before or after the JSON.
         * The JSON must have exactly this shape:
         {"text":"daily recap","highlights":["short highlight"]}
-        * "text" must be a concise paragraph, not a list.
-        * "highlights" must contain 0 to 5 short strings.
-        * Highlights must name concrete deliverables, decisions, transitions, objects, or specific threads.
-        * Each highlight must be specific, factual, and no longer than 12 words.
+        * "text" must be one concise narrative paragraph, not a list.
+        * "highlights" must contain TL;DR items as described above.
+        * Highlights must name concrete themes, deliverables, decisions, transitions, objects, purchases, or specific threads.
+        * Each highlight must be specific, factual, and no longer than 18 words.
         * Do not include empty, generic, or duplicate highlights.
 
         Avoid:

@@ -601,7 +601,7 @@ test('AI Insights renders generated, ready, and failed summary cards without unc
           sourceSummaryCount: 3,
           summary: {
             text: 'Focused implementation work in Oriel.',
-            highlights: ['Improved AI Insights'],
+            highlights: ['**Improved AI Insights**', '[PR review](https://github.com/sil-so/oriel/pull/22)'],
             uncertainties: ['metadata mismatch']
           }
         },
@@ -632,8 +632,18 @@ test('AI Insights renders generated, ready, and failed summary cards without unc
   }
   assert.match(grid.textContent, /Sunday, 7 June 2026/);
   assert.doesNotMatch(grid.textContent, /Sun, 7 Jun 2026/);
+  assert.match(grid.textContent, /TL;DR/);
+  assert.match(grid.textContent, /Improved AI Insights/);
+  assert.match(grid.textContent, /PR review/);
   assert.match(grid.textContent, /Focused implementation work in Oriel/);
-  assert.doesNotMatch(grid.textContent, /Improved AI Insights/);
+  assert.ok(grid.textContent.indexOf('TL;DR') < grid.textContent.indexOf('Focused implementation work in Oriel'));
+  const generatedCard = Array.from(grid.children).find(card => /Sunday, 7 June 2026/.test(card.textContent));
+  const highlightStrong = findChild(generatedCard, child => child.tagName === 'STRONG' && child.textContent === 'Improved AI Insights');
+  assert.ok(highlightStrong);
+  const highlightLink = findChild(generatedCard, child => child.tagName === 'A' && child.textContent === 'PR review');
+  assert.equal(highlightLink?.attributes.href, 'https://github.com/sil-so/oriel/pull/22');
+  assert.equal(highlightLink?.attributes.target, '_blank');
+  assert.equal(highlightLink?.attributes.rel, 'noopener noreferrer');
   assert.match(grid.textContent, /Generate daily summary/);
   assert.match(grid.textContent, /Try again/);
   assert.doesNotMatch(grid.textContent, /Based on \d+ screenshot activity summar/);
@@ -694,8 +704,8 @@ test('AI Insights generated card Open button shows a full summary modal', async 
           status: 'succeeded',
           sourceSummaryCount: 3,
           summary: {
-            text: 'Generated recap.\n\nHighlights:\n- One\n- Two',
-            highlights: ['One', 'Two', 'Three', 'Four', 'Five']
+            text: '#### Narrative\nGenerated **recap** with `context` after lunch.',
+            highlights: ['**One**', '[Two](https://example.com/two)', 'Three']
           }
         }
       ]
@@ -711,14 +721,26 @@ test('AI Insights generated card Open button shows a full summary modal', async 
   await openButton.click();
   assert.equal(element('ai-insights-detail-modal').classList.contains('hidden'), false);
   assert.equal(element('ai-insights-detail-title').textContent, 'Sunday, 7 June 2026');
+  assert.match(element('ai-insights-detail-body').textContent, /TL;DR/);
   assert.match(element('ai-insights-detail-body').textContent, /Generated recap/);
-  const markdownList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-card-markdown-list'));
-  assert.ok(markdownList);
-  assert.equal(markdownList.children.length, 2);
+  assert.ok(element('ai-insights-detail-body').textContent.indexOf('TL;DR') < element('ai-insights-detail-body').textContent.indexOf('Generated recap'));
+  const highlightList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
+  assert.ok(highlightList);
+  assert.equal(highlightList.children.length, 3);
+  const detailHeading = findChild(element('ai-insights-detail-body'), child => child.tagName === 'H4' && child.textContent === 'Narrative');
+  assert.ok(detailHeading);
+  const detailStrong = findChild(element('ai-insights-detail-body'), child => child.tagName === 'STRONG' && child.textContent === 'recap');
+  assert.ok(detailStrong);
+  const detailCode = findChild(element('ai-insights-detail-body'), child => child.tagName === 'CODE' && child.textContent === 'context');
+  assert.ok(detailCode);
+  const detailLink = findChild(element('ai-insights-detail-body'), child => child.tagName === 'A' && child.textContent === 'Two');
+  assert.equal(detailLink?.attributes.href, 'https://example.com/two');
+  assert.equal(detailLink?.attributes.target, '_blank');
+  assert.equal(detailLink?.attributes.rel, 'noopener noreferrer');
   assert.equal(openButton.textContent, 'Open');
 });
 
-test('AI Insights generated cards use a text-only preview and render markdown lists in the detail modal', async () => {
+test('AI Insights generated cards render TLDR highlights before narrative preview', async () => {
   const { dom, element } = loadMainControlsContext({
     nativeResponses: {
       'dailyAISummaries.list': [
@@ -727,8 +749,12 @@ test('AI Insights generated cards use a text-only preview and render markdown li
           status: 'succeeded',
           sourceSummaryCount: 3,
           summary: {
-            text: 'Focused implementation work.\n\nHighlights:\n- Improved card interactions\n- Rendered recap bullets\n\nAdditional details stayed readable.',
-            highlights: []
+            text: 'Focused implementation work.\n\nAdditional details stayed readable.',
+            highlights: [
+              'Improved card interactions',
+              'Rendered recap bullets',
+              'Linked [daily recap](https://example.com/recap)'
+            ]
           }
         }
       ]
@@ -737,16 +763,24 @@ test('AI Insights generated cards use a text-only preview and render markdown li
 
   await dom.elTabAiInsights.click();
   const card = element('ai-insights-card-grid').children[0];
+  assert.match(card.textContent, /TL;DR/);
+  assert.match(card.textContent, /Improved card interactions/);
+  assert.match(card.textContent, /Rendered recap bullets/);
   assert.match(card.textContent, /Focused implementation work/);
-  assert.doesNotMatch(card.textContent, /Improved card interactions|Rendered recap bullets|Additional details/);
-  assert.equal(findChild(card, child => child.tagName === 'UL'), null);
+  assert.ok(card.textContent.indexOf('Rendered recap bullets') < card.textContent.indexOf('Focused implementation work'));
+  assert.doesNotMatch(card.textContent, /Additional details stayed readable/);
+  const cardList = findChild(card, child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
+  assert.ok(cardList);
+  assert.equal(cardList.children.length, 3);
+  const cardLink = findChild(card, child => child.tagName === 'A' && child.textContent === 'daily recap');
+  assert.equal(cardLink?.attributes.href, 'https://example.com/recap');
 
   await findChild(card, child => child.textContent === 'Open').click();
-  const markdownList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-card-markdown-list'));
-  assert.ok(markdownList);
-  assert.equal(markdownList.children.length, 2);
-  assert.match(markdownList.textContent, /Improved card interactions/);
-  assert.match(markdownList.textContent, /Rendered recap bullets/);
+  const detailList = findChild(element('ai-insights-detail-body'), child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
+  assert.ok(detailList);
+  assert.equal(detailList.children.length, 3);
+  assert.match(detailList.textContent, /Improved card interactions/);
+  assert.match(detailList.textContent, /Rendered recap bullets/);
   assert.match(element('ai-insights-detail-body').textContent, /Additional details stayed readable/);
 });
 
