@@ -373,10 +373,21 @@ function loadModalsContext() {
   return { context, elements };
 }
 
-function renderMemoryAidHtml({ activities, timelineActivities, zoom, hideEmptyActivityRows = false, timeEntries = [], projects = [] }) {
+function renderMemoryAidHtml({
+  activities,
+  timelineActivities,
+  zoom,
+  hideEmptyActivityRows = false,
+  timeEntries = [],
+  projects = [],
+  currentDate = null
+}) {
   const context = loadTimelineContext();
   let renderedHtml = '';
 
+  if (currentDate) {
+    context.state.currentDate = new Date(currentDate);
+  }
   context.state.zoom = zoom;
   context.state.activities = activities;
   context.state.timeEntries = timeEntries;
@@ -455,10 +466,21 @@ async function refreshActivities({ rawActivities, thresholdSeconds }) {
   return context.state;
 }
 
-function renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom, activities = [], timelineActivities, hideEmptyActivityRows = false }) {
+function renderLoggedTimeEntriesHtml({
+  timeEntries,
+  projects,
+  zoom,
+  activities = [],
+  timelineActivities,
+  hideEmptyActivityRows = false,
+  currentDate = null
+}) {
   const context = loadTimelineContext();
   let renderedHtml = '';
 
+  if (currentDate) {
+    context.state.currentDate = new Date(currentDate);
+  }
   context.state.zoom = zoom;
   context.state.projects = projects;
   context.state.timeEntries = timeEntries;
@@ -2137,7 +2159,7 @@ test('auto-rule projection does not merge a tiny later secondary row into a visi
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
     start: codexStart,
-    end: codexEnd,
+    end: dateStart + (14 * 60 + 35) * 60 * 1000,
     zoom: 5
   }));
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['4 min']);
@@ -5289,6 +5311,100 @@ test('same-project source-backed entries do not merge across a visible empty row
     zoom: 15
   }), 'second coarse source row');
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min', '5 min']);
+});
+
+test('auto-rule coarse block stops before a hidden boundary row', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const ranges = [
+    [dateStart + (15 * 60 + 38) * 60 * 1000 + 26 * 1000, dateStart + (15 * 60 + 40) * 60 * 1000 + 57 * 1000],
+    [dateStart + (15 * 60 + 43) * 60 * 1000 + 23 * 1000, dateStart + (15 * 60 + 46) * 60 * 1000 + 6 * 1000],
+    [dateStart + (15 * 60 + 46) * 60 * 1000 + 12 * 1000, dateStart + (15 * 60 + 50) * 60 * 1000 + 13 * 1000]
+  ];
+  const activities = ranges.map(([start, end]) => codexActivity(start, end));
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-boundary-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  const activityHtml = renderMemoryAidHtml({
+    zoom: 5,
+    activities,
+    timelineActivities: activities,
+    currentDate: new Date(dateStart)
+  });
+  const entryHtml = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: [project],
+    activities,
+    timelineActivities: activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const [activityStyle] = extractActivityStyles(activityHtml);
+  const [entryStyle] = extractEntryStyles(entryHtml);
+
+  assert.equal(extractActivityStyles(activityHtml).length, 1);
+  assert.equal(extractEntryStyles(entryHtml).length, 1);
+  assertStyleMatchesRowGeometry(activityStyle, expectedRowGeometry({
+    dateStart,
+    start: dateStart + (15 * 60 + 35) * 60 * 1000,
+    end: dateStart + (15 * 60 + 50) * 60 * 1000,
+    zoom: 5
+  }), 'Activity Stream visible rows');
+  assertStyleMatchesRowGeometry(entryStyle, expectedRowGeometry({
+    dateStart,
+    start: dateStart + (15 * 60 + 35) * 60 * 1000,
+    end: dateStart + (15 * 60 + 50) * 60 * 1000,
+    zoom: 5
+  }), 'auto-rule boundary-trimmed rows');
+  assert.deepEqual(extractTimeEntryDurationLabels(entryHtml), ['9 min']);
+});
+
+test('hide-empty rows exclude auto-rule hidden boundary spillover rows', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const ranges = [
+    [dateStart + (15 * 60 + 38) * 60 * 1000 + 26 * 1000, dateStart + (15 * 60 + 40) * 60 * 1000 + 57 * 1000],
+    [dateStart + (15 * 60 + 43) * 60 * 1000 + 23 * 1000, dateStart + (15 * 60 + 46) * 60 * 1000 + 6 * 1000],
+    [dateStart + (15 * 60 + 46) * 60 * 1000 + 12 * 1000, dateStart + (15 * 60 + 50) * 60 * 1000 + 13 * 1000]
+  ];
+  const activities = ranges.map(([start, end]) => codexActivity(start, end));
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-compressed-boundary-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  context.state.currentDate = new Date(2026, 5, 15);
+  context.state.zoom = 5;
+  context.state.projects = [project];
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = timeEntries;
+  context.state.settings.hideEmptyActivityRows = true;
+
+  const model = context.getDayTimelineRenderModel({ dateStartOfDay: dateStart, zoom: 5 });
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: [project],
+    activities,
+    timelineActivities: activities,
+    timeEntries,
+    hideEmptyActivityRows: true,
+    currentDate: new Date(dateStart)
+  });
+  const [style] = extractEntryStyles(html);
+
+  assert.deepEqual(Array.from(model.rowLayout.sourceRows), [187, 188, 189]);
+  assert.equal(extractEntryStyles(html).length, 1);
+  assert.equal(style.top, 2);
+  assert.equal(style.height, 117);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['9 min']);
 });
 
 test('dense sub-minute auto-rule fragments summarize at coarse zoom instead of rendering tiny bars', () => {

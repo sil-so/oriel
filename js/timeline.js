@@ -3210,27 +3210,89 @@ function activityMatchesAnyKey(activity, keys) {
     return Boolean(similarityKey && keys.has(similarityKey));
 }
 
-function getAutoRuleFirstVisibleActivityDisplayStart(entry, exactStart, exactEnd, visibleActivityCells) {
-    if (!Array.isArray(visibleActivityCells) || visibleActivityCells.length === 0) return null;
+function getAutoRuleVisibleActivityDisplaySegments(entry, exactStart, exactEnd, visibleActivityCells) {
+    if (!Array.isArray(visibleActivityCells) || visibleActivityCells.length === 0) return [];
     const sourceActivities = getActivityStreamAssignmentActivities(entry);
-    if (sourceActivities.length === 0) return null;
+    if (sourceActivities.length === 0) return [];
 
     const matchKeys = new Set();
     sourceActivities.forEach(activity => addActivityMatchKeys(matchKeys, activity));
-    if (matchKeys.size === 0) return null;
+    if (matchKeys.size === 0) return [];
 
-    let displayStart = null;
-
+    const segments = [];
     visibleActivityCells.forEach(cell => {
         if (!cell || cell.end <= exactStart || cell.start >= exactEnd) return;
+
         const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(cell.overlaps || [cell], cell.start, cell.end);
         const hasVisibleMatch = visibleOverlaps.some(overlap => activityMatchesAnyKey(overlap, matchKeys));
         if (!hasVisibleMatch) return;
 
-        displayStart = displayStart === null ? cell.start : Math.min(displayStart, cell.start);
+        const segmentExactStart = Math.max(exactStart, cell.start);
+        const segmentExactEnd = Math.min(exactEnd, cell.end);
+        if (segmentExactEnd <= segmentExactStart) return;
+
+        const previous = segments[segments.length - 1];
+        if (previous && previous.displayEnd === cell.start && previous.exactEnd >= segmentExactStart) {
+            previous.displayEnd = cell.end;
+            previous.exactEnd = Math.max(previous.exactEnd, segmentExactEnd);
+            return;
+        }
+
+        segments.push({
+            displayStart: cell.start,
+            displayEnd: cell.end,
+            exactStart: segmentExactStart,
+            exactEnd: segmentExactEnd
+        });
     });
 
-    return Number.isFinite(displayStart) ? displayStart : null;
+    return segments;
+}
+
+function buildAutoRuleSegmentEntry(entry, segment) {
+    const segmentStart = Number(segment?.exactStart);
+    const segmentEnd = Number(segment?.exactEnd);
+    if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd) || segmentEnd <= segmentStart) return null;
+
+    const clippedActivities = getActivityStreamAssignmentActivities(entry)
+        .map(activity => {
+            const range = getAssignmentActivityRange(entry, activity);
+            if (!range) return null;
+
+            const start = Math.max(range.start, segmentStart);
+            const end = Math.min(range.end, segmentEnd);
+            if (end <= start) return null;
+
+            const duration = Math.max(0, end - start);
+            return {
+                ...activity,
+                start,
+                end,
+                duration,
+                assignedDurationMs: duration,
+                assignmentStart: start,
+                assignmentEnd: end,
+                activityMix: getActivityMixInRange(activity, start, end)
+            };
+        })
+        .filter(Boolean);
+    if (clippedActivities.length === 0) return null;
+
+    const durationMs = clippedActivities.reduce((total, activity) => {
+        return total + getActivitySourceDuration(activity);
+    }, 0);
+    if (durationMs <= 0) return null;
+
+    return {
+        ...entry,
+        start: Math.min(...clippedActivities.map(activity => activity.start)),
+        end: Math.max(...clippedActivities.map(activity => activity.end)),
+        renderDisplayStart: segment.displayStart,
+        renderDisplayEnd: segment.displayEnd,
+        renderDurationMs: durationMs,
+        renderExactGeometry: false,
+        activities: clippedActivities
+    };
 }
 
 function buildAutoRuleExactFragmentItems(groupEntries) {
@@ -3317,22 +3379,35 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
             visibleActivities: state.activities
         });
     const sortedEntries = groupEntries
-        .map(({ entry, sourceIndex }) => {
+        .flatMap(({ entry, sourceIndex }) => {
             const exactRange = getAutoRuleExactRange(entry);
             const exactStart = exactRange?.start ?? entry.start;
             const exactEnd = exactRange?.end ?? entry.end;
             if (!Number.isFinite(exactStart) || !Number.isFinite(exactEnd) || exactEnd <= exactStart) {
-                return null;
+                return [];
             }
-            return {
-                entry,
-                sourceIndex,
-                exactStart,
-                exactEnd
-            };
+            return getAutoRuleVisibleActivityDisplaySegments(entry, exactStart, exactEnd, visibleActivityCells)
+                .map((segment, segmentIndex) => {
+                    const segmentEntry = buildAutoRuleSegmentEntry(entry, segment);
+                    if (!segmentEntry) return null;
+
+                    return {
+                        entry: segmentEntry,
+                        sourceIndex: sourceIndex + (segmentIndex / 1000000),
+                        exactStart: segmentEntry.start,
+                        exactEnd: segmentEntry.end,
+                        displayStart: segment.displayStart,
+                        displayEnd: segment.displayEnd,
+                        durationMs: getRenderedTimeEntryDurationMs(segmentEntry)
+                    };
+                })
+                .filter(Boolean);
         })
-        .filter(Boolean)
-        .sort((left, right) => left.exactStart - right.exactStart || left.exactEnd - right.exactEnd);
+        .sort((left, right) => {
+            if (left.displayStart !== right.displayStart) return left.displayStart - right.displayStart;
+            if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
+            return left.exactStart - right.exactStart || left.exactEnd - right.exactEnd;
+        });
     const sessions = [];
     let current = null;
 
@@ -3345,16 +3420,13 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
         current = null;
     };
 
-    for (const { entry, sourceIndex, exactStart, exactEnd } of sortedEntries) {
-        const exactDisplayRange = getTimelineDisplayRowRange(exactStart, exactEnd, dateStartOfDay, zoom);
-        const visibleDisplayStart = getAutoRuleFirstVisibleActivityDisplayStart(entry, exactStart, exactEnd, visibleActivityCells);
-        const displayRange = Number.isFinite(visibleDisplayStart)
-            && visibleDisplayStart > exactDisplayRange.start
-            && visibleDisplayStart < exactDisplayRange.end
-            ? getTimelineDisplayRowRange(visibleDisplayStart, exactEnd, dateStartOfDay, zoom)
-            : exactDisplayRange;
+    for (const { entry, sourceIndex, exactStart, exactEnd, displayStart, displayEnd, durationMs } of sortedEntries) {
+        const displayRange = {
+            start: displayStart,
+            end: displayEnd
+        };
         const exactGapMs = current ? exactStart - current.end : Number.POSITIVE_INFINITY;
-        const entryDurationMs = getRenderedTimeEntryDurationMs(entry);
+        const entryDurationMs = durationMs;
         const canMergeByExactGap = current && exactGapMs <= ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
         const canMergeByDisplayRow = current
             && displayRange.start <= current.displayEnd
