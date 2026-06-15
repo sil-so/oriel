@@ -79,6 +79,9 @@ maintainable, and easy to review.
 - Keep public interfaces small and behavior explicit.
 - Update docs when setup, public behavior, privacy behavior, or contribution
   workflow changes.
+- Update `docs/timeline-decisions.md` whenever changing timeline rendering
+  behavior, geometry, row visibility, zoom behavior, or Activity Stream and
+  Time Entries alignment.
 - For UI design-system work, treat `PRODUCT.md`,
   `docs/design-system.md`, and `docs/ui-consistency-audit.md` as the source of
   truth. Preserve the neutral dark `graphite` direction, avoid new UI
