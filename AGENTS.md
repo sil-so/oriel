@@ -21,6 +21,24 @@ maintainable, and easy to review.
   launch-path changes.
 - Run `./script/build_and_run.sh` when a running app check is needed.
 
+## Design System
+
+- Before making UI changes, read `DESIGN.md`, `PRODUCT.md`,
+  `docs/design-system.md`, and `docs/ui-consistency-audit.md`.
+- Treat `DESIGN.md` as the agent-readable design contract for visual tokens,
+  component rules, theme behavior, accessibility, and UI anti-patterns.
+- Do not invent new colors, spacing, typography, radii, shadows, z-index values,
+  motion rules, or component variants unless the task explicitly updates the
+  design system.
+- Keep `graphite`, `light`, and `reference` usable while the theme selector is a
+  live app feature. `graphite` is the primary design direction; `light` and
+  `reference` are compatibility themes unless a task explicitly changes theme
+  strategy.
+- When implementation and `DESIGN.md` conflict, report the conflict first and
+  clarify whether to update the implementation or the design contract.
+- Update `DESIGN.md` when intentionally changing visual tokens, component
+  contracts, theme behavior, accessibility rules, or design-system anti-patterns.
+
 ## Pull Requests
 
 - Use Conventional Commit-style PR titles, such as
