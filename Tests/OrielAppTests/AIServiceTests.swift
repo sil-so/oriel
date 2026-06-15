@@ -284,6 +284,78 @@ final class AIServiceTests: XCTestCase {
             // Expected.
         }
     }
+
+    func testAIServiceGeneratesRollupSummaryWithAskAIProviderAndModel() async throws {
+        let keyStore = FakeAPIKeyStore(keys: ["openai": "openai-key"])
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: keyStore) { request in
+            capturedRequest = request
+            let data = #"{"output_text":"{\"text\":\"The week centered on Oriel rollups.\",\"highlights\":[\"Built weekly recap cards\"],\"metrics\":{\"version\":999}}"}"#.data(using: .utf8)!
+            return (data, httpResponse(for: request.url!, status: 200))
+        }
+
+        let response = try await service.rollupSummary(payload: [
+            "provider": "openai",
+            "model": "gpt-rollup",
+            "period": "week",
+            "periodStart": "2026-06-01",
+            "periodEnd": "2026-06-07",
+            "dailySummaries": [[
+                "date": "2026-06-01",
+                "text": "You implemented rollup storage.",
+                "highlights": ["Built rollup persistence"]
+            ]],
+            "periodContext": [
+                "period": "week",
+                "sourceDailyCount": 1,
+                "metrics": [
+                    "version": 1,
+                    "totalRecordedMs": 3_600_000,
+                    "longestFocusSession": [
+                        "durationMs": 3_600_000,
+                        "app": "Codex",
+                        "label": "Oriel rollups"
+                    ]
+                ]
+            ]
+        ])
+
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer openai-key")
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("weekly or monthly AI insights writer"))
+        XCTAssertTrue(requestBody.contains("successful daily AI summaries"))
+        XCTAssertTrue(requestBody.contains("Use periodContext.metrics as precomputed local context"))
+        XCTAssertTrue(requestBody.contains("Selected period"))
+        XCTAssertTrue(requestBody.contains("2026-06-01"))
+        XCTAssertTrue(requestBody.contains("Built rollup persistence"))
+        XCTAssertFalse(requestBody.contains("data:image"))
+        XCTAssertFalse(requestBody.contains("base64"))
+        XCTAssertEqual(response["text"] as? String, "The week centered on Oriel rollups.")
+        XCTAssertEqual(response["highlights"] as? [String], ["Built weekly recap cards"])
+        XCTAssertNil(response["metrics"])
+    }
+
+    func testAIServiceRollupSummaryFailsCleanlyWithoutAskAIKey() async throws {
+        let service = AIService(keyStore: FakeAPIKeyStore(keys: [:])) { request in
+            XCTFail("Transport should not run without a saved key: \(request)")
+            return (Data(), httpResponse(for: URL(string: "https://example.com")!, status: 200))
+        }
+
+        do {
+            _ = try await service.rollupSummary(payload: [
+                "provider": "openai",
+                "model": "gpt-rollup",
+                "period": "month",
+                "periodStart": "2026-06-01",
+                "periodEnd": "2026-06-30",
+                "dailySummaries": []
+            ])
+            XCTFail("Expected missing key failure")
+        } catch AIServiceError.missingAPIKey {
+            // Expected.
+        }
+    }
 }
 
 private final class FakeAPIKeyStore: APIKeyStore {

@@ -252,6 +252,89 @@ final class AIService {
         return normalizeDailySummaryText(responseText)
     }
 
+    func rollupSummary(payload: [String: Any]) async throws -> [String: Any] {
+        let provider = try normalizedProvider(payload["provider"] as? String)
+        let model = normalizedModel(payload["model"] as? String, provider: provider)
+        guard let apiKey = try keyStore.apiKey(for: provider), !apiKey.isEmpty else {
+            throw AIServiceError.missingAPIKey
+        }
+
+        let systemPrompt = """
+        You are Oriel's weekly or monthly AI insights writer.
+
+        Your task is to turn successful daily AI summaries and local rollup metrics into one concise recap for the selected period.
+
+        Use only the provided JSON. Do not invent goals, emotions, productivity judgments, clients, outcomes, purchases, or missing details that are not supported by the input.
+
+        Source interpretation:
+
+        * Treat dailySummaries as the primary source. They are already generated from successful daily AI summaries.
+        * Use periodContext.metrics as precomputed local context for total recorded time, longest focus block, session continuity, app/category proportions, context switches, and interruptions.
+        * Use metrics only as supporting evidence for natural phrasing. Do not present metrics as a dashboard, audit, score, or table.
+        * Failed, empty, and ready daily summaries are not included. Do not imply that missing days had no activity.
+        * Do not claim full real-world week or month coverage. Prefer "your tracked week", "your recorded month", "the clearest thread", or "the daily recaps show".
+
+        Voice and tone:
+
+        * Write directly to the user using "you" and "your" when natural.
+        * Keep the tone neutral, calm, specific, and observational.
+        * Do not judge productivity, effort, mood, focus, discipline, or value.
+        * Prefer concrete themes, transitions, repeated workstreams, and supported shifts in emphasis.
+
+        Synthesis rules:
+
+        * Synthesize across days instead of listing each day mechanically.
+        * Mention daily progression only when it clarifies the shape of the period.
+        * Preserve concrete details when clearly supported by daily summaries.
+        * Merge repeated related work into one coherent theme.
+        * Mention approximate time proportions only when periodContext.metrics supports them.
+        * Keep weekly recaps tighter than monthly recaps when the input has fewer distinct themes.
+
+        Privacy and product constraints:
+
+        * Do not mention screenshots, raw images, stored artifacts, providers, models, schemas, confidence scores, debug fields, or internal processing.
+        * Oriel does not store raw screenshots, so never imply that screenshots were stored or reviewed directly.
+        * Do not start with, repeat, or name the selected period date range.
+        * Light inline Markdown is allowed inside text and highlights when it improves readability.
+        * Do not add a TL;DR heading in text or highlights. The app renders that heading.
+        * Do not prefix highlight strings with bullets, hyphens, or numbers.
+
+        Output requirements:
+
+        * Return only a valid JSON object.
+        * Do not wrap the JSON in markdown.
+        * Do not include commentary before or after the JSON.
+        * The JSON must have exactly this shape:
+        {"text":"period recap","highlights":["short highlight"]}
+        * "text" must be one concise narrative paragraph, not a list.
+        * "highlights" must contain 2 to 5 concrete TL;DR items for normal evidence. Sparse evidence may use 1.
+        * Each highlight must be specific, factual, and no longer than 18 words.
+        * Do not include empty, generic, or duplicate highlights.
+
+        Avoid:
+
+        * Do not write "the user spent the week" or "the user spent the month".
+        * Do not write "the screenshots show" or "based on screenshots".
+        * Do not write "you were productive", "you wasted time", or similar judgments.
+        """
+        let userPrompt = try buildRollupSummaryPrompt(payload: payload)
+
+        let responseText: String
+        switch provider {
+        case "openai":
+            responseText = try await requestOpenAI(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        case "google":
+            responseText = try await requestGoogle(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        case "anthropic":
+            responseText = try await requestAnthropic(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        case "openrouter":
+            responseText = try await requestOpenRouter(model: model, apiKey: apiKey, systemPrompt: systemPrompt, userPrompt: userPrompt)
+        default:
+            throw AIServiceError.invalidProvider
+        }
+        return normalizeDailySummaryText(responseText)
+    }
+
     private func normalizedProvider(_ value: String?) throws -> String {
         guard let provider = AIProvider.normalize(value) else {
             throw AIServiceError.invalidProvider
@@ -332,6 +415,31 @@ final class AIService {
         \(contextJSON)
 
         Generate the daily recap JSON now.
+        """
+    }
+
+    private func buildRollupSummaryPrompt(payload: [String: Any]) throws -> String {
+        let period = payload["period"] as? String ?? ""
+        let periodStart = payload["periodStart"] as? String ?? ""
+        let periodEnd = payload["periodEnd"] as? String ?? ""
+        let dailySummaries = payload["dailySummaries"] as? [[String: Any]] ?? []
+        let periodContext = payload["periodContext"] as? [String: Any] ?? [:]
+        let dailyData = try JSONSerialization.data(withJSONObject: dailySummaries, options: [.sortedKeys])
+        let dailyJSON = String(decoding: dailyData, as: UTF8.self)
+        let contextData = try JSONSerialization.data(withJSONObject: periodContext, options: [.sortedKeys])
+        let contextJSON = String(decoding: contextData, as: UTF8.self)
+
+        return """
+        Selected period:
+        \(period) \(periodStart) through \(periodEnd)
+
+        Successful daily AI summaries for this period:
+        \(dailyJSON)
+
+        Local selected-period context for chronology and emphasis:
+        \(contextJSON)
+
+        Generate the period recap JSON now.
         """
     }
 

@@ -64,6 +64,13 @@ final class SQLiteStore {
         case "dailyAISummaries.upsert":
             try upsertDailyAISummary(payload)
             return try dailyAISummary(payload: payload)
+        case "aiInsightRollups.get":
+            return try aiInsightRollup(payload: payload)
+        case "aiInsightRollups.list":
+            return try aiInsightRollups(payload: payload)
+        case "aiInsightRollups.upsert":
+            try upsertAIInsightRollup(payload)
+            return try aiInsightRollup(payload: payload)
         case "projects.list":
             return try listProjects()
         case "projects.create":
@@ -256,11 +263,12 @@ final class SQLiteStore {
             rules: rules,
             exclusions: exclusions,
             activityAISummaries: archive["activityAISummaries"] as? [[String: Any]] ?? [],
-            dailyAISummaries: archive["dailyAISummaries"] as? [[String: Any]] ?? []
+            dailyAISummaries: archive["dailyAISummaries"] as? [[String: Any]] ?? [],
+            aiInsightRollups: archive["aiInsightRollups"] as? [[String: Any]] ?? []
         )
         let portableSettings = archive["settings"] as? [String: Any] ?? [:]
         try transaction {
-            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
+            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "ai_insight_rollups", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
                 try execute("DELETE FROM \(table)")
             }
             try insertPortableRecords(records)
@@ -290,6 +298,7 @@ final class SQLiteStore {
         let exclusions: [[String: Any]]
         let activityAISummaries: [[String: Any]]
         let dailyAISummaries: [[String: Any]]
+        let aiInsightRollups: [[String: Any]]
     }
 
     private func validatePortableRecords(
@@ -299,7 +308,8 @@ final class SQLiteStore {
         rules: [[String: Any]],
         exclusions: [[String: Any]],
         activityAISummaries: [[String: Any]],
-        dailyAISummaries: [[String: Any]]
+        dailyAISummaries: [[String: Any]],
+        aiInsightRollups: [[String: Any]]
     ) throws -> PortableRecords {
         let normalizedProjects = try projects.map { project -> [String: Any] in
             let id = optionalString(project, key: "id", defaultValue: identifier("project"))
@@ -347,6 +357,7 @@ final class SQLiteStore {
             activityIDs: activityIDs
         )
         let normalizedDailyAISummaries = try normalizedDailyAISummaries(dailyAISummaries)
+        let normalizedAIInsightRollups = try normalizedAIInsightRollups(aiInsightRollups)
         return PortableRecords(
             projects: normalizedProjects,
             entries: normalizedEntries,
@@ -354,7 +365,8 @@ final class SQLiteStore {
             rules: normalizedRules,
             exclusions: normalizedExclusions,
             activityAISummaries: normalizedActivityAISummaries,
-            dailyAISummaries: normalizedDailyAISummaries
+            dailyAISummaries: normalizedDailyAISummaries,
+            aiInsightRollups: normalizedAIInsightRollups
         )
     }
 
@@ -463,6 +475,36 @@ final class SQLiteStore {
         }
     }
 
+    private func normalizedAIInsightRollups(_ rows: [[String: Any]]) throws -> [[String: Any]] {
+        try rows.map { row in
+            let periodType = try rollupPeriodType(row)
+            let periodStart = try requiredString(row, key: "periodStart", maxLength: 10)
+            let periodEnd = optionalString(row, key: "periodEnd", defaultValue: try rollupPeriodBounds(periodType: periodType, periodStart: periodStart).end)
+            guard isValidDateString(periodStart), isValidDateString(periodEnd) else {
+                throw OrielStoreError.invalidRequest("An AI insight rollup has an invalid period.")
+            }
+            let status = optionalString(row, key: "status", defaultValue: "failed")
+            guard ["succeeded", "failed", "empty"].contains(status) else {
+                throw OrielStoreError.invalidRequest("An AI insight rollup has an invalid status.")
+            }
+            var normalized: [String: Any] = [
+                "periodType": periodType,
+                "periodStart": periodStart,
+                "periodEnd": periodEnd,
+                "status": status,
+                "provider": String(optionalString(row, key: "provider", defaultValue: "").prefix(64)),
+                "model": String(optionalString(row, key: "model", defaultValue: "").prefix(200)),
+                "errorCode": String(optionalString(row, key: "errorCode", defaultValue: "").prefix(100)),
+                "errorMessage": String(optionalString(row, key: "errorMessage", defaultValue: "").prefix(500)),
+                "sourceDailyCount": max(0, intValue(row["sourceDailyCount"]) ?? 0)
+            ]
+            if let summary = row["summary"] as? [String: Any] {
+                normalized["summary"] = summary
+            }
+            return normalized
+        }
+    }
+
     private func dayFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -505,6 +547,9 @@ final class SQLiteStore {
         }
         for summary in records.dailyAISummaries {
             try upsertDailyAISummary(summary)
+        }
+        for rollup in records.aiInsightRollups {
+            try upsertAIInsightRollup(rollup)
         }
         for rule in records.rules {
             try execute(
@@ -634,6 +679,21 @@ final class SQLiteStore {
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS ai_insight_rollups (
+                period_type TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                status TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                summary_json TEXT,
+                error_code TEXT NOT NULL DEFAULT '',
+                error_message TEXT NOT NULL DEFAULT '',
+                source_daily_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (period_type, period_start)
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
@@ -643,6 +703,7 @@ final class SQLiteStore {
             CREATE INDEX IF NOT EXISTS passive_reviews_range_idx ON passive_reviews(start_ms, end_ms);
             CREATE INDEX IF NOT EXISTS activity_ai_summaries_status_idx ON activity_ai_summaries(status, updated_at);
             CREATE INDEX IF NOT EXISTS daily_ai_summaries_status_idx ON daily_ai_summaries(status, updated_at);
+            CREATE INDEX IF NOT EXISTS ai_insight_rollups_status_idx ON ai_insight_rollups(status, updated_at);
             """
         )
         try addColumnIfMissing(table: "projects", column: "tasks_json", definition: "TEXT NOT NULL DEFAULT '[]'")
@@ -1243,10 +1304,248 @@ final class SQLiteStore {
         return output
     }
 
+    func upsertAIInsightRollup(_ payload: [String: Any]) throws {
+        let periodType = try rollupPeriodType(payload)
+        let periodStart = try requiredString(payload, key: "periodStart", maxLength: 10)
+        let periodEnd = optionalString(
+            payload,
+            key: "periodEnd",
+            defaultValue: try rollupPeriodBounds(periodType: periodType, periodStart: periodStart).end
+        )
+        guard isValidDateString(periodStart), isValidDateString(periodEnd) else {
+            throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid period.")
+        }
+        let status = optionalString(payload, key: "status", defaultValue: "failed")
+        guard ["succeeded", "failed", "empty"].contains(status) else {
+            throw OrielStoreError.invalidRequest("Unsupported AI insight rollup status.")
+        }
+        let summaryJSON: String?
+        if let summary = payload["summary"] as? [String: Any] {
+            summaryJSON = try encodedJSONObject(summary)
+        } else {
+            summaryJSON = nil
+        }
+        try execute(
+            """
+            INSERT INTO ai_insight_rollups (
+                period_type, period_start, period_end, status, provider, model,
+                summary_json, error_code, error_message, source_daily_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(period_type, period_start) DO UPDATE SET
+                period_end = excluded.period_end,
+                status = excluded.status,
+                provider = excluded.provider,
+                model = excluded.model,
+                summary_json = excluded.summary_json,
+                error_code = excluded.error_code,
+                error_message = excluded.error_message,
+                source_daily_count = excluded.source_daily_count,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            values: [
+                periodType,
+                periodStart,
+                periodEnd,
+                status,
+                optionalString(payload, key: "provider", defaultValue: ""),
+                optionalString(payload, key: "model", defaultValue: ""),
+                summaryJSON,
+                optionalString(payload, key: "errorCode", defaultValue: ""),
+                String(optionalString(payload, key: "errorMessage", defaultValue: "").prefix(500)),
+                max(0, intValue(payload["sourceDailyCount"]) ?? 0)
+            ]
+        )
+    }
+
+    private func aiInsightRollup(payload: [String: Any]) throws -> [String: Any] {
+        let periodType = try rollupPeriodType(payload)
+        let periodStart = try requiredString(payload, key: "periodStart", maxLength: 10)
+        let bounds = try rollupPeriodBounds(periodType: periodType, periodStart: periodStart)
+        let sourceCount = try aiInsightRollupSourceDailyCount(periodStart: bounds.start, periodEnd: bounds.end)
+        guard let row = try query(
+            """
+            SELECT period_type AS periodType, period_start AS periodStart, period_end AS periodEnd,
+                   status, provider, model, summary_json AS summaryJson,
+                   error_code AS errorCode, error_message AS errorMessage,
+                   source_daily_count AS sourceDailyCount,
+                   created_at AS createdAt, updated_at AS updatedAt
+            FROM ai_insight_rollups
+            WHERE period_type = ? AND period_start = ?
+            LIMIT 1
+            """,
+            values: [periodType, bounds.start]
+        ).first else {
+            return [
+                "periodType": periodType,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "status": sourceCount > 0 ? "ready" : "empty",
+                "sourceDailyCount": Int64(sourceCount)
+            ]
+        }
+        var output = decodedAIInsightRollupRow(row, sourceCount: sourceCount)
+        if (stringValue(output["periodEnd"]) ?? "").isEmpty {
+            output["periodEnd"] = bounds.end
+        }
+        return output
+    }
+
+    private func aiInsightRollups(payload: [String: Any]) throws -> [[String: Any]] {
+        let dates = try dailyAISummaryDateRange(payload)
+        guard let startText = dates.first, let endText = dates.last else { return [] }
+        let includeEmpty = boolean(payload["includeEmpty"])
+        let requestedType = optionalString(payload, key: "periodType", defaultValue: optionalString(payload, key: "period", defaultValue: ""))
+        let periodTypes: [String]
+        if requestedType.isEmpty {
+            periodTypes = ["week", "month"]
+        } else {
+            periodTypes = [try rollupPeriodType(["periodType": requestedType])]
+        }
+
+        let formatter = dayFormatter()
+        guard let startDate = formatter.date(from: startText),
+              let endDate = formatter.date(from: endText) else {
+            throw OrielStoreError.invalidRequest("A valid AI insight rollup date range is required.")
+        }
+
+        var output: [[String: Any]] = []
+        for periodType in periodTypes {
+            let starts = try rollupPeriodStarts(periodType: periodType, startDate: startDate, endDate: endDate)
+            for periodStart in starts {
+                let row = try aiInsightRollup(payload: [
+                    "periodType": periodType,
+                    "periodStart": periodStart
+                ])
+                let periodEnd = stringValue(row["periodEnd"]) ?? periodStart
+                if periodEnd < startText || periodEnd > endText {
+                    continue
+                }
+                let status = stringValue(row["status"]) ?? "empty"
+                let sourceCount = intValue(row["sourceDailyCount"]) ?? 0
+                if status == "empty" && !includeEmpty && sourceCount == 0 {
+                    continue
+                }
+                output.append(row)
+            }
+        }
+
+        let typeOrder = ["month": 0, "week": 1]
+        return output.sorted { first, second in
+            let firstEnd = stringValue(first["periodEnd"]) ?? stringValue(first["periodStart"]) ?? ""
+            let secondEnd = stringValue(second["periodEnd"]) ?? stringValue(second["periodStart"]) ?? ""
+            if firstEnd != secondEnd {
+                return firstEnd > secondEnd
+            }
+            let firstType = typeOrder[stringValue(first["periodType"]) ?? ""] ?? 9
+            let secondType = typeOrder[stringValue(second["periodType"]) ?? ""] ?? 9
+            return firstType < secondType
+        }
+    }
+
+    private func decodedAIInsightRollupRow(_ row: [String: Any], sourceCount: Int) -> [String: Any] {
+        var output = row
+        if let summaryJSON = stringValue(row["summaryJson"]),
+           let summary = decodedJSONObject(summaryJSON) {
+            output["summary"] = summary
+        }
+        output.removeValue(forKey: "summaryJson")
+        if intValue(output["sourceDailyCount"]) == 0 {
+            output["sourceDailyCount"] = Int64(sourceCount)
+        }
+        if (stringValue(output["status"]) ?? "empty") == "empty" && sourceCount > 0 {
+            output["status"] = "ready"
+        }
+        return output
+    }
+
     private func dailyAISummarySourceCount(for date: String) throws -> Int {
         try listActivityAISummaries(payload: ["date": date])
             .filter { ($0["status"] as? String) == "succeeded" }
             .count
+    }
+
+    private func aiInsightRollupSourceDailyCount(periodStart: String, periodEnd: String) throws -> Int {
+        let row = try query(
+            """
+            SELECT count(*) AS count
+            FROM daily_ai_summaries
+            WHERE status = 'succeeded' AND date >= ? AND date <= ?
+            """,
+            values: [periodStart, periodEnd]
+        ).first
+        return Int(intValue(row?["count"]) ?? 0)
+    }
+
+    private func rollupPeriodType(_ payload: [String: Any]) throws -> String {
+        let periodType = optionalString(payload, key: "periodType", defaultValue: optionalString(payload, key: "period", defaultValue: ""))
+        guard ["week", "month"].contains(periodType) else {
+            throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid period type.")
+        }
+        return periodType
+    }
+
+    private func rollupPeriodBounds(periodType: String, periodStart: String) throws -> (start: String, end: String) {
+        let formatter = dayFormatter()
+        guard let date = formatter.date(from: periodStart) else {
+            throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid period start.")
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 2
+        let startDate: Date
+        let endDate: Date
+        switch periodType {
+        case "week":
+            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+            startDate = calendar.date(from: components) ?? date
+            guard let computedEnd = calendar.date(byAdding: .day, value: 6, to: startDate) else {
+                throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid weekly period.")
+            }
+            endDate = computedEnd
+        case "month":
+            let components = calendar.dateComponents([.year, .month], from: date)
+            startDate = calendar.date(from: components) ?? date
+            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: startDate),
+                  let computedEnd = calendar.date(byAdding: .day, value: -1, to: nextMonth) else {
+                throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid monthly period.")
+            }
+            endDate = computedEnd
+        default:
+            throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid period type.")
+        }
+        return (formatter.string(from: startDate), formatter.string(from: endDate))
+    }
+
+    private func rollupPeriodStarts(periodType: String, startDate: Date, endDate: Date) throws -> [String] {
+        let formatter = dayFormatter()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 2
+        let firstDate: Date
+        let component: Calendar.Component
+        let step: Int
+        switch periodType {
+        case "week":
+            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: startDate)
+            firstDate = calendar.date(from: components) ?? startDate
+            component = .day
+            step = 7
+        case "month":
+            let components = calendar.dateComponents([.year, .month], from: startDate)
+            firstDate = calendar.date(from: components) ?? startDate
+            component = .month
+            step = 1
+        default:
+            throw OrielStoreError.invalidRequest("An AI insight rollup requires a valid period type.")
+        }
+
+        var starts: [String] = []
+        var cursor = firstDate
+        while cursor <= endDate {
+            starts.append(formatter.string(from: cursor))
+            guard let next = calendar.date(byAdding: component, value: step, to: cursor) else { break }
+            cursor = next
+        }
+        return starts
     }
 
     private func dailyAISummaryDateRange(_ payload: [String: Any]) throws -> [String] {
@@ -2082,6 +2381,25 @@ final class SQLiteStore {
                 output.removeValue(forKey: "summaryJson")
                 return output
             },
+            "aiInsightRollups": try query(
+                """
+                SELECT period_type AS periodType, period_start AS periodStart, period_end AS periodEnd,
+                       status, provider, model, summary_json AS summaryJson,
+                       error_code AS errorCode, error_message AS errorMessage,
+                       source_daily_count AS sourceDailyCount,
+                       created_at AS createdAt, updated_at AS updatedAt
+                FROM ai_insight_rollups
+                ORDER BY period_start, period_type
+                """
+            ).map { row in
+                var output = row
+                if let summaryJSON = stringValue(row["summaryJson"]),
+                   let summary = decodedJSONObject(summaryJSON) {
+                    output["summary"] = summary
+                }
+                output.removeValue(forKey: "summaryJson")
+                return output
+            },
             "rules": try listRules(),
             "exclusions": try listExclusions(),
             "settings": try settings()
@@ -2090,7 +2408,7 @@ final class SQLiteStore {
 
     private func purge() throws {
         try transaction {
-            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
+            for table in ["time_entry_activities", "time_entries", "assignment_rules", "capture_exclusions", "passive_reviews", "ai_insight_rollups", "daily_ai_summaries", "activity_ai_summaries", "activities", "projects", "settings"] {
                 try execute("DELETE FROM \(table)")
             }
         }
@@ -2138,6 +2456,7 @@ final class SQLiteStore {
             "passive_reviews",
             "activity_ai_summaries",
             "daily_ai_summaries",
+            "ai_insight_rollups",
             "settings"
         ]
         guard allowed.contains(table) else {
