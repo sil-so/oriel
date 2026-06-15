@@ -619,7 +619,7 @@ const datePickerConfigs = {
 const aiInsightsState = {
     isLoading: false,
     rows: [],
-    generatingDate: ''
+    generatingKey: ''
 };
 
 function requestJumpToCurrentTime() {
@@ -1945,6 +1945,99 @@ function setupMainEventListeners() {
         return parsed.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     }
 
+    function aiInsightsPeriodType(row) {
+        const type = String(row?.periodType || '').toLowerCase();
+        return (type === 'week' || type === 'month') ? type : 'day';
+    }
+
+    function aiInsightsPrimaryDate(row) {
+        return aiInsightsPeriodType(row) === 'day'
+            ? String(row?.date || '')
+            : String(row?.periodStart || '');
+    }
+
+    function aiInsightsPeriodEndDate(row) {
+        const explicitEnd = String(row?.periodEnd || '');
+        if (parseAiInsightsDate(explicitEnd)) return explicitEnd;
+        const type = aiInsightsPeriodType(row);
+        const start = parseAiInsightsDate(row?.periodStart);
+        if (!start) return aiInsightsPrimaryDate(row);
+        if (type === 'week') {
+            const end = new Date(start);
+            end.setDate(end.getDate() + 6);
+            return formatAiInsightsDate(end);
+        }
+        if (type === 'month') {
+            return formatAiInsightsDate(new Date(start.getFullYear(), start.getMonth() + 1, 0));
+        }
+        return aiInsightsPrimaryDate(row);
+    }
+
+    function aiInsightsSortDate(row) {
+        return aiInsightsPeriodType(row) === 'day'
+            ? aiInsightsPrimaryDate(row)
+            : aiInsightsPeriodEndDate(row);
+    }
+
+    function aiInsightsRowKey(row) {
+        const type = aiInsightsPeriodType(row);
+        return `${type}:${aiInsightsPrimaryDate(row)}`;
+    }
+
+    function aiInsightsCardId(row) {
+        return `ai-insights-card-${aiInsightsRowKey(row).replace(/[^a-z0-9-]/gi, '-')}`;
+    }
+
+    function aiInsightsWeekLabel(date) {
+        const thursday = new Date(date);
+        const day = thursday.getDay() || 7;
+        thursday.setDate(thursday.getDate() + 4 - day);
+        const year = thursday.getFullYear();
+        const yearStart = new Date(year, 0, 1);
+        const week = Math.ceil((((thursday - yearStart) / 86400000) + 1) / 7);
+        return `Week ${week}, ${year}`;
+    }
+
+    function aiInsightsTitle(row) {
+        const type = aiInsightsPeriodType(row);
+        const start = parseAiInsightsDate(aiInsightsPrimaryDate(row));
+        if (!start) return aiInsightsPrimaryDate(row);
+        if (type === 'month') {
+            return start.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+        }
+        if (type === 'week') {
+            return aiInsightsWeekLabel(start);
+        }
+        return aiInsightsFriendlyDate(row.date || '');
+    }
+
+    function aiInsightsMetadataLabel(row) {
+        const type = aiInsightsPeriodType(row);
+        if (type === 'month') return 'Monthly recap';
+        if (type === 'week') return 'Weekly recap';
+        return 'Daily recap';
+    }
+
+    function aiInsightsDefaultSummaryText(row) {
+        return aiInsightsPeriodType(row) === 'day'
+            ? 'Daily summary generated.'
+            : 'AI Insights recap generated.';
+    }
+
+    function aiInsightsGenerateLabel(row, prefix = 'Generate') {
+        const type = aiInsightsPeriodType(row);
+        if (type === 'month') return `${prefix} monthly recap`;
+        if (type === 'week') return `${prefix} weekly recap`;
+        return `${prefix} daily summary`;
+    }
+
+    function aiInsightsReadyNote(row) {
+        const type = aiInsightsPeriodType(row);
+        if (type === 'month') return 'Successful daily summaries are available for this month.';
+        if (type === 'week') return 'Successful daily summaries are available for this week.';
+        return 'Screenshot activity summaries are available for this day.';
+    }
+
     function aiInsightsStatusLabel(status) {
         if (status === 'succeeded') return 'Generated';
         if (status === 'ready') return 'Ready';
@@ -2166,7 +2259,16 @@ function setupMainEventListeners() {
     function visibleAiInsightsRows() {
         const rows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
         return rows
-            .sort((first, second) => String(second.date || '').localeCompare(String(first.date || '')));
+            .slice()
+            .sort((first, second) => {
+                const firstDate = aiInsightsSortDate(first);
+                const secondDate = aiInsightsSortDate(second);
+                if (firstDate !== secondDate) {
+                    return secondDate.localeCompare(firstDate);
+                }
+                const order = { month: 0, week: 1, day: 2 };
+                return (order[aiInsightsPeriodType(first)] ?? 9) - (order[aiInsightsPeriodType(second)] ?? 9);
+            });
     }
 
     function renderAiInsightsCards() {
@@ -2194,14 +2296,14 @@ function setupMainEventListeners() {
     function createAiInsightsCard(row) {
         const status = row.status || 'empty';
         const card = createAiInsightsElement('article', `ai-insights-card ai-insights-card--${status}`);
-        if (row.date) {
-            card.id = `ai-insights-card-${row.date}`;
+        if (aiInsightsPrimaryDate(row)) {
+            card.id = aiInsightsCardId(row);
         }
 
         const header = createAiInsightsElement('div', 'ai-insights-card-header');
         const titleBlock = createAiInsightsElement('div', 'ai-insights-card-title');
-        titleBlock.appendChild(createAiInsightsElement('h2', 'card-title', aiInsightsFriendlyDate(row.date || '')));
-        titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-card-metadata', 'Daily recap'));
+        titleBlock.appendChild(createAiInsightsElement('h2', 'card-title', aiInsightsTitle(row)));
+        titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-card-metadata', aiInsightsMetadataLabel(row)));
         const statusPill = createAiInsightsElement('span', 'ai-insights-status-pill', aiInsightsStatusLabel(status));
         statusPill.dataset.state = status;
         header.appendChild(titleBlock);
@@ -2239,10 +2341,10 @@ function setupMainEventListeners() {
         const title = document.getElementById('ai-insights-detail-title');
         const body = document.getElementById('ai-insights-detail-body');
         if (!modal || !body) return;
-        if (title) title.textContent = aiInsightsFriendlyDate(row?.date || '');
+        if (title) title.textContent = aiInsightsTitle(row || {});
 
         const summary = row?.summary || {};
-        const text = String(summary.text || 'Daily summary generated.').trim();
+        const text = String(summary.text || aiInsightsDefaultSummaryText(row || {})).trim();
         body.replaceChildren();
         const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-detail-tldr ai-insights-tldr');
         if (tldr) body.appendChild(tldr);
@@ -2252,7 +2354,7 @@ function setupMainEventListeners() {
 
     function appendGeneratedAiInsightsContent(card, row) {
         const summary = row.summary || {};
-        const text = String(summary.text || 'Daily summary generated.').trim();
+        const text = String(summary.text || aiInsightsDefaultSummaryText(row)).trim();
         const preview = createAiInsightsElement('div', 'ai-insights-card-preview ai-insights-card-preview--fade');
         const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-card-tldr ai-insights-tldr');
         if (tldr) preview.appendChild(tldr);
@@ -2263,12 +2365,12 @@ function setupMainEventListeners() {
         const openButton = createAiInsightsElement('button', 'button-secondary', 'Open');
         openButton.type = 'button';
         openButton.addEventListener('click', () => openAiInsightsDetail(row));
-        const isGenerating = aiInsightsState.generatingDate === row.date;
+        const isGenerating = aiInsightsState.generatingKey === aiInsightsRowKey(row);
         const regenerateButton = createAiInsightsElement('button', 'button-secondary', isGenerating ? 'Generating...' : 'Regenerate');
         regenerateButton.type = 'button';
         regenerateButton.dataset.action = 'generate';
         regenerateButton.disabled = !window.OrielData?.isNative || isGenerating;
-        regenerateButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        regenerateButton.addEventListener('click', () => generateAiInsightsSummary(row));
         actions.appendChild(openButton);
         actions.appendChild(regenerateButton);
         card.appendChild(actions);
@@ -2278,34 +2380,34 @@ function setupMainEventListeners() {
         card.appendChild(createAiInsightsElement(
             'p',
             'ai-insights-card-note',
-            'Screenshot activity summaries are available for this day.'
+            aiInsightsReadyNote(row)
         ));
-        const isGenerating = aiInsightsState.generatingDate === row.date;
-        const generateButton = createAiInsightsElement('button', 'button-primary ai-insights-card-generate', isGenerating ? 'Generating...' : 'Generate daily summary');
+        const isGenerating = aiInsightsState.generatingKey === aiInsightsRowKey(row);
+        const generateButton = createAiInsightsElement('button', 'button-primary ai-insights-card-generate', isGenerating ? 'Generating...' : aiInsightsGenerateLabel(row));
         generateButton.type = 'button';
         generateButton.dataset.action = 'generate';
         generateButton.disabled = !window.OrielData?.isNative || isGenerating;
-        generateButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        generateButton.addEventListener('click', () => generateAiInsightsSummary(row));
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
         actions.appendChild(generateButton);
         card.appendChild(actions);
     }
 
     function appendFailedAiInsightsContent(card, row) {
-        const message = row.errorMessage || 'Daily AI summary generation failed.';
+        const message = row.errorMessage || `${aiInsightsMetadataLabel(row)} generation failed.`;
         card.appendChild(createAiInsightsElement('p', 'ai-insights-card-error', message));
-        const isGenerating = aiInsightsState.generatingDate === row.date;
+        const isGenerating = aiInsightsState.generatingKey === aiInsightsRowKey(row);
         const retryButton = createAiInsightsElement('button', 'button-secondary ai-insights-card-generate', isGenerating ? 'Generating...' : 'Try again');
         retryButton.type = 'button';
         retryButton.dataset.action = 'generate';
         retryButton.disabled = !window.OrielData?.isNative || isGenerating;
-        retryButton.addEventListener('click', () => generateAiInsightsDailySummary(row.date));
+        retryButton.addEventListener('click', () => generateAiInsightsSummary(row));
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
         actions.appendChild(retryButton);
         card.appendChild(actions);
     }
 
-    async function refreshAiInsights({ focusDate = '' } = {}) {
+    async function refreshAiInsights({ focusDate = '', focusKey = '' } = {}) {
         syncAiInsightsDateControl();
         if (!window.OrielData?.isNative) {
             aiInsightsState.rows = [];
@@ -2316,15 +2418,23 @@ function setupMainEventListeners() {
         try {
             aiInsightsState.isLoading = true;
             renderAiInsightsCards();
-            const payload = await window.OrielData.request('dailyAISummaries.list', {
-                ...aiInsightsRangeBounds(),
+            const bounds = aiInsightsRangeBounds();
+            const dailyPayload = await window.OrielData.request('dailyAISummaries.list', {
+                ...bounds,
                 includeEmpty: false
             });
-            aiInsightsState.rows = Array.isArray(payload) ? payload : [];
+            const rollupPayload = await window.OrielData.request('aiInsightRollups.list', {
+                ...bounds,
+                includeEmpty: false
+            });
+            aiInsightsState.rows = [
+                ...(Array.isArray(dailyPayload) ? dailyPayload : []),
+                ...(Array.isArray(rollupPayload) ? rollupPayload : [])
+            ];
             aiInsightsState.isLoading = false;
             renderAiInsightsCards();
-            const targetDate = focusDate || aiInsightsDateString();
-            const targetCard = targetDate ? document.getElementById(`ai-insights-card-${targetDate}`) : null;
+            const targetKey = focusKey || (focusDate ? `day:${focusDate}` : `day:${aiInsightsDateString()}`);
+            const targetCard = targetKey ? document.getElementById(`ai-insights-card-${targetKey.replace(/[^a-z0-9-]/gi, '-')}`) : null;
             targetCard?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
             targetCard?.classList?.add?.('is-focused');
             if (targetCard) {
@@ -2343,22 +2453,36 @@ function setupMainEventListeners() {
     }
     window.refreshAiInsights = refreshAiInsights;
 
-    async function generateAiInsightsDailySummary(date = aiInsightsDateString()) {
-        if (!window.OrielData?.isNative || !date) return;
+    async function generateAiInsightsSummary(row) {
+        if (!window.OrielData?.isNative || !row) return;
+        const type = aiInsightsPeriodType(row);
+        const key = aiInsightsRowKey(row);
         try {
-            aiInsightsState.generatingDate = date;
+            aiInsightsState.generatingKey = key;
             renderAiInsightsCards();
-            await window.OrielData.request('dailyAISummaries.generate', { date });
-            aiInsightsState.generatingDate = '';
-            await refreshAiInsights({ focusDate: date });
+            if (type === 'day') {
+                await window.OrielData.request('dailyAISummaries.generate', { date: row.date });
+            } else {
+                await window.OrielData.request('aiInsightRollups.generate', {
+                    period: type,
+                    periodStart: row.periodStart
+                });
+            }
+            aiInsightsState.generatingKey = '';
+            await refreshAiInsights({ focusKey: key });
         } catch (error) {
-            aiInsightsState.generatingDate = '';
+            aiInsightsState.generatingKey = '';
             const existingRows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
-            aiInsightsState.rows = existingRows.map(row => row.date === date
-                ? { ...row, status: 'failed', errorMessage: error?.message || 'Could not generate the daily AI summary.' }
-                : row);
+            aiInsightsState.rows = existingRows.map(existing => aiInsightsRowKey(existing) === key
+                ? { ...existing, status: 'failed', errorMessage: error?.message || `Could not generate the ${aiInsightsMetadataLabel(existing).toLowerCase()}.` }
+                : existing);
             renderAiInsightsCards();
         }
+    }
+
+    async function generateAiInsightsDailySummary(date = aiInsightsDateString()) {
+        if (!window.OrielData?.isNative || !date) return;
+        await generateAiInsightsSummary({ date, status: 'ready' });
     }
 
     DOM.elTimelineModeDay?.addEventListener('click', async () => {

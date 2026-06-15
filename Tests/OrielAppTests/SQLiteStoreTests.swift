@@ -946,6 +946,131 @@ final class SQLiteStoreTests: XCTestCase {
         ]))
     }
 
+    func testAIInsightRollupsPersistListExportAndRestore() throws {
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-02",
+            "status": "succeeded",
+            "summary": [
+                "text": "Worked on Oriel rollup storage.",
+                "highlights": ["Built rollup storage"],
+                "metrics": [
+                    "version": 1,
+                    "totalRecordedMs": 3_600_000,
+                    "longestFocusSession": [
+                        "start": 1_780_810_800_000 as Int64,
+                        "end": 1_780_814_400_000 as Int64,
+                        "durationMs": 3_600_000,
+                        "app": "Codex",
+                        "title": "Oriel rollups",
+                        "label": "Oriel rollups"
+                    ],
+                    "focusSessions": [
+                        "count": 1,
+                        "totalDurationMs": 3_600_000,
+                        "averageDurationMs": 3_600_000
+                    ],
+                    "fragmentation": [
+                        "activityFragmentCount": 2,
+                        "sessionCount": 1,
+                        "contextSwitchCount": 0,
+                        "interruptionCount": 0
+                    ],
+                    "appBreakdown": [["name": "Codex", "durationMs": 3_600_000, "percent": 100]],
+                    "categoryBreakdown": [["name": "engineering", "summaryCount": 1]]
+                ]
+            ],
+            "sourceSummaryCount": 2
+        ])
+
+        let incompleteRows = try XCTUnwrap(try store.request(operation: "aiInsightRollups.list", payload: [
+            "startDate": "2026-06-01",
+            "endDate": "2026-06-06"
+        ]) as? [[String: Any]])
+        XCTAssertFalse(incompleteRows.contains { row in
+            (row["periodType"] as? String) == "week"
+                && (row["periodStart"] as? String) == "2026-06-01"
+        })
+        XCTAssertFalse(incompleteRows.contains { row in
+            (row["periodType"] as? String) == "month"
+                && (row["periodStart"] as? String) == "2026-06-01"
+        })
+
+        let weekEndingRows = try XCTUnwrap(try store.request(operation: "aiInsightRollups.list", payload: [
+            "startDate": "2026-06-01",
+            "endDate": "2026-06-07"
+        ]) as? [[String: Any]])
+        XCTAssertTrue(weekEndingRows.contains { row in
+            (row["periodType"] as? String) == "week"
+                && (row["periodStart"] as? String) == "2026-06-01"
+                && (row["status"] as? String) == "ready"
+                && int64Value(row["sourceDailyCount"]) == 1
+        })
+        XCTAssertFalse(weekEndingRows.contains { row in
+            (row["periodType"] as? String) == "month"
+                && (row["periodStart"] as? String) == "2026-06-01"
+        })
+
+        let readyRows = try XCTUnwrap(try store.request(operation: "aiInsightRollups.list", payload: [
+            "startDate": "2026-06-01",
+            "endDate": "2026-06-30"
+        ]) as? [[String: Any]])
+        XCTAssertTrue(readyRows.contains { row in
+            (row["periodType"] as? String) == "week"
+                && (row["periodStart"] as? String) == "2026-06-01"
+                && (row["status"] as? String) == "ready"
+                && int64Value(row["sourceDailyCount"]) == 1
+        })
+        XCTAssertTrue(readyRows.contains { row in
+            (row["periodType"] as? String) == "month"
+                && (row["periodStart"] as? String) == "2026-06-01"
+                && (row["status"] as? String) == "ready"
+                && int64Value(row["sourceDailyCount"]) == 1
+        })
+
+        _ = try store.request(operation: "aiInsightRollups.upsert", payload: [
+            "periodType": "week",
+            "periodStart": "2026-06-01",
+            "periodEnd": "2026-06-07",
+            "status": "succeeded",
+            "provider": "openai",
+            "model": "gpt-5.2",
+            "summary": [
+                "text": "The week centered on Oriel rollups.",
+                "highlights": ["Implemented weekly rollups"],
+                "metrics": [
+                    "version": 1,
+                    "totalRecordedMs": 3_600_000
+                ]
+            ],
+            "sourceDailyCount": 1
+        ])
+
+        let week = try XCTUnwrap(try store.request(operation: "aiInsightRollups.get", payload: [
+            "periodType": "week",
+            "periodStart": "2026-06-01"
+        ]) as? [String: Any])
+        XCTAssertEqual(week["status"] as? String, "succeeded")
+        XCTAssertEqual(week["periodEnd"] as? String, "2026-06-07")
+        XCTAssertEqual((week["summary"] as? [String: Any])?["text"] as? String, "The week centered on Oriel rollups.")
+
+        let archive = try XCTUnwrap(try store.request(operation: "data.export", payload: [:]) as? [String: Any])
+        let encoded = String(data: try JSONSerialization.data(withJSONObject: archive), encoding: .utf8) ?? ""
+        XCTAssertTrue(encoded.contains("aiInsightRollups"))
+        XCTAssertFalse(encoded.contains("apiKey"))
+        XCTAssertFalse(encoded.contains("Authorization"))
+        XCTAssertFalse(encoded.contains("data:image"))
+        XCTAssertFalse(encoded.contains("base64"))
+
+        let restored = try SQLiteStore(databaseURL: directory.appendingPathComponent("RestoredRollups.sqlite"))
+        try restored.restoreArchive(archive)
+        let restoredWeek = try XCTUnwrap(try restored.request(operation: "aiInsightRollups.get", payload: [
+            "periodType": "week",
+            "periodStart": "2026-06-01"
+        ]) as? [String: Any])
+        XCTAssertEqual(restoredWeek["status"] as? String, "succeeded")
+        XCTAssertEqual((restoredWeek["summary"] as? [String: Any])?["text"] as? String, "The week centered on Oriel rollups.")
+    }
+
     func testScreenshotSummaryProviderFallsBackToAskAIProvider() throws {
         XCTAssertEqual(
             TrackingController.screenshotSummaryProvider(from: [

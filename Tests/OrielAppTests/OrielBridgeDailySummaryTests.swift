@@ -111,6 +111,112 @@ final class OrielBridgeDailySummaryTests: XCTestCase {
         XCTAssertFalse(requestBody.contains("file:///Users"))
     }
 
+    @MainActor
+    func testGenerateAIInsightRollupUsesSuccessfulDailySummariesAndLocalMetrics() async throws {
+        _ = try store.request(operation: "settings.update", payload: ["aiProvider": "openai"])
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-01",
+            "status": "succeeded",
+            "summary": [
+                "text": "You implemented rollup storage.",
+                "highlights": ["Built rollup persistence"],
+                "metrics": [
+                    "version": 1,
+                    "totalRecordedMs": 3_600_000,
+                    "longestFocusSession": [
+                        "start": 1_780_810_800_000 as Int64,
+                        "end": 1_780_814_400_000 as Int64,
+                        "durationMs": 3_600_000,
+                        "app": "Codex",
+                        "title": "Oriel rollups",
+                        "label": "Oriel rollups"
+                    ],
+                    "focusSessions": [
+                        "count": 1,
+                        "totalDurationMs": 3_600_000,
+                        "averageDurationMs": 3_600_000
+                    ],
+                    "fragmentation": [
+                        "activityFragmentCount": 2,
+                        "sessionCount": 1,
+                        "contextSwitchCount": 0,
+                        "interruptionCount": 0
+                    ],
+                    "appBreakdown": [["name": "Codex", "durationMs": 3_600_000, "percent": 100]],
+                    "categoryBreakdown": [["name": "engineering", "summaryCount": 1]]
+                ]
+            ],
+            "sourceSummaryCount": 2
+        ])
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-02",
+            "status": "failed",
+            "summary": ["text": "Do not include failed daily summaries."],
+            "sourceSummaryCount": 1
+        ])
+
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: BridgeFakeAPIKeyStore(keys: ["openai": "openai-key"])) { request in
+            capturedRequest = request
+            let data = #"{"output_text":"{\"text\":\"The week centered on Oriel rollups.\",\"highlights\":[\"Built weekly rollups\"],\"metrics\":{\"version\":999,\"totalRecordedMs\":1}}"}"#.data(using: .utf8)!
+            return (data, bridgeHTTPResponse(for: request.url!, status: 200))
+        }
+        let bridge = OrielBridge(store: store, aiService: service, statusProvider: { [:] })
+
+        let row = try await bridge.generateAIInsightRollup(payload: [
+            "period": "week",
+            "periodStart": "2026-06-01"
+        ])
+
+        XCTAssertEqual(row["periodType"] as? String, "week")
+        XCTAssertEqual(row["periodStart"] as? String, "2026-06-01")
+        XCTAssertEqual(row["periodEnd"] as? String, "2026-06-07")
+        XCTAssertEqual(row["status"] as? String, "succeeded")
+        XCTAssertEqual(row["sourceDailyCount"] as? Int64, 1)
+        let summary = try XCTUnwrap(row["summary"] as? [String: Any])
+        XCTAssertEqual(summary["text"] as? String, "The week centered on Oriel rollups.")
+        let metrics = try XCTUnwrap(summary["metrics"] as? [String: Any])
+        XCTAssertEqual(metrics["version"] as? Int, 1)
+        XCTAssertEqual(metrics["totalRecordedMs"] as? Int64, 3_600_000)
+
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("You implemented rollup storage."))
+        XCTAssertTrue(requestBody.contains("periodContext"))
+        XCTAssertTrue(requestBody.contains("longestFocusSession"))
+        XCTAssertFalse(requestBody.contains("Do not include failed daily summaries."))
+        XCTAssertFalse(requestBody.contains("data:image"))
+        XCTAssertFalse(requestBody.contains("base64"))
+    }
+
+    @MainActor
+    func testGenerateAIInsightRollupStoresEmptyAndMissingProviderFailures() async throws {
+        let bridge = OrielBridge(store: store, aiService: AIService(), statusProvider: { [:] })
+
+        let empty = try await bridge.generateAIInsightRollup(payload: [
+            "period": "month",
+            "periodStart": "2026-06-01"
+        ])
+
+        XCTAssertEqual(empty["status"] as? String, "empty")
+        XCTAssertEqual(empty["sourceDailyCount"] as? Int64, 0)
+
+        _ = try store.request(operation: "dailyAISummaries.upsert", payload: [
+            "date": "2026-06-03",
+            "status": "succeeded",
+            "summary": ["text": "Successful daily summary.", "highlights": ["Daily source"]],
+            "sourceSummaryCount": 1
+        ])
+
+        let failed = try await bridge.generateAIInsightRollup(payload: [
+            "period": "month",
+            "periodStart": "2026-06-01"
+        ])
+
+        XCTAssertEqual(failed["status"] as? String, "failed")
+        XCTAssertEqual(failed["errorCode"] as? String, "missing_provider")
+        XCTAssertEqual(failed["sourceDailyCount"] as? Int64, 1)
+    }
+
     private func recordActivitySummary(
         id: String,
         start: Int64,

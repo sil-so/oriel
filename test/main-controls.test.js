@@ -583,8 +583,13 @@ test('AI Insights tab switches to the AI insights workspace and loads summary ca
   assert.equal(dom.elAiInsightsWorkspace.classList.contains('hidden'), false);
   assert.equal(dom.elTabAiInsights.classList.contains('app-tab--active'), true);
   assert.equal(element('date-navigation').classList.contains('hidden'), true);
-  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list']);
+  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list', 'aiInsightRollups.list']);
   assert.deepEqual({ ...nativeRequests[0].payload }, {
+    startDate: '2025-05-21',
+    endDate: '2026-05-21',
+    includeEmpty: false
+  });
+  assert.deepEqual({ ...nativeRequests[1].payload }, {
     startDate: '2025-05-21',
     endDate: '2026-05-21',
     includeEmpty: false
@@ -688,11 +693,148 @@ test('AI Insights ready card generation uses the card date and refreshes the gri
   await generateButton.click();
   assert.deepEqual(nativeRequests.map(request => request.operation), [
     'dailyAISummaries.list',
+    'aiInsightRollups.list',
     'dailyAISummaries.generate',
-    'dailyAISummaries.list'
+    'dailyAISummaries.list',
+    'aiInsightRollups.list'
   ]);
-  assert.equal(nativeRequests[1].payload.date, '2026-06-08');
+  assert.equal(nativeRequests[2].payload.date, '2026-06-08');
   assert.match(element('ai-insights-card-grid').textContent, /Generated recap/);
+});
+
+test('AI Insights renders weekly and monthly rollup cards alongside daily cards', async () => {
+  const metrics = {
+    version: 1,
+    totalRecordedMs: 5_400_000,
+    longestFocusSession: {
+      durationMs: 3_600_000,
+      app: 'Codex',
+      title: 'Oriel rollups',
+      label: 'Oriel rollups'
+    }
+  };
+  const { dom, element } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-30',
+          status: 'succeeded',
+          sourceSummaryCount: 2,
+          summary: { text: 'Month-end daily recap.', highlights: [] }
+        },
+        {
+          date: '2026-06-07',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: { text: 'Daily recap text.', highlights: ['Daily source'] }
+        }
+      ],
+      'aiInsightRollups.list': [
+        {
+          periodType: 'month',
+          periodStart: '2026-06-01',
+          periodEnd: '2026-06-30',
+          status: 'succeeded',
+          sourceDailyCount: 2,
+          summary: {
+            text: 'The month centered on recap cards.',
+            highlights: ['Built monthly recap cards'],
+            metrics
+          }
+        },
+        {
+          periodType: 'week',
+          periodStart: '2026-06-01',
+          periodEnd: '2026-06-07',
+          status: 'ready',
+          sourceDailyCount: 2
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+
+  const grid = element('ai-insights-card-grid');
+  assert.equal(grid.children.length, 4);
+  assert.equal(findChild(grid.children[0], child => child.tagName === 'H2')?.textContent, 'June 2026');
+  assert.equal(findChild(grid.children[1], child => child.tagName === 'H2')?.textContent, 'Tuesday, 30 June 2026');
+  assert.equal(findChild(grid.children[2], child => child.tagName === 'H2')?.textContent, 'Week 23, 2026');
+  assert.equal(findChild(grid.children[3], child => child.tagName === 'H2')?.textContent, 'Sunday, 7 June 2026');
+  assert.match(grid.textContent, /Sunday, 7 June 2026/);
+  assert.match(grid.textContent, /June 2026/);
+  assert.match(grid.textContent, /Week 23, 2026/);
+  assert.doesNotMatch(grid.textContent, /Week of Monday/);
+  assert.match(grid.textContent, /Daily recap/);
+  assert.match(grid.textContent, /Monthly recap/);
+  assert.match(grid.textContent, /Weekly recap/);
+  assert.match(grid.textContent, /Generate weekly recap/);
+  assert.doesNotMatch(grid.textContent, /Oriel rollups/);
+  assert.doesNotMatch(grid.textContent, /Longest focus/);
+
+  const monthCard = Array.from(grid.children).find(card => /Monthly recap/.test(card.textContent));
+  await findChild(monthCard, child => child.textContent === 'Open').click();
+  assert.equal(element('ai-insights-detail-title').textContent, 'June 2026');
+  assert.match(element('ai-insights-detail-body').textContent, /The month centered on recap cards/);
+  assert.doesNotMatch(element('ai-insights-detail-body').textContent, /Longest focus/);
+});
+
+test('AI Insights ready rollup card generation uses the card period and refreshes the grid', async () => {
+  let generated = false;
+  const { dom, element, nativeRequests } = loadMainControlsContext({
+    nativeResponses: {
+      'dailyAISummaries.list': [],
+      'aiInsightRollups.list': () => generated ? [
+        {
+          periodType: 'week',
+          periodStart: '2026-06-01',
+          periodEnd: '2026-06-07',
+          status: 'succeeded',
+          sourceDailyCount: 2,
+          summary: { text: 'Generated weekly recap.', highlights: [] }
+        }
+      ] : [
+        {
+          periodType: 'week',
+          periodStart: '2026-06-01',
+          periodEnd: '2026-06-07',
+          status: 'ready',
+          sourceDailyCount: 2
+        }
+      ],
+      'aiInsightRollups.generate': payload => {
+        generated = true;
+        return {
+          periodType: payload.period,
+          periodStart: payload.periodStart,
+          periodEnd: '2026-06-07',
+          status: 'succeeded',
+          sourceDailyCount: 2,
+          summary: { text: 'Generated weekly recap.', highlights: [] }
+        };
+      }
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+  const readyCard = element('ai-insights-card-grid').children[0];
+  const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
+  assert.ok(generateButton);
+
+  await generateButton.click();
+
+  assert.deepEqual(nativeRequests.map(request => request.operation), [
+    'dailyAISummaries.list',
+    'aiInsightRollups.list',
+    'aiInsightRollups.generate',
+    'dailyAISummaries.list',
+    'aiInsightRollups.list'
+  ]);
+  assert.deepEqual({ ...nativeRequests[2].payload }, {
+    period: 'week',
+    periodStart: '2026-06-01'
+  });
+  assert.match(element('ai-insights-card-grid').textContent, /Generated weekly recap/);
 });
 
 test('AI Insights generated card Open button shows a full summary modal', async () => {
@@ -906,7 +1048,7 @@ test('AI Insights generation buttons show loading state while a request is pendi
   const pendingButton = findChild(element('ai-insights-card-grid').children[0], child => child.dataset?.action === 'generate');
   assert.equal(pendingButton.disabled, true);
   assert.equal(pendingButton.textContent, 'Generating...');
-  assert.equal(nativeRequests[1].payload.date, '2026-06-08');
+  assert.equal(nativeRequests[2].payload.date, '2026-06-08');
 
   resolveGenerate();
   await clickPromise;
@@ -925,8 +1067,13 @@ test('AI Insights refreshes when header date navigation changes while active', a
 
   await element('btn-prev-day').click();
 
-  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list']);
+  assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list', 'aiInsightRollups.list']);
   assert.deepEqual({ ...nativeRequests[0].payload }, {
+    startDate: '2025-05-20',
+    endDate: '2026-05-20',
+    includeEmpty: false
+  });
+  assert.deepEqual({ ...nativeRequests[1].payload }, {
     startDate: '2025-05-20',
     endDate: '2026-05-20',
     includeEmpty: false

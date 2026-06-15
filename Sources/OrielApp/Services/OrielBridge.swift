@@ -51,7 +51,11 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
 
-        if operation == "ai.chat" || operation == "ai.models.list" || operation == "ai.screenshotSummary.test" || operation == "dailyAISummaries.generate" {
+        if operation == "ai.chat"
+            || operation == "ai.models.list"
+            || operation == "ai.screenshotSummary.test"
+            || operation == "dailyAISummaries.generate"
+            || operation == "aiInsightRollups.generate" {
             Task {
                 do {
                     let value: Any
@@ -61,6 +65,8 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
                         value = try await aiService.listModels(payload: payload)
                     } else if operation == "dailyAISummaries.generate" {
                         value = try await generateDailyAISummary(payload: payload)
+                    } else if operation == "aiInsightRollups.generate" {
+                        value = try await generateAIInsightRollup(payload: payload)
                     } else {
                         value = try await testScreenshotSummary(payload: payload)
                     }
@@ -218,6 +224,98 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         return try store.request(operation: "dailyAISummaries.get", payload: ["date": date]) as? [String: Any] ?? [:]
     }
 
+    func generateAIInsightRollup(payload: [String: Any]) async throws -> [String: Any] {
+        let period = stringValue(payload["period"]) ?? stringValue(payload["periodType"]) ?? ""
+        guard ["week", "month"].contains(period) else {
+            throw OrielStoreError.invalidRequest("A weekly or monthly AI insight rollup is required.")
+        }
+        let requestedStart = stringValue(payload["periodStart"]) ?? todayString()
+        let bounds = try rollupPeriodBounds(period: period, periodStart: requestedStart)
+        let dailyRows = try store.request(operation: "dailyAISummaries.list", payload: [
+            "startDate": bounds.start,
+            "endDate": bounds.end
+        ]) as? [[String: Any]] ?? []
+        let succeededRows = dailyRows.filter { ($0["status"] as? String) == "succeeded" }
+        if succeededRows.isEmpty {
+            try store.upsertAIInsightRollup([
+                "periodType": period,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "status": "empty",
+                "sourceDailyCount": 0
+            ])
+            return try store.request(operation: "aiInsightRollups.get", payload: [
+                "periodType": period,
+                "periodStart": bounds.start
+            ]) as? [String: Any] ?? [:]
+        }
+
+        let settings = try store.request(operation: "settings.get", payload: [:]) as? [String: Any] ?? [:]
+        guard let provider = AIProvider.normalize(settings["aiProvider"] as? String ?? "") else {
+            try store.upsertAIInsightRollup([
+                "periodType": period,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "status": "failed",
+                "errorCode": "missing_provider",
+                "errorMessage": "Choose an Ask AI provider before generating AI insight rollups.",
+                "sourceDailyCount": succeededRows.count
+            ])
+            return try store.request(operation: "aiInsightRollups.get", payload: [
+                "periodType": period,
+                "periodStart": bounds.start
+            ]) as? [String: Any] ?? [:]
+        }
+        let model = askAIModel(provider: provider, settings: settings)
+        do {
+            let context = RollupSummaryContextBuilder.build(
+                period: period,
+                periodStart: bounds.start,
+                periodEnd: bounds.end,
+                dailySummaries: succeededRows
+            )
+            let summary = try await aiService.rollupSummary(payload: [
+                "provider": provider.rawValue,
+                "model": model,
+                "period": period,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "dailySummaries": context.dailySummaries,
+                "periodContext": context.periodContext
+            ])
+            var storedSummary = summary
+            if let metrics = context.metrics {
+                storedSummary["metrics"] = metrics
+            }
+            try store.upsertAIInsightRollup([
+                "periodType": period,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "status": "succeeded",
+                "provider": provider.rawValue,
+                "model": model,
+                "summary": storedSummary,
+                "sourceDailyCount": succeededRows.count
+            ])
+        } catch {
+            try store.upsertAIInsightRollup([
+                "periodType": period,
+                "periodStart": bounds.start,
+                "periodEnd": bounds.end,
+                "status": "failed",
+                "provider": provider.rawValue,
+                "model": model,
+                "errorCode": "ai_failure",
+                "errorMessage": error.localizedDescription,
+                "sourceDailyCount": succeededRows.count
+            ])
+        }
+        return try store.request(operation: "aiInsightRollups.get", payload: [
+            "periodType": period,
+            "periodStart": bounds.start
+        ]) as? [String: Any] ?? [:]
+    }
+
     private func askAIModel(provider: AIProvider, settings: [String: Any]) -> String {
         let key: String
         switch provider {
@@ -259,6 +357,37 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             "endDate": formatter.string(from: endDate)
         ]) as? [[String: Any]] ?? []
         return rows.filter { ($0["status"] as? String) == "succeeded" }
+    }
+
+    private func rollupPeriodBounds(period: String, periodStart: String) throws -> (start: String, end: String) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: periodStart) else {
+            throw OrielStoreError.invalidRequest("A valid AI insight rollup period start is required.")
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 2
+        let startDate: Date
+        let endDate: Date
+        if period == "week" {
+            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+            startDate = calendar.date(from: components) ?? date
+            guard let computedEnd = calendar.date(byAdding: .day, value: 6, to: startDate) else {
+                throw OrielStoreError.invalidRequest("A valid weekly AI insight rollup period is required.")
+            }
+            endDate = computedEnd
+        } else {
+            let components = calendar.dateComponents([.year, .month], from: date)
+            startDate = calendar.date(from: components) ?? date
+            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: startDate),
+                  let computedEnd = calendar.date(byAdding: .day, value: -1, to: nextMonth) else {
+                throw OrielStoreError.invalidRequest("A valid monthly AI insight rollup period is required.")
+            }
+            endDate = computedEnd
+        }
+        return (formatter.string(from: startDate), formatter.string(from: endDate))
     }
 
     private func testScreenshotSummary(payload: [String: Any]) async throws -> [String: Any] {
