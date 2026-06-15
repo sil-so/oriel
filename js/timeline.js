@@ -3365,6 +3365,44 @@ function buildAutoRuleExactFragmentItems(groupEntries) {
     return renderItems;
 }
 
+function buildAutoRuleDisplayRangeGroups(sortedEntries) {
+    const groups = new Map();
+
+    for (const item of sortedEntries) {
+        const key = `${item.displayStart}:${item.displayEnd}`;
+        if (!groups.has(key)) {
+            groups.set(key, {
+                entries: [],
+                firstEntry: item.entry,
+                start: item.exactStart,
+                end: item.exactEnd,
+                displayStart: item.displayStart,
+                displayEnd: item.displayEnd,
+                isAssignedGroup: true,
+                sourceIndex: item.sourceIndex
+            });
+        }
+
+        const group = groups.get(key);
+        group.entries.push(item.entry);
+        group.start = Math.min(group.start, item.exactStart);
+        group.end = Math.max(group.end, item.exactEnd);
+        group.sourceIndex = Math.min(group.sourceIndex, item.sourceIndex);
+    }
+
+    return [...groups.values()]
+        .map(group => ({
+            ...group,
+            durationMs: getAutoRuleExactAssignedDurationMs(group.entries)
+        }))
+        .filter(group => group.durationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS)
+        .sort((left, right) => {
+            if (left.displayStart !== right.displayStart) return left.displayStart - right.displayStart;
+            if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
+            return left.sourceIndex - right.sourceIndex;
+        });
+}
+
 function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
     if (shouldRenderExactActivityStreamSessions(zoom)) {
         return buildAutoRuleExactFragmentItems(groupEntries);
@@ -3397,8 +3435,7 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
                         exactStart: segmentEntry.start,
                         exactEnd: segmentEntry.end,
                         displayStart: segment.displayStart,
-                        displayEnd: segment.displayEnd,
-                        durationMs: getRenderedTimeEntryDurationMs(segmentEntry)
+                        displayEnd: segment.displayEnd
                     };
                 })
                 .filter(Boolean);
@@ -3408,62 +3445,7 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
             if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
             return left.exactStart - right.exactStart || left.exactEnd - right.exactEnd;
         });
-    const sessions = [];
-    let current = null;
-
-    const flushCurrent = () => {
-        if (!current) return;
-        current.durationMs = getAutoRuleExactAssignedDurationMs(current.entries);
-        if (current.durationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS) {
-            sessions.push(current);
-        }
-        current = null;
-    };
-
-    for (const { entry, sourceIndex, exactStart, exactEnd, displayStart, displayEnd, durationMs } of sortedEntries) {
-        const displayRange = {
-            start: displayStart,
-            end: displayEnd
-        };
-        const exactGapMs = current ? exactStart - current.end : Number.POSITIVE_INFINITY;
-        const entryDurationMs = durationMs;
-        const canMergeByExactGap = current && exactGapMs <= ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
-        const canMergeByDisplayRow = current
-            && displayRange.start <= current.displayEnd
-            && exactGapMs <= AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS
-            && entryDurationMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS;
-        const shouldStartSession = !current
-            || (!canMergeByExactGap && !canMergeByDisplayRow);
-
-        if (shouldStartSession) {
-            flushCurrent();
-            current = {
-                entries: [entry],
-                firstEntry: entry,
-                start: exactStart,
-                end: exactEnd,
-                displayStart: displayRange.start,
-                displayEnd: displayRange.end,
-                isAssignedGroup: true,
-                sourceIndex
-            };
-            continue;
-        }
-
-        current.entries.push(entry);
-        current.start = Math.min(current.start, exactStart);
-        current.end = Math.max(current.end, exactEnd);
-        current.displayStart = Math.min(current.displayStart, displayRange.start);
-        current.displayEnd = Math.max(current.displayEnd, displayRange.end);
-        current.sourceIndex = Math.min(current.sourceIndex, sourceIndex);
-    }
-
-    flushCurrent();
-    return sessions.sort((left, right) => {
-        if (left.displayStart !== right.displayStart) return left.displayStart - right.displayStart;
-        if (left.displayEnd !== right.displayEnd) return left.displayEnd - right.displayEnd;
-        return left.sourceIndex - right.sourceIndex;
-    });
+    return buildAutoRuleDisplayRangeGroups(sortedEntries);
 }
 
 function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {

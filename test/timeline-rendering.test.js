@@ -517,6 +517,18 @@ function codexActivity(start, end) {
   };
 }
 
+function orielActivity(start, end) {
+  return {
+    app: 'Oriel',
+    title: 'Oriel',
+    appPath: '/Applications/Oriel.app',
+    bundleId: 'so.sil.oriel',
+    start,
+    end,
+    duration: end - start
+  };
+}
+
 function makeAutoRuleEntry({ id, start, end, projectId = 'project-1', ruleId = 'rule-1' }) {
   return {
     id,
@@ -2298,6 +2310,198 @@ test('auto-rule secondary snippets stay hidden until their row group reaches one
     zoom: 5
   }), 'visible secondary auto-rule summary');
   assert.deepEqual(extractTimeEntryDurationLabels(visibleHtml), ['1 min']);
+});
+
+test('auto-rule secondary row aggregates separated visible snippets before threshold filtering', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const rowStart = dateStart + (5 * 60 + 15) * 60 * 1000;
+  const rowEnd = rowStart + 15 * 60 * 1000;
+  const ranges = [
+    [rowStart + 44 * 1000, rowStart + 57 * 1000],
+    [rowStart + 65 * 1000, rowStart + 70 * 1000],
+    [rowStart + 73 * 1000, rowStart + 81 * 1000],
+    [rowStart + 2 * 60 * 1000 + 19 * 1000, rowStart + 2 * 60 * 1000 + 27 * 1000],
+    [rowStart + 3 * 60 * 1000 + 41 * 1000, rowStart + 3 * 60 * 1000 + 51 * 1000],
+    [rowStart + 4 * 60 * 1000 + 15 * 1000, rowStart + 4 * 60 * 1000 + 19 * 1000],
+    [rowStart + 5 * 60 * 1000, rowStart + 5 * 60 * 1000 + 34 * 1000]
+  ];
+  const activities = [
+    orielActivity(rowStart, rowEnd),
+    ...ranges.map(([start, end]) => codexActivity(start, end))
+  ];
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-secondary-separated-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  const activityHtml = renderMemoryAidHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const entryHtml = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const activityStyles = extractActivityStyles(activityHtml);
+  const entryStyles = extractEntryStyles(entryHtml);
+
+  assert.equal(activityStyles.length, 1);
+  assert.equal(entryStyles.length, 1);
+  assertStyleMatchesRowGeometry(entryStyles[0], expectedRowGeometry({
+    dateStart,
+    start: rowStart,
+    end: rowEnd,
+    zoom: 15
+  }), 'secondary row-level auto-rule summary');
+  assert.deepEqual(extractTimeEntryDurationLabels(entryHtml), ['1 min']);
+  assert.deepEqual(extractGroupedEntryIds(entryHtml), timeEntries.map(entry => entry.id));
+});
+
+test('auto-rule row below visible threshold stays hidden and does not preserve compressed rows', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstRowStart = dateStart + (5 * 60 + 15) * 60 * 1000;
+  const secondRowStart = firstRowStart + 15 * 60 * 1000;
+  const ranges = [
+    [firstRowStart + 60 * 1000, firstRowStart + 80 * 1000],
+    [firstRowStart + 4 * 60 * 1000, firstRowStart + 4 * 60 * 1000 + 20 * 1000],
+    [firstRowStart + 8 * 60 * 1000, firstRowStart + 8 * 60 * 1000 + 19 * 1000],
+    [secondRowStart + 60 * 1000, secondRowStart + 2 * 60 * 1000 + 31 * 1000]
+  ];
+  const activities = ranges.map(([start, end]) => codexActivity(start, end));
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-secondary-threshold-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  context.state.currentDate = new Date(dateStart);
+  context.state.zoom = 15;
+  context.state.projects = [project];
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = timeEntries;
+  context.state.settings.hideEmptyActivityRows = true;
+
+  const model = context.getDayTimelineRenderModel({ dateStartOfDay: dateStart, zoom: 15 });
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    hideEmptyActivityRows: true,
+    currentDate: new Date(dateStart)
+  });
+  const [style] = extractEntryStyles(html);
+
+  assert.deepEqual(Array.from(model.rowLayout.sourceRows), [22]);
+  assert.equal(style.top, 2);
+  assert.equal(style.height, 37);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('adjacent visible secondary auto-rule rows merge after row-level aggregation', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const firstRowStart = dateStart + (6 * 60) * 60 * 1000;
+  const secondRowStart = firstRowStart + 15 * 60 * 1000;
+  const secondRowEnd = secondRowStart + 15 * 60 * 1000;
+  const ranges = [
+    [firstRowStart + 60 * 1000, firstRowStart + 90 * 1000],
+    [firstRowStart + 4 * 60 * 1000, firstRowStart + 4 * 60 * 1000 + 35 * 1000],
+    [secondRowStart + 60 * 1000, secondRowStart + 90 * 1000],
+    [secondRowStart + 5 * 60 * 1000, secondRowStart + 5 * 60 * 1000 + 35 * 1000]
+  ];
+  const activities = [
+    orielActivity(firstRowStart, secondRowStart),
+    orielActivity(secondRowStart, secondRowEnd),
+    ...ranges.map(([start, end]) => codexActivity(start, end))
+  ];
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-secondary-touch-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: firstRowStart,
+    end: secondRowEnd,
+    zoom: 15
+  }), 'merged secondary rows');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('secondary visible auto-rule rows align with Activity Stream row geometry', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const rowStart = dateStart + (7 * 60 + 15) * 60 * 1000;
+  const rowEnd = rowStart + 15 * 60 * 1000;
+  const ranges = [
+    [rowStart + 2 * 60 * 1000, rowStart + 2 * 60 * 1000 + 35 * 1000],
+    [rowStart + 9 * 60 * 1000, rowStart + 9 * 60 * 1000 + 35 * 1000]
+  ];
+  const activities = [
+    orielActivity(rowStart, rowEnd),
+    ...ranges.map(([start, end]) => codexActivity(start, end))
+  ];
+  const timeEntries = ranges.map(([start, end], index) => makeAutoRuleEntry({
+    id: `entry-secondary-align-${index}`,
+    start,
+    end,
+    projectId: project.id
+  }));
+
+  const activityHtml = renderMemoryAidHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const entryHtml = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const [activityStyle] = extractActivityStyles(activityHtml);
+  const [entryStyle] = extractEntryStyles(entryHtml);
+
+  assertStyleMatchesRowGeometry(activityStyle, expectedRowGeometry({
+    dateStart,
+    start: rowStart,
+    end: rowEnd,
+    zoom: 15
+  }), 'Activity Stream secondary row');
+  assertStyleMatchesRowGeometry(entryStyle, {
+    top: activityStyle.top,
+    height: activityStyle.height
+  }, 'secondary Time Entry row');
+  assert.deepEqual(extractTimeEntryDurationLabels(entryHtml), ['1 min']);
 });
 
 test('activity-stream assignments include earlier current zoom rows when the assigned app is secondary', () => {
