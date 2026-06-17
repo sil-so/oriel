@@ -34,6 +34,16 @@ test('native host provides WKWebView reply bridge and desktop lifecycle controls
 
   assert.match(app, /NSStatusItem/);
   assert.match(app, /NSWindowDelegate/);
+  assert.match(app, /NSMenu\(title:\s*"Edit"\)/);
+  for (const selector of ['undo:', 'redo:']) {
+    assert.match(app, new RegExp(`Selector\\(\\("${selector}"\\)\\)`));
+  }
+  for (const command of ['cut', 'copy', 'paste', 'selectAll']) {
+    assert.match(app, new RegExp(`#selector\\(NSText\\.${command}\\(_:\\)\\)`));
+  }
+  assert.match(app, /editMenu\.addItem/);
+  assert.match(app, /keyEquivalent:\s*"a"/);
+  assert.match(app, /keyEquivalent:\s*"c"/);
   assert.match(app, /\.fullSizeContentView/);
   assert.match(app, /titleVisibility = \.hidden/);
   assert.match(app, /titlebarAppearsTransparent = true/);
@@ -56,6 +66,9 @@ test('native host provides WKWebView reply bridge and desktop lifecycle controls
   assert.match(app, /Pause Tracking/);
   assert.doesNotMatch(app, /Start Oriel at Login/);
   assert.match(webView, /WKWebView/);
+  assert.match(webView, /final class ContextMenuDisabledWebView:\s*WKWebView/);
+  assert.match(webView, /override func menu\(for event:\s*NSEvent\)\s*->\s*NSMenu\?\s*\{\s*nil\s*\}/);
+  assert.match(webView, /webView = ContextMenuDisabledWebView\(frame: \.zero, configuration: configuration\)/);
   assert.match(webView, /WKNavigationDelegate/);
   assert.match(bridge, /WKScriptMessageHandlerWithReply/);
   assert.match(bridge, /store\.request\(operation:/);

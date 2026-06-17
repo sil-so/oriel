@@ -218,6 +218,7 @@ const state = {
     
     // Selected activity blocks for bulk actions
     selectedActivities: new Set(),
+    selectedActivityScopes: new Map(),
     
     // Active application workspace view
     currentView: 'timeline',
@@ -341,7 +342,12 @@ const DOM = {
     
     // Statistics
     get elStatCapturedActive() { return document.getElementById('stat-captured-active'); },
-    get elStatProjectTotal() { return document.getElementById('stat-project-total'); },
+    get elWorkStatCaptured() { return document.getElementById('work-stat-captured'); },
+    get elWorkStatLogged() { return document.getElementById('work-stat-logged'); },
+    get elWorkStatEarnings() { return document.getElementById('work-stat-earnings'); },
+    get elWorkStatBillableHours() { return document.getElementById('work-stat-billable-hours'); },
+    get elWorkStatConversionPercent() { return document.getElementById('work-stat-conversion-percent'); },
+    get elWorkStatConversionBar() { return document.getElementById('work-stat-conversion-bar'); },
     get getElStatBillable() { return document.getElementById('stat-billable'); },
     get elStatNonbillable() { return document.getElementById('stat-nonbillable'); },
     get elBarProject() { return document.getElementById('bar-project'); },

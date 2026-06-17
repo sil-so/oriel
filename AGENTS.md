@@ -21,6 +21,22 @@ maintainable, and easy to review.
   launch-path changes.
 - Run `./script/build_and_run.sh` when a running app check is needed.
 
+## Local Verification Notes
+
+- If `.agents/oriel-verification.md` exists, read it before choosing Browser,
+  Computer Use, Chrome, Playwright, terminal logs, or other verification tools
+  for Oriel work.
+- Do not treat "use the in-app Codex browser when UI verification is relevant"
+  as a sole or default rule for every UI check. Use the routing guidance in the
+  local verification notes: Browser/Playwright for browser-runnable frontend UI,
+  Computer Use for the real Oriel app surface, and terminal tests/logs/data
+  inspection for under-the-hood behavior.
+- Keep `.agents/oriel-verification.md` local and ignored. It may contain
+  machine-specific Codex workflow notes, failed interaction attempts, screenshots
+  or app-state observations, and private debugging context.
+- Update `.agents/oriel-verification.md` whenever a verification or debugging
+  approach succeeds after earlier attempts were slow, flaky, or misleading.
+
 ## Design System
 
 - Before making UI changes, read `DESIGN.md`, `PRODUCT.md`,

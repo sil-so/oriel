@@ -114,6 +114,11 @@ class FakeElement {
     this.children = children;
   }
 
+  contains(target) {
+    if (target === this) return true;
+    return this.children.some(child => typeof child.contains === 'function' && child.contains(target));
+  }
+
   closest() {
     return null;
   }
@@ -124,6 +129,10 @@ class FakeElement {
 
   getBoundingClientRect() {
     return { top: 0 };
+  }
+
+  remove() {
+    this.removed = true;
   }
 }
 
@@ -411,6 +420,9 @@ function loadMainControlsContext({
     },
     hideTimeEntryHoverPreview() {
       hoverCalls.push('hide');
+    },
+    showCustomConfirm(options) {
+      context.confirmOptions = options;
     },
     setTimeout() {},
     setInterval() {},
@@ -1606,6 +1618,125 @@ test('time entry create cue can run over an existing logged entry row', () => {
   assert.equal(dom.elItemsTimeEntries.child.style.height, '77px');
 });
 
+test('right-click outside Time Entries prevents the native menu without showing app actions', async () => {
+  const { element, dispatchDocument } = loadMainControlsContext();
+  const target = element('body');
+  let prevented = false;
+
+  await dispatchDocument('contextmenu', {
+    target,
+    clientX: 120,
+    clientY: 140,
+    preventDefault() {
+      prevented = true;
+    }
+  });
+
+  const menu = findDescendant(target, child => String(child.className || '').includes('app-context-menu'));
+  assert.equal(prevented, true);
+  assert.equal(menu.classList.contains('hidden'), true);
+});
+
+test('right-click on a Time Entry block opens edit and delete context actions', async () => {
+  const { context, element, dispatchDocument } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const block = new FakeElement('entry-block');
+  let modalArgs = null;
+  let prevented = false;
+
+  block.className = 'time-entry-block';
+  block.classList = new FakeClassList(block);
+  block.dataset = {
+    id: 'entry-1',
+    groupIds: encodeURIComponent(JSON.stringify(['entry-1', 'entry-2'])),
+    groupStart: String(dateStart + 9 * 60 * 60 * 1000),
+    groupEnd: String(dateStart + (9 * 60 + 30) * 60 * 1000)
+  };
+  block.closest = selector => selector === '.time-entry-block' ? block : null;
+  context.state.projects = [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }];
+  context.state.timeEntries = [
+    {
+      id: 'entry-1',
+      start: dateStart + 9 * 60 * 60 * 1000,
+      end: dateStart + (9 * 60 + 10) * 60 * 1000,
+      projectId: 'project-1',
+      taskId: '',
+      description: 'Focused work',
+      billable: false,
+      activities: [{ app: 'Codex', title: 'Codex', start: dateStart + 9 * 60 * 60 * 1000, end: dateStart + (9 * 60 + 10) * 60 * 1000 }]
+    },
+    {
+      id: 'entry-2',
+      start: dateStart + (9 * 60 + 20) * 60 * 1000,
+      end: dateStart + (9 * 60 + 30) * 60 * 1000,
+      projectId: 'project-1',
+      taskId: '',
+      description: 'Focused work',
+      billable: false,
+      activities: [{ app: 'Codex', title: 'Codex', start: dateStart + (9 * 60 + 20) * 60 * 1000, end: dateStart + (9 * 60 + 30) * 60 * 1000 }]
+    }
+  ];
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  await dispatchDocument('contextmenu', {
+    target: block,
+    clientX: 120,
+    clientY: 140,
+    preventDefault() {
+      prevented = true;
+    }
+  });
+
+  const menu = findDescendant(element('body'), child => String(child.className || '').includes('app-context-menu'));
+  assert.equal(prevented, true);
+  assert.equal(menu.classList.contains('hidden'), false);
+  assert.equal(menu.children.map(child => child.textContent).join('|'), 'Edit Time Entry|Delete Time Entry');
+
+  await menu.children[0].click();
+
+  assert.equal(context.window.editingTimeEntryId, 'entry-1');
+  assert.deepEqual(Array.from(context.window.editingTimeEntryGroupIds), ['entry-1', 'entry-2']);
+  assert.equal(modalArgs[0], Number(block.dataset.groupStart));
+  assert.equal(modalArgs[1], Number(block.dataset.groupEnd));
+  assert.equal(modalArgs[3], 'project-1');
+});
+
+test('Time Entry context menu delete confirms and removes all grouped entries', async () => {
+  const { context, element, dispatchDocument, fetchCalls } = loadMainControlsContext();
+  const block = new FakeElement('entry-block');
+
+  block.className = 'time-entry-block';
+  block.classList = new FakeClassList(block);
+  block.dataset = {
+    id: 'entry-1',
+    groupIds: encodeURIComponent(JSON.stringify(['entry-1', 'entry-2']))
+  };
+  block.closest = selector => selector === '.time-entry-block' ? block : null;
+
+  await dispatchDocument('contextmenu', {
+    target: block,
+    clientX: 120,
+    clientY: 140,
+    preventDefault() {}
+  });
+
+  const menu = findDescendant(element('body'), child => String(child.className || '').includes('app-context-menu'));
+  await menu.children[1].click();
+
+  assert.equal(context.confirmOptions.title, 'Delete Time Entry');
+  assert.match(context.confirmOptions.message, /2 logged time entries/);
+
+  await context.confirmOptions.onConfirm();
+
+  assert.deepEqual(fetchCalls.map(call => [call.url, call.options.method]), [
+    ['http://localhost:3000/api/time-entries/entry-1', 'DELETE'],
+    ['http://localhost:3000/api/time-entries/entry-2', 'DELETE']
+  ]);
+});
+
 test('column splitter drag prevents text selection until release', () => {
   const { element, dispatchWindow } = loadMainControlsContext();
   const resizeHandle = element('resize-handle');
@@ -1754,7 +1885,7 @@ test('bulk activity assignment saves separate entries at each selected activity 
   assert.equal(context.state.selectedActivities.size, 0);
 });
 
-test('bulk activity assignment saves summary-model rows with selected block bounds and displayed duration', async () => {
+test('bulk activity assignment saves summary-model row units with nested sources', async () => {
   const { dom, context, fetchCalls } = loadMainControlsContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const assignmentStart = dateStart + 13 * 60 * 60 * 1000;
@@ -1781,8 +1912,12 @@ test('bulk activity assignment saves summary-model rows with selected block boun
     title: 'Codex',
     assignmentStart,
     assignmentEnd,
+    assignedDurationMs: first.duration + second.duration,
     assignmentSource: 'activity-stream',
     assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: assignmentStart,
+    assignmentDisplayEnd: assignmentEnd,
+    assignmentDisplayGroupKey: 'codex-row-13-00',
     assignmentDisplayZoom: 5,
     sources: [first, second]
   };
@@ -1799,19 +1934,108 @@ test('bulk activity assignment saves summary-model rows with selected block boun
   await dom.elModalBtnSave.click();
 
   assert.equal(fetchCalls.length, 1);
-  assert.deepEqual(fetchCalls.map(call => [call.body.start, call.body.end]), [
-    [assignmentStart, assignmentEnd]
-  ]);
+  assert.deepEqual([fetchCalls[0].body.start, fetchCalls[0].body.end], [assignmentStart, assignmentEnd]);
   assert.equal(fetchCalls[0].body.activities.length, 1);
   assert.equal(fetchCalls[0].body.activities[0].app, 'Codex');
-  assert.equal(fetchCalls[0].body.activities[0].sources, undefined);
+  assert.deepEqual(fetchCalls[0].body.activities[0].sources.map(source => [source.start, source.end]), [
+    [first.start, first.end],
+    [second.start, second.end]
+  ]);
   assert.equal(fetchCalls[0].body.activities[0].duration, first.duration + second.duration);
   assert.equal(fetchCalls[0].body.activities[0].assignedDurationMs, first.duration + second.duration);
   assert.equal(fetchCalls[0].body.activities[0].assignmentStart, assignmentStart);
   assert.equal(fetchCalls[0].body.activities[0].assignmentEnd, assignmentEnd);
+  assert.equal(fetchCalls[0].body.activities[0].assignmentDisplayStart, assignmentStart);
+  assert.equal(fetchCalls[0].body.activities[0].assignmentDisplayEnd, assignmentEnd);
+  assert.equal(fetchCalls[0].body.activities[0].assignmentDisplayGroupKey, 'codex-row-13-00');
   assert.equal(fetchCalls[0].body.activities[0].assignmentSource, 'activity-stream');
   assert.equal(fetchCalls[0].body.activities[0].assignmentModel, 'activity-stream-summary');
   assert.equal(fetchCalls[0].body.activities[0].assignmentDisplayZoom, 5);
+});
+
+test('bulk Activity Stream assignment saves visible row units with nested source evidence', async () => {
+  const { dom, context, fetchCalls } = loadMainControlsContext();
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const affinitySource = (title, start, end) => ({
+    app: 'Affinity',
+    title,
+    appPath: '/Applications/Affinity Photo 2.app',
+    bundleId: 'com.seriflabs.affinityphoto2',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 1
+  });
+  const firstRowSources = [
+    affinitySource('Affinity', at(11, 52, 3), at(11, 52, 8)),
+    affinitySource('Affinity', at(11, 52, 8), at(11, 52, 10)),
+    affinitySource('Affinity', at(11, 52, 10), at(11, 53, 0))
+  ];
+  const secondRowSources = [
+    affinitySource('Affinity - leon.afphoto @ 30% [Loading 32%]', at(11, 53, 19), at(11, 53, 31)),
+    affinitySource('Affinity - leon.afphoto @ 30%', at(11, 53, 42), at(11, 54, 14)),
+    affinitySource('Affinity - Foto Amber.jpeg @ 134%', at(11, 54, 18), at(11, 55, 30))
+  ];
+  const rowUnit = (id, title, displayStart, displayEnd, sources) => {
+    const duration = sources.reduce((total, source) => total + source.assignedDurationMs, 0);
+    return {
+      app: 'Affinity',
+      title,
+      appPath: '/Applications/Affinity Photo 2.app',
+      bundleId: 'com.seriflabs.affinityphoto2',
+      start: displayStart,
+      end: displayEnd,
+      duration,
+      assignedDurationMs: duration,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: id,
+      assignmentDisplayZoom: 1,
+      modalSourceActivities: sources,
+      sources
+    };
+  };
+
+  context.window.isBulkAllocation = true;
+  context.state.currentDate = new Date(dateStart);
+  dom.elModalStart.value = '11:52';
+  dom.elModalEnd.value = '11:56';
+  dom.elModalDescription.value = '';
+  dom.elModalProjectSelect.value = 'project-personal';
+  dom.elModalTaskSelect.value = '';
+  dom.elModalBillable.checked = false;
+  context.state.currentModalActivities = [
+    rowUnit('affinity-row-1152', 'Affinity', at(11, 52), at(11, 53), firstRowSources),
+    rowUnit('affinity-row-1153', 'Affinity - leon.afphoto @ 30% [Loading 32%]', at(11, 53), at(11, 56), secondRowSources)
+  ];
+
+  await dom.elModalBtnSave.click();
+
+  assert.equal(fetchCalls.length, 2);
+  assert.deepEqual(fetchCalls.map(call => [call.body.start, call.body.end]), [
+    [at(11, 52), at(11, 53)],
+    [at(11, 53), at(11, 56)]
+  ]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities.length), [1, 1]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities[0].sources.length), [3, 3]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities[0].assignedDurationMs), [
+    57 * 1000,
+    116 * 1000
+  ]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities[0].assignmentDisplayGroupKey), [
+    'affinity-row-1152',
+    'affinity-row-1153'
+  ]);
 });
 
 test('saving an edited assigned activity group consolidates grouped entries into one row', async () => {
@@ -2110,6 +2334,52 @@ test('selected activity assignment only passes overlaps matching the selected bl
   assert.deepEqual(Array.from(modalArgs[6], activity => activity.app), ['Codex']);
 });
 
+test('selected activity assignment carries visible Activity Stream display bounds', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const start = dateStart + (11 * 60 + 45) * 60 * 1000;
+  const end = dateStart + (11 * 60 + 48) * 60 * 1000;
+  const chatboxSummary = {
+    app: 'Chatbox',
+    title: 'Chatbox',
+    appPath: '/Applications/Chatbox.app',
+    bundleId: 'xyz.chatboxapp.app',
+    start,
+    end,
+    duration: end - start
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(11 * 60 + 42),
+      span: '6',
+      app: 'Chatbox',
+      title: 'Chatbox',
+      url: '',
+      appPath: '/Applications/Chatbox.app',
+      bundleId: 'xyz.chatboxapp.app',
+      overlaps: encodeURIComponent(JSON.stringify([chatboxSummary]))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 1;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(modalArgs[6][0].assignmentDisplayStart, dateStart + (11 * 60 + 42) * 60 * 1000);
+  assert.equal(modalArgs[6][0].assignmentDisplayEnd, dateStart + (11 * 60 + 48) * 60 * 1000);
+  assert.match(modalArgs[6][0].assignmentDisplayGroupKey, /chatbox/);
+});
+
 test('selected similar mixed-row assignment saves only the matched secondary activity', async () => {
   const { dom, context } = loadMainControlsContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -2141,7 +2411,7 @@ test('selected similar mixed-row assignment saves only the matched secondary act
       url: '',
       appPath: '/Applications/Brave Browser.app',
       bundleId: 'com.brave.Browser',
-      selectedSimilarityKeys: encodeURIComponent(JSON.stringify(['codex'])),
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([context.getActivitySummaryKey(codexSummary)])),
       overlaps: encodeURIComponent(JSON.stringify([braveSummary, codexSummary]))
     }
   };
@@ -2166,6 +2436,360 @@ test('selected similar mixed-row assignment saves only the matched secondary act
   assert.equal(modalArgs[6][0].assignmentEnd, at(19, 0));
   assert.equal(modalArgs[6][0].assignedDurationMs, 2 * 60 * 1000);
   assert.equal(modalArgs[6][0].assignmentModel, 'activity-stream-summary');
+});
+
+test('selected similar assignment filters stored summary keys as source-backed activities', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
+  const amazonSummary = {
+    app: 'Brave Browser',
+    title: 'Amazon search results for adapter',
+    url: 'https://www.amazon.nl/s?k=adapter&ref=nb_sb_noss',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 20),
+    end: at(12, 24),
+    duration: 4 * 60 * 1000
+  };
+  const bolSummary = {
+    app: 'Brave Browser',
+    title: 'Example shop checkout',
+    url: 'https://www.bol.com/nl/nl/checkout/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 20),
+    end: at(12, 24),
+    duration: 4 * 60 * 1000
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(12 * 12 + 4),
+      span: '1',
+      app: 'Brave Browser',
+      title: amazonSummary.title,
+      url: amazonSummary.url,
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([context.getActivitySummaryKey(amazonSummary)])),
+      overlaps: encodeURIComponent(JSON.stringify([amazonSummary, bolSummary]))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 5;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].app, 'Brave Browser');
+  assert.equal(modalArgs[6][0].url, amazonSummary.url);
+  assert.equal(modalArgs[6][0].assignmentStart, at(12, 20));
+  assert.equal(modalArgs[6][0].assignmentEnd, at(12, 25));
+  assert.equal(modalArgs[6][0].assignedDurationMs, 4 * 60 * 1000);
+});
+
+test('selected similar assignment filters exact stored source keys inside same-host rows', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const selectedAmazonSource = {
+    app: 'Brave Browser',
+    title: 'Amazon search results for adapter',
+    url: 'https://www.amazon.nl/s?k=adapter&ref=nb_sb_noss',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 20),
+    end: at(12, 21),
+    duration: 60 * 1000
+  };
+  const sameHostSibling = {
+    app: 'Brave Browser',
+    title: 'Amazon.nl - winkelwagen',
+    url: 'https://www.amazon.nl/gp/cart/view.html',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 22),
+    end: at(12, 24),
+    duration: 2 * 60 * 1000
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(12 * 12 + 4),
+      span: '1',
+      app: 'Brave Browser',
+      title: selectedAmazonSource.title,
+      url: selectedAmazonSource.url,
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(selectedAmazonSource)])),
+      overlaps: encodeURIComponent(JSON.stringify([selectedAmazonSource, sameHostSibling]))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 5;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].title, selectedAmazonSource.title);
+  assert.equal(modalArgs[6][0].url, selectedAmazonSource.url);
+  assert.equal(modalArgs[6][0].assignmentStart, at(12, 20));
+  assert.equal(modalArgs[6][0].assignmentEnd, at(12, 25));
+  assert.equal(modalArgs[6][0].assignedDurationMs, 60 * 1000);
+});
+
+test('selected similar assignment saves only popup-matched source fragments inside mixed rows', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const amazonSource = {
+    app: 'Brave Browser',
+    title: 'Amazon product page',
+    url: 'https://www.amazon.nl/product/example',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 30),
+    end: at(12, 33),
+    duration: 3 * 60 * 1000
+  };
+  const chatgptSource = {
+    app: 'Brave Browser',
+    title: 'Research comparison',
+    url: 'https://chatgpt.com/c/research-comparison',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 30),
+    end: at(12, 34),
+    duration: 4 * 60 * 1000
+  };
+  const musicSource = {
+    app: 'Music',
+    title: 'Music',
+    url: '',
+    appPath: '/System/Applications/Music.app',
+    bundleId: 'com.apple.Music',
+    start: at(12, 30),
+    end: at(12, 35),
+    duration: 5 * 60 * 1000
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(12 * 12 + 6),
+      span: '1',
+      app: 'Music',
+      title: 'Multiple Activities',
+      url: '',
+      appPath: '/System/Applications/Music.app',
+      bundleId: 'com.apple.Music',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(amazonSource)])),
+      overlaps: encodeURIComponent(JSON.stringify([amazonSource, chatgptSource, musicSource]))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 5;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].app, 'Brave Browser');
+  assert.equal(modalArgs[6][0].title, 'Amazon product page');
+  assert.equal(modalArgs[6][0].url, amazonSource.url);
+  assert.equal(modalArgs[6][0].assignmentStart, at(12, 30));
+  assert.equal(modalArgs[6][0].assignmentEnd, at(12, 35));
+  assert.equal(modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
+});
+
+test('selected similar assignment resolves overlap-key backed exact activity rows', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes, seconds = 0) => dateStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const amazonSource = {
+    app: 'Brave Browser',
+    title: 'amazon.nl',
+    url: 'https://www.amazon.nl/s?k=adapter',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 13, 5),
+    end: at(12, 13, 55),
+    duration: 50 * 1000
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(12 * 60 + 13),
+      span: '1',
+      startMs: String(at(12, 13)),
+      endMs: String(at(12, 14)),
+      exactGeometry: 'true',
+      app: 'Brave Browser',
+      title: 'amazon.nl',
+      url: amazonSource.url,
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      overlapKey: 'exact-amazon',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(amazonSource)])),
+      selectedSimilarityMode: 'host',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify(['brave browser|||amazon.nl']))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 1;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.getActivityBlockDetailOverlaps = block => (block === selectedBlock ? [amazonSource] : []);
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].title, 'amazon.nl');
+  assert.equal(modalArgs[6][0].assignedDurationMs, 50 * 1000);
+  assert.equal(modalArgs[6][0].assignmentStart, at(12, 13));
+  assert.equal(modalArgs[6][0].assignmentEnd, at(12, 14));
+});
+
+test('selected similar base-url assignment tags same-title fragments for modal aggregation', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes, seconds = 0) => dateStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const hostKey = 'brave browser|||bol.com';
+  const firstBol = {
+    app: 'Brave Browser',
+    title: 'bol | Bestellen',
+    url: 'https://www.bol.com/nl/nl/checkout/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 0, 10),
+    end: at(12, 0, 35),
+    duration: 25 * 1000
+  };
+  const secondBol = {
+    ...firstBol,
+    title: 'bol.com/nl/nl/basket/',
+    url: 'https://www.bol.com/nl/nl/basket/',
+    start: at(12, 5, 5),
+    end: at(12, 5, 55),
+    duration: 50 * 1000
+  };
+  const blocks = [
+    {
+      dataset: {
+        startCell: String(12 * 12),
+        span: '1',
+        app: 'Brave Browser',
+        title: firstBol.title,
+        url: firstBol.url,
+        appPath: firstBol.appPath,
+        bundleId: firstBol.bundleId,
+        selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(firstBol)])),
+        selectedSimilarityMode: 'host',
+        selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify([hostKey])),
+        overlaps: encodeURIComponent(JSON.stringify([firstBol]))
+      }
+    },
+    {
+      dataset: {
+        startCell: String(12 * 12 + 1),
+        span: '1',
+        app: 'Brave Browser',
+        title: secondBol.title,
+        url: secondBol.url,
+        appPath: secondBol.appPath,
+        bundleId: secondBol.bundleId,
+        selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(secondBol)])),
+        selectedSimilarityMode: 'host',
+        selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify([hostKey])),
+        overlaps: encodeURIComponent(JSON.stringify([secondBol]))
+      }
+    }
+  ];
+  let modalArgs = null;
+
+  context.state.zoom = 5;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? blocks : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 2);
+  assert.deepEqual(
+    new Set(modalArgs[6].map(activity => activity.modalAggregateGroupKey)),
+    new Set([
+      context.getActivitySimilarityKeyForMode(firstBol, 'app-title'),
+      context.getActivitySimilarityKeyForMode(secondBol, 'app-title')
+    ])
+  );
+  assert.equal(modalArgs[6].some(activity => activity.modalAggregateGroupKey === hostKey), false);
+  assert.equal(modalArgs[6].reduce((total, activity) => total + activity.assignedDurationMs, 0), 75 * 1000);
 });
 
 test('selected activity assignment excludes secondary summaries from the same similar app block', async () => {
@@ -2276,6 +2900,65 @@ test('selected activity assignment uses selected Activity Stream row bounds when
   assert.equal(modalArgs[6][0].assignmentSource, 'activity-stream');
   assert.equal(modalArgs[6][0].assignmentModel, 'activity-stream-summary');
   assert.equal(modalArgs[6][0].assignmentDisplayZoom, 5);
+});
+
+test('similar selected activity assignment preserves the matched row display bounds', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes, seconds = 0) => dateStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  const chatboxSummary = {
+    app: 'Chatbox',
+    title: 'Chatbox',
+    bundleId: 'xyz.chatboxapp.app',
+    appPath: '/Applications/Chatbox.app',
+    start: at(11, 45, 12),
+    end: at(11, 46, 18),
+    duration: 66 * 1000,
+    sources: [{
+      app: 'Chatbox',
+      title: 'Chatbox',
+      bundleId: 'xyz.chatboxapp.app',
+      appPath: '/Applications/Chatbox.app',
+      start: at(11, 45, 12),
+      end: at(11, 46, 18),
+      duration: 66 * 1000
+    }]
+  };
+  const selectedBlock = {
+    dataset: {
+      startCell: String(11 * 60 + 42),
+      span: '6',
+      app: 'Chatbox',
+      title: 'Chatbox',
+      url: '',
+      appPath: '/Applications/Chatbox.app',
+      bundleId: 'xyz.chatboxapp.app',
+      overlaps: encodeURIComponent(JSON.stringify([chatboxSummary])),
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([
+        context.getActivitySummaryKey(chatboxSummary)
+      ])),
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify(['chatbox']))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 1;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].app, 'Chatbox');
+  assert.equal(modalArgs[6][0].assignedDurationMs, 66 * 1000);
+  assert.equal(modalArgs[6][0].assignmentDisplayStart, at(11, 42));
+  assert.equal(modalArgs[6][0].assignmentDisplayEnd, at(11, 48));
+  assert.match(modalArgs[6][0].assignmentDisplayGroupKey, /chatbox/);
 });
 
 test('selected activity assignment keeps coarse selected blocks as one stable summary assignment', async () => {
@@ -2419,4 +3102,85 @@ test('selected activity assignment stores the selected summary duration without 
   assert.equal(modalArgs[6][0].assignedDurationMs, selectedSummary.duration);
   assert.equal(modalArgs[6][0].assignmentSource, 'activity-stream');
   assert.equal(modalArgs[6][0].assignmentModel, 'activity-stream-summary');
+});
+
+test('selected similar app-name assignment keeps each Affinity row as one modal row unit', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const affinity = (title, start, end) => ({
+    app: 'Affinity',
+    title,
+    appPath: '/Applications/Affinity Photo 2.app',
+    bundleId: 'com.seriflabs.affinityphoto2',
+    start,
+    end,
+    duration: end - start
+  });
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const firstRowSources = [
+    affinity('Affinity', at(11, 52, 3), at(11, 52, 8)),
+    affinity('Affinity', at(11, 52, 8), at(11, 52, 10)),
+    affinity('Affinity', at(11, 52, 10), at(11, 53, 0))
+  ];
+  const secondRowSources = [
+    affinity('Affinity - leon.afphoto @ 30% [Loading 32%]', at(11, 53, 19), at(11, 53, 31)),
+    affinity('Affinity - leon.afphoto @ 30%', at(11, 53, 42), at(11, 54, 14)),
+    affinity('Affinity - Foto Amber.jpeg @ 134%', at(11, 54, 18), at(11, 55, 30))
+  ];
+  const selectedBlock = (startCell, span, title, overlaps) => ({
+    dataset: {
+      startCell: String(startCell),
+      span: String(span),
+      app: 'Affinity',
+      title,
+      url: '',
+      appPath: '/Applications/Affinity Photo 2.app',
+      bundleId: 'com.seriflabs.affinityphoto2',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify(overlaps.map(sourceKey))),
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify(['affinity'])),
+      overlaps: encodeURIComponent(JSON.stringify(overlaps))
+    }
+  });
+  let modalArgs = null;
+
+  context.state.currentDate = new Date(dateStart);
+  context.state.zoom = 1;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected'
+      ? [
+        selectedBlock(11 * 60 + 52, 1, 'Affinity', firstRowSources),
+        selectedBlock(11 * 60 + 53, 3, 'Affinity - leon.afphoto @ 30% [Loading 32%]', secondRowSources)
+      ]
+      : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 2);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.assignedDurationMs), [
+    57 * 1000,
+    116 * 1000
+  ]);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.sources.length), [3, 3]);
+  assert.deepEqual(Array.from(modalArgs[6], activity => [
+    activity.assignmentDisplayStart,
+    activity.assignmentDisplayEnd
+  ]), [
+    [at(11, 52), at(11, 53)],
+    [at(11, 53), at(11, 56)]
+  ]);
 });

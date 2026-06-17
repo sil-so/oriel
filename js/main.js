@@ -125,6 +125,139 @@ function closeAllCustomSelects(exceptWrapper = null) {
     });
 }
 
+let appContextMenu = null;
+let appContextMenuBlock = null;
+let appContextMenuBound = false;
+
+function getContextMenuTimeEntryIds(blockEl) {
+    const groupIds = typeof getTimeEntryGroupIds === 'function'
+        ? getTimeEntryGroupIds(blockEl)
+        : [];
+    if (groupIds.length > 0) return groupIds;
+
+    const entryId = blockEl?.dataset?.id;
+    return entryId ? [entryId] : [];
+}
+
+async function deleteTimeEntriesByIds(entryIds) {
+    const ids = Array.isArray(entryIds) ? entryIds.filter(Boolean) : [];
+    if (ids.length === 0) return;
+
+    const responses = await Promise.all(ids.map(entryId => (
+        fetch(`${API_BASE}/time-entries/${entryId}`, { method: 'DELETE' })
+    )));
+    if (responses.every(response => response.ok)) {
+        await refreshData();
+    } else {
+        alert('Failed to delete time entry');
+    }
+}
+
+function closeAppContextMenu() {
+    appContextMenuBlock = null;
+    appContextMenu?.classList?.add('hidden');
+}
+
+function createContextMenuButton(label, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'menu-option app-context-menu__item';
+    button.textContent = label;
+    button.setAttribute('role', 'menuitem');
+    button.addEventListener('click', event => {
+        event.stopPropagation?.();
+        onClick();
+    });
+    return button;
+}
+
+function ensureAppContextMenu() {
+    if (appContextMenu) return appContextMenu;
+
+    const menu = document.createElement('div');
+    menu.className = 'app-context-menu popover hidden';
+    menu.classList?.add('app-context-menu', 'popover', 'hidden');
+    menu.setAttribute('role', 'menu');
+    menu.appendChild(createContextMenuButton('Edit Time Entry', () => {
+        const block = appContextMenuBlock;
+        closeAppContextMenu();
+        if (block && typeof openTimeEntryBlockEditor === 'function') {
+            openTimeEntryBlockEditor(block);
+        }
+    }));
+    menu.appendChild(createContextMenuButton('Delete Time Entry', () => {
+        const ids = getContextMenuTimeEntryIds(appContextMenuBlock);
+        closeAppContextMenu();
+        if (ids.length === 0) return;
+
+        const message = ids.length > 1
+            ? `Delete ${ids.length} logged time entries permanently?`
+            : 'Delete this logged time entry permanently?';
+        const onConfirm = async () => {
+            try {
+                await deleteTimeEntriesByIds(ids);
+            } catch (error) {
+                console.error('Error deleting entry:', error);
+            }
+        };
+
+        if (typeof showCustomConfirm === 'function') {
+            showCustomConfirm({
+                title: 'Delete Time Entry',
+                message,
+                actionText: ids.length > 1 ? 'Delete Entries' : 'Delete Entry',
+                actionClass: 'button-danger',
+                onConfirm
+            });
+        } else if (confirm(message)) {
+            onConfirm();
+        }
+    }));
+
+    document.body?.appendChild(menu);
+    appContextMenu = menu;
+    return menu;
+}
+
+function showAppContextMenuForTimeEntry(blockEl, event) {
+    const menu = ensureAppContextMenu();
+    appContextMenuBlock = blockEl;
+
+    const menuWidth = 188;
+    const menuHeight = 88;
+    const viewportWidth = Number.isFinite(window.innerWidth) ? window.innerWidth : event.clientX + menuWidth;
+    const viewportHeight = Number.isFinite(window.innerHeight) ? window.innerHeight : event.clientY + menuHeight;
+    const left = Math.max(8, Math.min(event.clientX, viewportWidth - menuWidth - 8));
+    const top = Math.max(8, Math.min(event.clientY, viewportHeight - menuHeight - 8));
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.classList.remove('hidden');
+}
+
+function setupAppContextMenu() {
+    if (appContextMenuBound) return;
+    appContextMenuBound = true;
+    ensureAppContextMenu();
+
+    document.addEventListener('contextmenu', event => {
+        event.preventDefault?.();
+        closeAppContextMenu();
+
+        const block = event.target?.closest?.('.time-entry-block');
+        if (!block) return;
+
+        showAppContextMenuForTimeEntry(block, event);
+    });
+
+    document.addEventListener('click', event => {
+        if (!appContextMenu || appContextMenu.classList.contains('hidden')) return;
+        if (appContextMenu.contains?.(event.target)) return;
+        closeAppContextMenu();
+    });
+
+}
+
 function hasTimeRange(activity) {
     return Number.isFinite(activity?.start)
         && Number.isFinite(activity?.end)
@@ -132,7 +265,7 @@ function hasTimeRange(activity) {
 }
 
 function timeEntryActivitySnapshot(activity) {
-    const { sources, ...snapshot } = activity || {};
+    const { sources, modalSourceActivities, modalAggregateGroupKey, ...snapshot } = activity || {};
     return snapshot;
 }
 
@@ -146,13 +279,47 @@ function isActivityStreamAssignment(activity) {
 }
 
 function normalizeActivityStreamAssignmentForSave(activity) {
-    const duration = getActivityDurationMs(activity);
+    const sourceActivities = getBulkAssignmentSourceActivities(activity);
+    const sourceSnapshots = sourceActivities.map(source => {
+        const sourceDuration = getActivityDurationMs(source);
+        const sourceStart = Number.isFinite(source?.assignmentStart)
+            ? source.assignmentStart
+            : source?.start;
+        const sourceEnd = Number.isFinite(source?.assignmentEnd) && source.assignmentEnd > sourceStart
+            ? source.assignmentEnd
+            : source?.end;
+
+        if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd <= sourceStart || sourceDuration <= 0) {
+            return null;
+        }
+
+        return manualTimeEntryActivitySnapshot({
+            ...source,
+            start: sourceStart,
+            end: sourceEnd,
+            duration: sourceDuration,
+            assignedDurationMs: sourceDuration,
+            assignmentStart: sourceStart,
+            assignmentEnd: sourceEnd,
+            assignmentSource: 'activity-stream',
+            assignmentModel: 'activity-stream-summary',
+            assignmentDisplayZoom: Number.isFinite(activity?.assignmentDisplayZoom)
+                ? activity.assignmentDisplayZoom
+                : source.assignmentDisplayZoom
+        });
+    }).filter(Boolean);
+    const sourceDuration = sourceSnapshots.reduce((total, source) => total + getActivityDurationMs(source), 0);
+    const duration = getActivityDurationMs(activity) || sourceDuration;
     const start = Number.isFinite(activity?.assignmentStart)
         ? activity.assignmentStart
-        : activity?.start;
+        : (Number.isFinite(activity?.assignmentDisplayStart)
+            ? activity.assignmentDisplayStart
+            : activity?.start);
     const end = Number.isFinite(activity?.assignmentEnd) && activity.assignmentEnd > start
         ? activity.assignmentEnd
-        : activity?.end;
+        : (Number.isFinite(activity?.assignmentDisplayEnd) && activity.assignmentDisplayEnd > start
+            ? activity.assignmentDisplayEnd
+            : activity?.end);
 
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || duration <= 0) {
         return timeEntryActivitySnapshot(activity);
@@ -170,7 +337,8 @@ function normalizeActivityStreamAssignmentForSave(activity) {
         assignmentModel: 'activity-stream-summary',
         assignmentDisplayZoom: Number.isFinite(activity?.assignmentDisplayZoom)
             ? activity.assignmentDisplayZoom
-            : state.zoom
+            : state.zoom,
+        ...(sourceSnapshots.length > 0 ? { sources: sourceSnapshots } : {})
     };
 }
 
@@ -226,6 +394,43 @@ function getActivityDurationMs(activity) {
         return activity.end - activity.start;
     }
     return 0;
+}
+
+function getBulkAssignmentSourceActivities(activity) {
+    if (Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0) {
+        return activity.modalSourceActivities.filter(hasTimeRange);
+    }
+    if (Array.isArray(activity?.sources) && activity.sources.length > 0) {
+        return activity.sources.filter(hasTimeRange);
+    }
+    return [];
+}
+
+function buildSourceBackedBulkActivitySnapshots(activity) {
+    return getBulkAssignmentSourceActivities(activity).map(source => {
+        const duration = getActivityDurationMs(source);
+        if (duration <= 0) return null;
+        return normalizeActivityStreamAssignmentForSave({
+            ...activity,
+            ...source,
+            title: source.title || activity.title,
+            app: source.app || activity.app,
+            url: source.url || activity.url || '',
+            appPath: source.appPath || activity.appPath || '',
+            bundleId: source.bundleId || activity.bundleId || '',
+            start: source.start,
+            end: source.end,
+            duration,
+            assignedDurationMs: duration,
+            assignmentStart: source.start,
+            assignmentEnd: source.end,
+            assignmentSource: 'activity-stream',
+            assignmentModel: activity.assignmentModel || source.assignmentModel,
+            assignmentDisplayZoom: Number.isFinite(activity?.assignmentDisplayZoom)
+                ? activity.assignmentDisplayZoom
+                : source.assignmentDisplayZoom
+        });
+    }).filter(activity => activity && hasTimeRange(activity));
 }
 
 function collectSummarizedActivityOverlaps(startMs, endMs) {
@@ -330,9 +535,47 @@ function getActivityDurationWithinRange(activity, rangeStart, rangeEnd) {
     }, 0);
 }
 
-function buildVisibleAssignmentActivities(blockOverlaps, selectedActivity, rangeStart, rangeEnd) {
+function buildActivityStreamDisplayGroupKey(activity, rangeStart, rangeEnd) {
+    const key = typeof getActivitySummaryKey === 'function'
+        ? getActivitySummaryKey(activity)
+        : `${activity?.app || ''}|||${activity?.title || ''}|||${activity?.url || activity?.bundleId || activity?.appPath || ''}`;
+    return `activity-stream-row|||${key}|||${rangeStart}|||${rangeEnd}`;
+}
+
+function withActivityStreamDisplayBounds(activity, rangeStart, rangeEnd) {
+    if (!activity || !Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
+        return activity;
+    }
+
+    return {
+        ...activity,
+        assignmentDisplayStart: rangeStart,
+        assignmentDisplayEnd: rangeEnd,
+        assignmentDisplayGroupKey: activity.assignmentDisplayGroupKey || buildActivityStreamDisplayGroupKey(activity, rangeStart, rangeEnd),
+        ...(Array.isArray(activity.sources) ? {
+            sources: activity.sources.map(source => withActivityStreamDisplayBounds(source, rangeStart, rangeEnd))
+        } : {}),
+        ...(Array.isArray(activity.modalSourceActivities) ? {
+            modalSourceActivities: activity.modalSourceActivities.map(source => withActivityStreamDisplayBounds(source, rangeStart, rangeEnd))
+        } : {})
+    };
+}
+
+function buildVisibleAssignmentActivities(blockOverlaps, selectedActivity, rangeStart, rangeEnd, options = {}) {
+    const preserveDisplayBounds = options?.preserveDisplayBounds !== false;
     if (typeof window.buildActivityStreamSummaryAssignmentActivity === 'function') {
-        const assignmentActivity = buildActivityStreamSummaryAssignmentActivity(selectedActivity, rangeStart, rangeEnd, state.zoom);
+        const assignmentActivity = buildActivityStreamSummaryAssignmentActivity(
+            selectedActivity,
+            rangeStart,
+            rangeEnd,
+            state.zoom,
+            preserveDisplayBounds
+                ? {
+                    assignmentDisplayStart: rangeStart,
+                    assignmentDisplayEnd: rangeEnd
+                }
+                : {}
+        );
         return assignmentActivity ? [assignmentActivity] : [];
     }
 
@@ -340,7 +583,7 @@ function buildVisibleAssignmentActivities(blockOverlaps, selectedActivity, range
         || getActivityDurationWithinRange(selectedActivity, rangeStart, rangeEnd);
     if (duration <= 0) return [];
 
-    return [timeEntryActivitySnapshot({
+    const assignmentActivity = timeEntryActivitySnapshot({
         ...selectedActivity,
         start: rangeStart,
         end: rangeEnd,
@@ -351,7 +594,206 @@ function buildVisibleAssignmentActivities(blockOverlaps, selectedActivity, range
         assignmentSource: 'activity-stream',
         assignmentModel: 'activity-stream-summary',
         assignmentDisplayZoom: state.zoom
-    })];
+    });
+    return [preserveDisplayBounds
+        ? withActivityStreamDisplayBounds(assignmentActivity, rangeStart, rangeEnd)
+        : assignmentActivity];
+}
+
+function getActivityStreamSessionKeyForAssignment(activity) {
+    if (typeof getActivityStreamSessionKey === 'function') return getActivityStreamSessionKey(activity);
+    if (typeof getActivitySimilarityKey === 'function') {
+        const similarityKey = getActivitySimilarityKey(activity);
+        if (similarityKey) return similarityKey;
+    }
+    return typeof getActivitySummaryKey === 'function' ? getActivitySummaryKey(activity) : '';
+}
+
+function getSelectedActivityBlockSessionKey(blockEl) {
+    return String(blockEl?.dataset?.sessionKey || '').trim();
+}
+
+function getAssignmentSourceCandidates(activity) {
+    const sources = Array.isArray(activity?.sources) && activity.sources.length > 0
+        ? activity.sources
+        : [activity];
+    return sources.filter(hasTimeRange);
+}
+
+function clipAssignmentSourceToRange(source, rangeStart, rangeEnd) {
+    if (!source || !hasTimeRange(source)) return null;
+
+    const start = Math.max(source.start, rangeStart);
+    const end = Math.min(source.end, rangeEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+
+    const duration = end - start;
+    return timeEntryActivitySnapshot({
+        ...source,
+        start,
+        end,
+        duration,
+        assignedDurationMs: duration,
+        assignmentStart: start,
+        assignmentEnd: end,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined
+    });
+}
+
+function buildVisibleRowUnitAssignmentActivity(blockData, sourceActivities, rangeStart, rangeEnd) {
+    const clippedSources = [];
+    const seenSources = new Set();
+
+    (Array.isArray(sourceActivities) ? sourceActivities : []).forEach(activity => {
+        getAssignmentSourceCandidates(activity).forEach(source => {
+            const clippedSource = clipAssignmentSourceToRange(source, rangeStart, rangeEnd);
+            if (!clippedSource) return;
+
+            const sourceKey = typeof getActivitySourceKey === 'function'
+                ? getActivitySourceKey(clippedSource)
+                : `${clippedSource.app || ''}|||${clippedSource.title || ''}|||${clippedSource.url || ''}|||${clippedSource.start}|||${clippedSource.end}`;
+            if (sourceKey && seenSources.has(sourceKey)) return;
+            if (sourceKey) seenSources.add(sourceKey);
+            clippedSources.push(clippedSource);
+        });
+    });
+
+    if (clippedSources.length === 0) return null;
+
+    clippedSources.sort((first, second) => first.start - second.start || first.end - second.end);
+    const duration = clippedSources.reduce((total, source) => total + getActivityDurationMs(source), 0);
+    if (duration <= 0) return null;
+
+    const firstSource = clippedSources[0] || {};
+    const rowActivity = {
+        app: blockData?.app || firstSource.app || '',
+        title: blockData?.title || firstSource.title || '',
+        url: blockData?.url || firstSource.url || '',
+        appPath: blockData?.appPath || firstSource.appPath || '',
+        bundleId: blockData?.bundleId || firstSource.bundleId || '',
+        start: rangeStart,
+        end: rangeEnd,
+        duration,
+        assignedDurationMs: duration,
+        assignmentStart: rangeStart,
+        assignmentEnd: rangeEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined,
+        sources: clippedSources,
+        modalSourceActivities: clippedSources
+    };
+    const displayGroupKey = buildActivityStreamDisplayGroupKey(rowActivity, rangeStart, rangeEnd);
+
+    return {
+        ...rowActivity,
+        assignmentDisplayStart: rangeStart,
+        assignmentDisplayEnd: rangeEnd,
+        assignmentDisplayGroupKey: displayGroupKey,
+        modalAggregateGroupKey: displayGroupKey,
+        sources: clippedSources.map(source => withActivityStreamDisplayBounds(source, rangeStart, rangeEnd)),
+        modalSourceActivities: clippedSources.map(source => withActivityStreamDisplayBounds(source, rangeStart, rangeEnd))
+    };
+}
+
+function getActivityBlockAssignmentOverlaps(blockEl) {
+    if (typeof getActivityBlockDetailOverlaps === 'function') {
+        const overlaps = getActivityBlockDetailOverlaps(blockEl);
+        if (Array.isArray(overlaps)) return overlaps;
+    }
+
+    if (!blockEl?.dataset?.overlaps) return [];
+    try {
+        const parsed = JSON.parse(decodeURIComponent(blockEl.dataset.overlaps));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function getSelectedActivityBlockTimeRange(blockEl, fallbackStartCell, fallbackEndCell, dateStartOfDay) {
+    if (typeof getActivityBlockTimeRange === 'function') {
+        const range = getActivityBlockTimeRange(blockEl);
+        if (Number.isFinite(range?.start) && Number.isFinite(range?.end) && range.end > range.start) {
+            return range;
+        }
+    }
+
+    const exactStart = Number(blockEl?.dataset?.startMs);
+    const exactEnd = Number(blockEl?.dataset?.endMs);
+    if (Number.isFinite(exactStart) && Number.isFinite(exactEnd) && exactEnd > exactStart) {
+        return { start: exactStart, end: exactEnd };
+    }
+
+    return {
+        start: dateStartOfDay + fallbackStartCell * state.zoom * 60 * 1000,
+        end: dateStartOfDay + fallbackEndCell * state.zoom * 60 * 1000
+    };
+}
+
+function getSelectedActivityBlockSimilarityScope(blockEl) {
+    if (typeof getActivityBlockSelectedSimilarityScope === 'function') {
+        return getActivityBlockSelectedSimilarityScope(blockEl);
+    }
+
+    return {
+        mode: typeof getActivityBlockSelectedSimilarityMode === 'function'
+            ? getActivityBlockSelectedSimilarityMode(blockEl)
+            : '',
+        matchKeys: typeof getActivityBlockSelectedSimilarityMatchKeys === 'function'
+            ? getActivityBlockSelectedSimilarityMatchKeys(blockEl)
+            : [],
+        assignmentKeys: typeof getActivityBlockSelectedSimilarityKeys === 'function'
+            ? getActivityBlockSelectedSimilarityKeys(blockEl)
+            : []
+    };
+}
+
+function getActivitySimilarityScopeMatchKey(activity, scope) {
+    const mode = scope?.mode || '';
+    const matchKeys = Array.isArray(scope?.matchKeys) ? scope.matchKeys.filter(Boolean) : [];
+    if (!mode || matchKeys.length === 0 || typeof getActivitySimilarityKeyForMode !== 'function') return '';
+
+    const matchKeySet = new Set(matchKeys);
+    const directKey = getActivitySimilarityKeyForMode(activity, mode);
+    if (directKey && matchKeySet.has(directKey)) return directKey;
+
+    const sources = Array.isArray(activity?.sources) ? activity.sources : [];
+    for (const source of sources) {
+        const sourceKey = getActivitySimilarityKeyForMode(source, mode);
+        if (sourceKey && matchKeySet.has(sourceKey)) return sourceKey;
+    }
+
+    return '';
+}
+
+function getAssignmentModalAggregateGroupKey(activity) {
+    if (typeof getActivitySimilarityKeyForMode === 'function') {
+        const titleKey = getActivitySimilarityKeyForMode(activity, 'app-title');
+        if (titleKey) return titleKey;
+    }
+
+    const app = String(activity?.app || '').trim().toLowerCase();
+    const title = String(
+        typeof getActivityDisplayTitle === 'function'
+            ? getActivityDisplayTitle(activity)
+            : activity?.title || ''
+    ).trim().toLowerCase();
+    return app && title ? `${app}|||${title}` : app;
+}
+
+function applySimilarityScopeToAssignmentActivity(activity, scope) {
+    const matchKey = getActivitySimilarityScopeMatchKey(activity, scope);
+    if (!matchKey) return activity;
+
+    return {
+        ...activity,
+        selectedSimilarityMode: scope.mode,
+        selectedSimilarityMatchKey: matchKey,
+        modalAggregateGroupKey: activity.modalAggregateGroupKey || getAssignmentModalAggregateGroupKey(activity)
+    };
 }
 
 function syncCustomSelect(select) {
@@ -651,6 +1093,7 @@ function clearTimelineSelectionForDateChange() {
         clearSelectedActivityBlocks();
     } else {
         state.selectedActivities?.clear();
+        state.selectedActivityScopes?.clear?.();
     }
 
     if (typeof dismissActivityDetailsPopup === 'function') {
@@ -1059,6 +1502,7 @@ function clearSelectedActivityBlocks() {
     }
 
     state.selectedActivities.clear();
+    state.selectedActivityScopes?.clear?.();
     if (typeof DOM === 'undefined') return;
 
     DOM.elItemsMemoryAid?.querySelectorAll('.activity-block.selected').forEach(el => {
@@ -1080,6 +1524,7 @@ function setupMainEventListeners() {
     setupWorkTimesToggle();
     setupEmptyActivityRowsToggle();
     setupModalDismissalHandlers();
+    setupAppContextMenu();
     bindSettingsTooltips();
 
     // Auto-Assignment Rules Modal triggers
@@ -2564,6 +3009,7 @@ function setupMainEventListeners() {
     // Global window Esc key overlay / multi-select dismiss logic
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+            closeAppContextMenu();
             hideSettingsTooltip();
             closeDatePicker();
             if (closeTopModal()) return;
@@ -2683,6 +3129,7 @@ function setupMainEventListeners() {
                 
                 // Reset selection & UI
                 state.selectedActivities.clear();
+                state.selectedActivityScopes?.clear?.();
                 updateMultiSelectBar();
                 closeTimeEntryModal();
                 await refreshData();
@@ -3268,36 +3715,79 @@ function setupMainEventListeners() {
             if (sc + sp > maxEndCell) maxEndCell = sc + sp;
             
             // Accrue activities overlapping blocks to accurately record assigned items
-            if (el.dataset.overlaps) {
-                try {
-                    const blockOverlaps = JSON.parse(decodeURIComponent(el.dataset.overlaps));
-                    const blockKey = getActivitySummaryKey(getActivityBlockData(el));
-                    const selectedSimilarityKeys = typeof getActivityBlockSelectedSimilarityKeys === 'function'
-                        ? getActivityBlockSelectedSimilarityKeys(el)
-                        : [];
-                    const blockStart = dateStartOfDay + sc * state.zoom * 60 * 1000;
-                    const blockEnd = dateStartOfDay + (sc + sp) * state.zoom * 60 * 1000;
-                    const matchingOverlaps = selectedSimilarityKeys.length > 0
-                        ? blockOverlaps.filter(overlap => selectedSimilarityKeys.includes(getActivitySimilarityKey(overlap)))
-                        : blockOverlaps.filter(overlap => (
+            const blockOverlaps = getActivityBlockAssignmentOverlaps(el);
+            if (blockOverlaps.length === 0) return;
+
+            try {
+                const blockData = getActivityBlockData(el);
+                const blockKey = getActivitySummaryKey(blockData);
+                const blockSessionKey = getSelectedActivityBlockSessionKey(el);
+                const similarityScope = getSelectedActivityBlockSimilarityScope(el);
+                const selectedSimilarityKeys = Array.isArray(similarityScope.assignmentKeys)
+                    ? similarityScope.assignmentKeys
+                    : [];
+                const selectedSimilarityKeySet = new Set(selectedSimilarityKeys);
+                const activityMatchesSelectedAssignmentKeys = activity => {
+                    if (selectedSimilarityKeySet.size === 0) return false;
+                    const keys = typeof getActivityAssignmentKeys === 'function'
+                        ? getActivityAssignmentKeys(activity)
+                        : [
+                            typeof getActivitySummaryKey === 'function' ? getActivitySummaryKey(activity) : ''
+                        ].filter(Boolean);
+                    return keys.some(key => selectedSimilarityKeySet.has(key));
+                };
+                const { start: blockStart, end: blockEnd } = getSelectedActivityBlockTimeRange(el, sc, sc + sp, dateStartOfDay);
+                let matchingOverlaps = [];
+                if (selectedSimilarityKeys.length > 0) {
+                    matchingOverlaps = blockOverlaps.filter(activityMatchesSelectedAssignmentKeys);
+                } else if (blockSessionKey) {
+                    matchingOverlaps = blockOverlaps.filter(overlap => (
+                        getActivityStreamSessionKeyForAssignment(overlap) === blockSessionKey
+                    ));
+                    if (matchingOverlaps.length === 0) {
+                        matchingOverlaps = blockOverlaps.filter(overlap => (
                             getActivitySummaryKey(overlap) === blockKey
                         ));
-                    const selectedSummaries = typeof window.summarizeActivityOverlaps === 'function'
-                        ? summarizeActivityOverlaps(matchingOverlaps, blockStart, blockEnd)
-                        : matchingOverlaps;
-                    const assignmentActivities = selectedSummaries.flatMap(overlap => (
-                        buildVisibleAssignmentActivities(blockOverlaps, overlap, blockStart, blockEnd)
+                    }
+                } else {
+                    matchingOverlaps = blockOverlaps.filter(overlap => (
+                        getActivitySummaryKey(overlap) === blockKey
                     ));
-                    overlaps.push(...(assignmentActivities.length > 0
-                        ? assignmentActivities
-                        : matchingOverlaps.map(overlap => ({
-                            ...overlap,
-                            assignmentStart: blockStart,
-                            assignmentEnd: blockEnd,
-                            assignmentSource: 'activity-stream'
-                        }))));
-                } catch (e) {}
-            }
+                }
+                if (selectedSimilarityKeys.length > 0 && matchingOverlaps.length === 0) {
+                    return;
+                }
+                const shouldUseVisibleRowUnit = (
+                    (selectedSimilarityKeys.length > 0 && similarityScope.mode === 'app')
+                    || (selectedSimilarityKeys.length === 0 && Boolean(blockSessionKey))
+                );
+                const rowUnitActivity = shouldUseVisibleRowUnit
+                    ? buildVisibleRowUnitAssignmentActivity(blockData, matchingOverlaps, blockStart, blockEnd)
+                    : null;
+                if (rowUnitActivity) {
+                    overlaps.push(applySimilarityScopeToAssignmentActivity(rowUnitActivity, similarityScope));
+                    return;
+                }
+                const selectedSummaries = typeof window.summarizeActivityOverlaps === 'function'
+                    ? summarizeActivityOverlaps(matchingOverlaps, blockStart, blockEnd)
+                    : matchingOverlaps;
+                const assignmentActivities = selectedSummaries.flatMap(overlap => (
+                    buildVisibleAssignmentActivities(blockOverlaps, overlap, blockStart, blockEnd, {
+                        preserveDisplayBounds: true
+                    })
+                        .map(activity => applySimilarityScopeToAssignmentActivity(activity, similarityScope))
+                ));
+                overlaps.push(...(assignmentActivities.length > 0
+                    ? assignmentActivities
+                    : matchingOverlaps.map(overlap => applySimilarityScopeToAssignmentActivity({
+                        ...overlap,
+                        assignmentStart: blockStart,
+                        assignmentEnd: blockEnd,
+                        assignmentSource: 'activity-stream'
+                    }, similarityScope)).map(activity => (
+                        withActivityStreamDisplayBounds(activity, blockStart, blockEnd)
+                    ))));
+            } catch (e) {}
         });
 
         const startMs = dateStartOfDay + minStartCell * state.zoom * 60 * 1000;
@@ -3309,6 +3799,7 @@ function setupMainEventListeners() {
             return startA - startB;
         });
 
+        if (selectedOverlaps.length === 0) return;
         openTimeEntryModal(startMs, endMs, '', null, null, true, selectedOverlaps);
     });
 }

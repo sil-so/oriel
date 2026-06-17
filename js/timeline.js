@@ -103,12 +103,12 @@ function buildFullDayTimelineRowLayout(dateStartOfDay, zoom) {
 }
 
 function getCurrentDayTimelineActivityCells(dateStartOfDay, zoom) {
-    const ownershipActivities = Array.isArray(state.timelineActivities)
-        ? state.timelineActivities
-        : state.activities;
     const visibleActivities = Array.isArray(state.activities)
         ? state.activities
-        : ownershipActivities;
+        : [];
+    const ownershipActivities = Array.isArray(state.timelineActivities) && state.timelineActivities.length > 0
+        ? state.timelineActivities
+        : visibleActivities;
     return buildVisibleActivityCells({
         dateStartOfDay,
         zoom,
@@ -774,11 +774,32 @@ function getTimelineTimeEntryListSignature(entries) {
             hash = hashTimelineSignatureValue(hash, activity?.assignedDurationMs);
             hash = hashTimelineSignatureValue(hash, activity?.assignmentSource);
             hash = hashTimelineSignatureValue(hash, activity?.assignmentModel);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentDisplayStart);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentDisplayEnd);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentDisplayGroupKey);
+            hash = hashTimelineSignatureValue(hash, activity?.assignmentDisplayZoom);
+            hash = hashTimelineSignatureValue(hash, activity?.selectedSimilarityMode);
+            hash = hashTimelineSignatureValue(hash, activity?.selectedSimilarityMatchKey);
             hash = hashTimelineSignatureValue(hash, activity?.app);
             hash = hashTimelineSignatureValue(hash, activity?.title);
             hash = hashTimelineSignatureValue(hash, activity?.url);
             hash = hashTimelineSignatureValue(hash, activity?.appPath);
             hash = hashTimelineSignatureValue(hash, activity?.bundleId);
+            const sources = Array.isArray(activity?.sources) ? activity.sources : [];
+            hash = hashTimelineSignatureValue(hash, sources.length);
+            sources.forEach(source => {
+                hash = hashTimelineSignatureValue(hash, source?.start);
+                hash = hashTimelineSignatureValue(hash, source?.end);
+                hash = hashTimelineSignatureValue(hash, source?.duration);
+                hash = hashTimelineSignatureValue(hash, source?.assignedDurationMs);
+                hash = hashTimelineSignatureValue(hash, source?.assignmentStart);
+                hash = hashTimelineSignatureValue(hash, source?.assignmentEnd);
+                hash = hashTimelineSignatureValue(hash, source?.app);
+                hash = hashTimelineSignatureValue(hash, source?.title);
+                hash = hashTimelineSignatureValue(hash, source?.url);
+                hash = hashTimelineSignatureValue(hash, source?.appPath);
+                hash = hashTimelineSignatureValue(hash, source?.bundleId);
+            });
         });
     });
     return `${entries.length}:${hash}`;
@@ -1316,18 +1337,104 @@ function buildActivityStreamAssignmentActivities(selectedActivity, rangeStart, r
         assignedDurationMs: run.duration,
         assignmentStart: run.start,
         assignmentEnd: run.end,
-        assignmentSource: 'activity-stream'
+        assignmentSource: 'activity-stream',
+        assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+        assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined
     }));
 }
 
-function buildActivityStreamSummaryAssignmentActivity(selectedActivity, rangeStart, rangeEnd, zoom = state.zoom) {
+function getActivityStreamAssignmentDisplayBounds(activity) {
+    const displayStart = Number(activity?.assignmentDisplayStart);
+    const displayEnd = Number(activity?.assignmentDisplayEnd);
+    if (!Number.isFinite(displayStart) || !Number.isFinite(displayEnd) || displayEnd <= displayStart) {
+        return null;
+    }
+
+    return {
+        start: displayStart,
+        end: displayEnd
+    };
+}
+
+function assignmentDisplayBoundsMatchCurrentZoom(activity, zoom) {
+    const assignmentDisplayZoom = Number(activity?.assignmentDisplayZoom);
+    const renderZoom = Math.max(1, Number(zoom) || 1);
+    return Number.isFinite(assignmentDisplayZoom)
+        && Math.max(1, assignmentDisplayZoom) === renderZoom;
+}
+
+function buildActivityStreamAssignmentDisplayGroupKey(activity, displayStart, displayEnd) {
+    const explicitKey = normalizeActivityText(activity?.assignmentDisplayGroupKey).trim();
+    if (explicitKey) return explicitKey;
+
+    const summaryKey = getActivitySummaryKey(activity);
+    return `activity-stream-row|||${summaryKey}|||${displayStart}|||${displayEnd}`;
+}
+
+function applyActivityStreamAssignmentDisplayMetadata(activity, displayStart, displayEnd, displayGroupKey = '') {
+    if (!activity || !Number.isFinite(displayStart) || !Number.isFinite(displayEnd) || displayEnd <= displayStart) {
+        return activity;
+    }
+
+    const assignmentDisplayGroupKey = displayGroupKey || buildActivityStreamAssignmentDisplayGroupKey(activity, displayStart, displayEnd);
+    return {
+        ...activity,
+        assignmentDisplayStart: displayStart,
+        assignmentDisplayEnd: displayEnd,
+        assignmentDisplayGroupKey,
+        ...(Array.isArray(activity.sources) ? {
+            sources: activity.sources.map(source => applyActivityStreamAssignmentDisplayMetadata(
+                source,
+                displayStart,
+                displayEnd,
+                assignmentDisplayGroupKey
+            ))
+        } : {}),
+        ...(Array.isArray(activity.modalSourceActivities) ? {
+            modalSourceActivities: activity.modalSourceActivities.map(source => applyActivityStreamAssignmentDisplayMetadata(
+                source,
+                displayStart,
+                displayEnd,
+                assignmentDisplayGroupKey
+            ))
+        } : {})
+    };
+}
+
+function buildActivityStreamSummaryAssignmentActivity(selectedActivity, rangeStart, rangeEnd, zoom = state.zoom, options = {}) {
     const duration = getActivitySourceDuration(selectedActivity, rangeStart, rangeEnd);
     if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart || duration <= 0) {
         return null;
     }
 
     const base = stripActivitySources(selectedActivity);
-    return {
+    const sources = Array.isArray(selectedActivity?.sources)
+        ? selectedActivity.sources.map(source => {
+            const sourceStart = Number.isFinite(source?.start) ? Math.max(source.start, rangeStart) : source?.start;
+            const sourceEnd = Number.isFinite(source?.end) ? Math.min(source.end, rangeEnd) : source?.end;
+            const sourceDuration = getActivitySourceDuration(source, rangeStart, rangeEnd);
+            if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd <= sourceStart || sourceDuration <= 0) {
+                return null;
+            }
+            return {
+                ...stripActivitySources(source),
+                title: getActivityDisplayTitle(source),
+                appPath: source.appPath || '',
+                bundleId: source.bundleId || '',
+                start: sourceStart,
+                end: sourceEnd,
+                duration: sourceDuration,
+                assignedDurationMs: sourceDuration,
+                activityMix: getActivityMixInRange(source, rangeStart, rangeEnd),
+                assignmentStart: sourceStart,
+                assignmentEnd: sourceEnd,
+                assignmentSource: 'activity-stream',
+                assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
+                assignmentDisplayZoom: zoom
+            };
+        }).filter(Boolean)
+        : [];
+    const assignment = {
         ...base,
         title: getActivityDisplayTitle(selectedActivity),
         start: rangeStart,
@@ -1339,13 +1446,27 @@ function buildActivityStreamSummaryAssignmentActivity(selectedActivity, rangeSta
         assignmentEnd: rangeEnd,
         assignmentSource: 'activity-stream',
         assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL,
-        assignmentDisplayZoom: zoom
+        assignmentDisplayZoom: zoom,
+        ...(sources.length > 0 ? { sources, modalSourceActivities: sources } : {})
     };
+
+    const displayStart = Number(options?.assignmentDisplayStart);
+    const displayEnd = Number(options?.assignmentDisplayEnd);
+    if (Number.isFinite(displayStart) && Number.isFinite(displayEnd) && displayEnd > displayStart) {
+        return applyActivityStreamAssignmentDisplayMetadata(
+            assignment,
+            displayStart,
+            displayEnd,
+            options?.assignmentDisplayGroupKey || ''
+        );
+    }
+
+    return assignment;
 }
 
-function buildActivityStreamSummaryAssignmentActivities(activities, rangeStart, rangeEnd, zoom = state.zoom) {
+function buildActivityStreamSummaryAssignmentActivities(activities, rangeStart, rangeEnd, zoom = state.zoom, options = {}) {
     return (Array.isArray(activities) ? activities : [])
-        .map(activity => buildActivityStreamSummaryAssignmentActivity(activity, rangeStart, rangeEnd, zoom))
+        .map(activity => buildActivityStreamSummaryAssignmentActivity(activity, rangeStart, rangeEnd, zoom, options))
         .filter(Boolean);
 }
 
@@ -1425,8 +1546,13 @@ function getLoggedSourceSnapshotRanges(timeEntries, dayStart, dayEnd) {
 
     for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
         for (const activity of Array.isArray(entry?.activities) ? entry.activities : []) {
-            const range = getLoggedSourceSnapshotRange(entry, activity, dayStart, dayEnd);
-            if (range) ranges.push(range);
+            const sourceActivities = Array.isArray(activity?.sources) && activity.sources.length > 0
+                ? activity.sources
+                : [activity];
+            sourceActivities.forEach(sourceActivity => {
+                const range = getLoggedSourceSnapshotRange(entry, sourceActivity, dayStart, dayEnd);
+                if (range) ranges.push(range);
+            });
         }
     }
 
@@ -1804,6 +1930,36 @@ function getActivityDisplayTitle(activity) {
     return cleanTitle(activity.title || '', activity).trim();
 }
 
+function getMeaningfulActivityDisplayTitle(activity) {
+    const title = getActivityDisplayTitle(activity);
+    return title && !isWeakPopupActivityTitle(title, activity) ? title : '';
+}
+
+function getTimelineBlockFallbackDisplayActivity(primaryActivity, popupDisplayModel) {
+    const primaryTitle = getMeaningfulActivityDisplayTitle(primaryActivity);
+    if (primaryTitle) return primaryActivity;
+
+    const visibleRows = (popupDisplayModel?.visibleRows || [])
+        .filter(row => Number(row?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS);
+    for (const row of visibleRows) {
+        const labels = getPopupActivityDisplayLabels(row);
+        const rowTitle = normalizeActivityText(labels?.primary).trim();
+        if (rowTitle && !isWeakPopupActivityTitle(rowTitle, row)) return row;
+
+        const children = Array.isArray(row?.children) ? row.children : [];
+        for (const child of children) {
+            const childDuration = Number(child?.duration);
+            if (!Number.isFinite(childDuration) || childDuration < POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS) continue;
+
+            const childLabels = getPopupActivityDisplayLabels(child);
+            const childTitle = normalizeActivityText(childLabels?.primary).trim();
+            if (childTitle && !isWeakPopupActivityTitle(childTitle, child)) return child;
+        }
+    }
+
+    return primaryActivity;
+}
+
 function escapeTimelineText(value) {
     return normalizeActivityText(value)
         .replace(/&/g, '&amp;')
@@ -2042,24 +2198,36 @@ function normalizeActivityExactUrl(value) {
 
 const BROWSER_ACTIVITY_APP_NAMES = [
     'brave browser',
+    'brave browser beta',
+    'brave browser nightly',
     'brave',
     'google chrome',
+    'google chrome beta',
+    'google chrome dev',
     'chrome canary',
     'chrome',
     'chromium',
+    'webkit',
     'safari technology preview',
     'safari',
     'arc',
     'microsoft edge',
+    'microsoft edge beta',
+    'microsoft edge dev',
+    'microsoft edge canary',
     'edge',
     'firefox developer edition',
+    'firefox nightly',
     'firefox',
     'opera gx',
     'opera',
     'vivaldi',
+    'vivaldi snapshot',
     'orion',
     'dia',
+    'dia browser',
     'zen',
+    'zen browser',
     'floorp',
     'librewolf',
     'waterfox',
@@ -2070,18 +2238,29 @@ const BROWSER_ACTIVITY_APP_NAMES = [
 
 const BROWSER_ACTIVITY_BUNDLE_FRAGMENTS = [
     'com.brave.browser',
+    'com.brave.browser.beta',
+    'com.brave.browser.nightly',
     'com.google.chrome',
+    'com.google.chrome.beta',
+    'com.google.chrome.dev',
     'com.google.chrome.canary',
     'com.apple.safari',
     'com.apple.safaritechnologypreview',
+    'org.webkit.webkit',
     'company.thebrowser.browser',
     'company.thebrowser.dia',
     'com.microsoft.edgemac',
+    'com.microsoft.edgemac.beta',
+    'com.microsoft.edgemac.dev',
+    'com.microsoft.edgemac.canary',
+    'com.microsoft.edge',
     'org.mozilla.firefox',
     'org.mozilla.firefoxdeveloperedition',
+    'org.mozilla.nightly',
     'com.operasoftware.opera',
     'com.operasoftware.operagx',
     'com.vivaldi.vivaldi',
+    'com.vivaldi.vivaldi.snapshot',
     'com.kagi.kagimacos',
     'app.zen-browser.zen',
     'one.ablaze.floorp',
@@ -2167,8 +2346,10 @@ function updateSimilarModeAvailability(activity) {
         setSimilarOptionAvailability(radio, Boolean(availability[mode]));
     });
 
-    const selectedMode = getSelectedSimilarActivityMode();
-    const nextMode = availability[selectedMode] ? selectedMode : availability.defaultMode;
+    const preferredMode = availability.defaultMode;
+    const nextMode = availability[preferredMode]
+        ? preferredMode
+        : Object.keys(radios).find(mode => availability[mode]);
     Object.entries(radios).forEach(([mode, radio]) => {
         if (radio) radio.checked = mode === nextMode;
     });
@@ -2201,6 +2382,48 @@ function getActivitySimilarityKeyForMode(activity, mode = 'host') {
     return host ? `${app}|||${host}` : '';
 }
 
+function getActivityAssignmentKeys(activity) {
+    const keys = [];
+    const addKey = key => {
+        if (key && !keys.includes(key)) keys.push(key);
+    };
+
+    if (Array.isArray(activity?.sources) && activity.sources.length > 0) {
+        activity.sources.forEach(source => {
+            addKey(getActivitySourceKey(source));
+            addKey(getActivitySummaryKey(source));
+        });
+    }
+
+    addKey(getActivitySourceKey(activity));
+    addKey(getActivitySummaryKey(activity));
+    return keys;
+}
+
+function getActivitySelectionIdentityKeys(activity) {
+    return Array.from(new Set([
+        ...getActivityAssignmentKeys(activity),
+        getActivitySimilarityKey(activity),
+        getActivitySummaryKey(activity),
+        getActivitySimilarityKeyForMode(activity, 'url'),
+        getActivitySimilarityKeyForMode(activity, 'app-title'),
+        getActivitySimilarityKeyForMode(activity, 'app')
+    ].filter(Boolean)));
+}
+
+function getActivitySimilarityEntryForMode(activity, mode = 'host') {
+    const matchKey = getActivitySimilarityKeyForMode(activity, mode);
+    const assignmentKeys = getActivityAssignmentKeys(activity);
+    if (!matchKey || assignmentKeys.length === 0) return null;
+
+    return {
+        matchKey,
+        assignmentKeys,
+        identityKeys: getActivitySelectionIdentityKeys(activity),
+        activity
+    };
+}
+
 function getActivityBlockData(blockEl) {
     return {
         app: blockEl.dataset.app || '',
@@ -2209,6 +2432,93 @@ function getActivityBlockData(blockEl) {
         appPath: blockEl.dataset.appPath || '',
         bundleId: blockEl.dataset.bundleId || ''
     };
+}
+
+function getActivityBlockCandidateSimilarityActivities(blockEl, options = {}) {
+    const includeBreakdown = options?.includeBreakdown !== false;
+    const activities = [];
+    const seen = new Set();
+    const addActivity = activity => {
+        const identityKey = getActivitySummaryKey(activity) || getActivitySimilarityKey(activity);
+        if (!identityKey) return;
+        const key = `${identityKey}|||${activity?.start || ''}|||${activity?.end || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        activities.push(activity);
+    };
+
+    const displayModel = buildActivityBlockPopupDisplayModel(blockEl);
+    const primaryRow = displayModel?.primaryRow || getActivityBlockData(blockEl);
+    const visibleRows = includeBreakdown && Array.isArray(displayModel?.visibleRows)
+        ? displayModel.visibleRows
+        : [primaryRow];
+
+    visibleRows.forEach(row => {
+        addActivity(row);
+        if (includeBreakdown && Array.isArray(row?.children)) {
+            row.children.forEach(child => {
+                if (Number(child?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS) {
+                    addActivity(child);
+                }
+            });
+        }
+    });
+
+    const primaryActivity = getActivityBlockData(blockEl);
+    if (!activities.some(activity => getActivitySummaryKey(activity) === getActivitySummaryKey(primaryActivity))) {
+        addActivity(primaryActivity);
+    }
+
+    return activities;
+}
+
+function getActivityBlockSimilarityEntriesForMode(blockEl, mode = 'host', options = {}) {
+    const entries = [];
+    const seen = new Set();
+    getActivityBlockCandidateSimilarityActivities(blockEl, options).forEach(activity => {
+        const entry = getActivitySimilarityEntryForMode(activity, mode);
+        if (!entry) return;
+        const key = `${entry.matchKey}|||${entry.assignmentKeys.join('|||')}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        entries.push(entry);
+    });
+    return entries;
+}
+
+function activityMatchesSelectedSimilarityKeys(activity, selectedKeys) {
+    if (!selectedKeys || selectedKeys.size === 0) return false;
+    return getActivitySelectionIdentityKeys(activity).some(key => selectedKeys.has(key));
+}
+
+function getActivityBlockSeedSimilarityEntriesForMode(blockEl, mode = 'host') {
+    const storedKeys = new Set(getActivityBlockSelectedSimilarityKeys(blockEl));
+    const seedActivities = storedKeys.size > 0
+        ? getActivityBlockCandidateSimilarityActivities(blockEl)
+            .filter(activity => activityMatchesSelectedSimilarityKeys(activity, storedKeys))
+        : [getActivityBlockData(blockEl)];
+
+    const entries = [];
+    const seen = new Set();
+    seedActivities.forEach(activity => {
+        const entry = getActivitySimilarityEntryForMode(activity, mode);
+        if (!entry) return;
+        const key = `${entry.matchKey}|||${entry.assignmentKeys.join('|||')}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        entries.push(entry);
+    });
+    return entries;
+}
+
+function getActivityBlockSimilarModeActivity(blockEl) {
+    const primaryActivity = getActivityBlockData(blockEl);
+    const storedKeys = new Set(getActivityBlockSelectedSimilarityKeys(blockEl));
+    if (storedKeys.size === 0) return primaryActivity;
+
+    return getActivityBlockCandidateSimilarityActivities(blockEl)
+        .find(activity => activityMatchesSelectedSimilarityKeys(activity, storedKeys))
+        || primaryActivity;
 }
 
 function getActivityBlockTimeRange(blockEl) {
@@ -2302,11 +2612,18 @@ function getActivityStreamAssignmentActivities(entry) {
 }
 
 function getActivityStreamAssignmentGroupKey(entry) {
+    if (entry?.renderManualSavedRange) return null;
+
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
     if (assignmentActivities.length === 0) return null;
 
     const projectId = normalizeActivityText(entry.projectId);
     const taskId = normalizeActivityText(entry.taskId);
+    const displayGroupKey = normalizeActivityText(assignmentActivities[0]?.assignmentDisplayGroupKey).trim();
+    if (displayGroupKey) {
+        return `${projectId}|||${taskId}|||display|||${displayGroupKey}`;
+    }
+
     const app = normalizeActivityText(assignmentActivities[0].app).trim().toLowerCase();
     return `${projectId}|||${taskId}|||${app}`;
 }
@@ -2322,27 +2639,47 @@ function getAutoRuleAssignmentGroupKey(entry) {
     return `${assignmentKey}|||auto-rule|||${ruleId}`;
 }
 
+function getDisplayedMinuteDurationMs(durationMs) {
+    const duration = Number(durationMs);
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    return Math.max(1, Math.round(duration / (60 * 1000))) * 60 * 1000;
+}
+
 function getActivityStreamAssignedDurationMs(entries) {
     const seenRepairKeys = new Set();
+    const sourceBackedRepairDurations = new Map();
+    let total = 0;
 
-    return entries.reduce((entryTotal, entry) => {
+    (Array.isArray(entries) ? entries : []).forEach(entry => {
         const renderRepairKey = entry?.renderDisplayRepairKey;
         const renderDuration = Number(entry?.renderDurationMs);
         if (renderRepairKey && Number.isFinite(renderDuration) && renderDuration >= 0) {
-            if (seenRepairKeys.has(renderRepairKey)) return entryTotal;
+            if (entry?.renderSourceBackedAssignment === true) {
+                const displayDuration = getDisplayedMinuteDurationMs(renderDuration);
+                sourceBackedRepairDurations.set(
+                    renderRepairKey,
+                    Math.max(sourceBackedRepairDurations.get(renderRepairKey) || 0, displayDuration)
+                );
+                return;
+            }
+            if (seenRepairKeys.has(renderRepairKey)) return;
             seenRepairKeys.add(renderRepairKey);
-            return entryTotal + renderDuration;
+            total += renderDuration;
+            return;
         }
 
         const assignmentActivities = getActivityStreamAssignmentActivities(entry);
-        return entryTotal + assignmentActivities.reduce((activityTotal, activity) => {
+        total += assignmentActivities.reduce((activityTotal, activity) => {
             if (activity.assignmentDisplayRepairKey) {
                 if (seenRepairKeys.has(activity.assignmentDisplayRepairKey)) return activityTotal;
                 seenRepairKeys.add(activity.assignmentDisplayRepairKey);
             }
             return activityTotal + getActivitySourceDuration(activity);
         }, 0);
-    }, 0);
+    });
+
+    return total + Array.from(sourceBackedRepairDurations.values())
+        .reduce((sourceTotal, duration) => sourceTotal + duration, 0);
 }
 
 function isActivityStreamSummaryAssignment(activity) {
@@ -2384,6 +2721,15 @@ function getRenderEntryDisplayRowRange(entry, dateStartOfDay, zoom) {
         const rowDurationMs = Math.max(1, Number(zoom) || 1) * 60 * 1000;
         const startRow = Math.max(0, Math.floor((displayStart - dateStartOfDay) / rowDurationMs));
         const endRow = Math.max(startRow + 1, Math.ceil((displayEnd - dateStartOfDay) / rowDurationMs));
+        if (entry?.renderExactGeometry === true) {
+            return {
+                start: displayStart,
+                end: displayEnd,
+                startRow,
+                endRow,
+                rowSpan: endRow - startRow
+            };
+        }
         return {
             start: dateStartOfDay + startRow * rowDurationMs,
             end: dateStartOfDay + endRow * rowDurationMs,
@@ -2562,6 +2908,25 @@ function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities,
     return blocks;
 }
 
+function buildActivityStreamAssignmentProjectionBlocks({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
+    const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    if (shouldRenderExactActivityStreamSessions(renderZoom)) {
+        return buildActivityStreamSessions({
+            dateStartOfDay,
+            activities: ownershipActivities,
+            detailActivities: visibleActivities,
+            timeEntries: Array.isArray(state.timeEntries) ? state.timeEntries : []
+        });
+    }
+
+    return buildVisibleActivityBlocks({
+        dateStartOfDay,
+        zoom: renderZoom,
+        ownershipActivities,
+        visibleActivities
+    });
+}
+
 function getActivityStreamVisibleBlocksForSummary(summaryKey, dateStartOfDay, zoom, activity = null) {
     if (!summaryKey) return [];
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
@@ -2703,6 +3068,106 @@ function buildAutoRuleActivityStreamAssignmentRenderEntries(entry, activity, ran
     }];
 }
 
+function getAssignmentSourceActivities(activity) {
+    return Array.isArray(activity?.sources) && activity.sources.length > 0
+        ? activity.sources.filter(source => Number.isFinite(source?.start) && Number.isFinite(source?.end) && source.end > source.start)
+        : [];
+}
+
+function hasSourceBackedAssignment(activity) {
+    return getAssignmentSourceActivities(activity).length > 0;
+}
+
+function activityMatchesSimilarityScope(activity, scopeActivity) {
+    const mode = normalizeActivityText(scopeActivity?.selectedSimilarityMode).trim();
+    const matchKey = normalizeActivityText(scopeActivity?.selectedSimilarityMatchKey).trim();
+    if (!mode || !matchKey) return false;
+    return getActivitySimilarityKeyForMode(activity, mode) === matchKey;
+}
+
+function activityMatchesSourceProjectionIdentity(candidate, source, assignmentActivity) {
+    if (!candidate || !source) return false;
+    if (activityMatchesSimilarityScope(candidate, assignmentActivity)
+        && activityMatchesSimilarityScope(source, assignmentActivity)) {
+        return true;
+    }
+
+    const sourceSummaryKey = getActivitySummaryKey(source);
+    if (sourceSummaryKey && getActivitySummaryKey(candidate) === sourceSummaryKey) return true;
+
+    const sourceSimilarityKey = getActivitySimilarityKey(source);
+    return Boolean(sourceSimilarityKey && getActivitySimilarityKey(candidate) === sourceSimilarityKey);
+}
+
+function sourceIsVisibleInActivityBlock(source, block, assignmentActivity) {
+    const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
+        block?.overlaps,
+        block?.start,
+        block?.end
+    );
+    return visibleOverlaps.some(overlap => activityMatchesSourceProjectionIdentity(
+        overlap,
+        source,
+        assignmentActivity
+    ));
+}
+
+function getSourceBackedAssignmentProjectionDuration(activity, block, range) {
+    const sources = getAssignmentSourceActivities(activity);
+    if (sources.length === 0) return 0;
+
+    const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
+        block?.overlaps,
+        block?.start,
+        block?.end
+    );
+    const visibleSources = sources.filter(source => sourceIsVisibleInActivityBlock(source, block, activity));
+
+    return visibleSources.reduce((total, source) => {
+        const start = Math.max(range.start, block.start);
+        const end = Math.min(range.end, block.end);
+        return total + getActivitySourceOverlapDuration(source, start, end);
+    }, 0);
+}
+
+function getSourceBackedAssignmentProjectionKey(activity, summaryKey) {
+    const displayGroupKey = normalizeActivityText(activity?.assignmentDisplayGroupKey).trim();
+    if (displayGroupKey) return `display|||${displayGroupKey}`;
+
+    const displayRepairKey = normalizeActivityText(activity?.assignmentDisplayRepairKey).trim();
+    if (displayRepairKey) return `display|||${displayRepairKey}`;
+
+    const mode = normalizeActivityText(activity?.selectedSimilarityMode).trim();
+    const matchKey = normalizeActivityText(activity?.selectedSimilarityMatchKey).trim();
+    if (mode && matchKey) return `${mode}|||${matchKey}`;
+
+    return getActivitySimilarityKey(activity) || summaryKey;
+}
+
+function getActivitySourceOverlapDuration(source, rangeStart, rangeEnd) {
+    const sourceStart = Number(source?.start);
+    const sourceEnd = Number(source?.end);
+    if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd <= sourceStart) {
+        return 0;
+    }
+
+    const start = Number.isFinite(rangeStart) ? Math.max(sourceStart, rangeStart) : sourceStart;
+    const end = Number.isFinite(rangeEnd) ? Math.min(sourceEnd, rangeEnd) : sourceEnd;
+    if (end <= start) return 0;
+
+    const activeDuration = getActivitySourceDuration(source);
+    if (!Number.isFinite(activeDuration) || activeDuration <= 0) {
+        return end - start;
+    }
+
+    if (start <= sourceStart && end >= sourceEnd) {
+        return activeDuration;
+    }
+
+    const elapsedDuration = sourceEnd - sourceStart;
+    return Math.min(activeDuration, activeDuration * ((end - start) / elapsedDuration));
+}
+
 function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range, summaryKey, dateStartOfDay, zoom) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const assignedDuration = getActivitySourceDuration(activity, range.start, range.end);
@@ -2718,7 +3183,7 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
         : ownershipActivities;
     const hasActivityData = (Array.isArray(ownershipActivities) && ownershipActivities.length > 0)
         || (Array.isArray(visibleActivities) && visibleActivities.length > 0);
-    const visibleBlocks = buildVisibleActivityBlocks({
+    const visibleBlocks = buildActivityStreamAssignmentProjectionBlocks({
         dateStartOfDay,
         zoom: renderZoom,
         ownershipActivities,
@@ -2729,8 +3194,34 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
     for (const block of visibleBlocks) {
         if (block.end <= range.start || block.start >= range.end) continue;
 
-        const matchingSummary = getActivitySummaryForAssignmentWithinRange(
+        const sourceBackedDuration = getSourceBackedAssignmentProjectionDuration(activity, block, range);
+        if (sourceBackedDuration > 0) {
+            const exactStart = Math.max(range.start, block.start);
+            const exactEnd = Math.min(range.end, block.end);
+            if (exactEnd <= exactStart) continue;
+
+            projections.push({
+                displayStart: block.start,
+                displayEnd: block.end,
+                exactStart,
+                exactEnd,
+                durationMs: sourceBackedDuration,
+                displayRepairKey: `${getSourceBackedAssignmentProjectionKey(activity, summaryKey)}|||sources|||${block.start}|||${block.end}`,
+                sourceBacked: true,
+                renderExactGeometry: shouldRenderExactActivityStreamSessions(renderZoom)
+            });
+            continue;
+        }
+
+        if (hasSourceBackedAssignment(activity)) continue;
+
+        const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
             block.overlaps,
+            block.start,
+            block.end
+        );
+        const matchingSummary = getActivitySummaryForAssignmentWithinRange(
+            visibleOverlaps,
             activity,
             summaryKey,
             block.start,
@@ -2758,7 +3249,7 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
     };
 }
 
-function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, range, summaryKey, dateStartOfDay, zoom) {
+function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, range, summaryKey, dateStartOfDay, zoom, options = {}) {
     const projectionResult = buildActivityStreamSummaryAssignmentDisplayProjections(
         activity,
         range,
@@ -2802,7 +3293,8 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
             end: projection.exactEnd,
             duration: projection.durationMs,
             assignmentStart: projection.exactStart,
-            assignmentEnd: projection.exactEnd
+            assignmentEnd: projection.exactEnd,
+            assignmentDisplayGroupKey: options.rowScopedDisplayGroups && repairKey ? repairKey : ''
         };
 
         if (repairKey) {
@@ -2817,6 +3309,8 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
             renderDisplayEnd: projection.displayEnd,
             renderDurationMs: projection.durationMs,
             renderDisplayRepairKey: repairKey,
+            renderSourceBackedAssignment: projection.sourceBacked === true,
+            renderExactGeometry: projection.renderExactGeometry === true,
             activities: [renderActivity]
         };
     });
@@ -2837,16 +3331,63 @@ function getAssignmentActivityRange(entry, activity) {
     return { start, end };
 }
 
+function shouldRenderManualSummaryAssignmentFromSavedRange(entry, assignmentActivities) {
+    if (entry?.createdBy !== 'manual') return false;
+    if (!Array.isArray(assignmentActivities) || assignmentActivities.length === 0) return false;
+    if (!assignmentActivities.every(isActivityStreamSummaryAssignment)) return false;
+    if (assignmentActivities.some(activity => getActivityStreamAssignmentDisplayBounds(activity))) return false;
+
+    return assignmentActivities.some(activity => {
+        const range = getAssignmentActivityRange(entry, activity);
+        if (!range) return false;
+
+        const rangeDuration = range.end - range.start;
+        const assignedDuration = getActivitySourceDuration(activity, range.start, range.end);
+        return Number.isFinite(rangeDuration)
+            && Number.isFinite(assignedDuration)
+            && rangeDuration - assignedDuration > 1000;
+    });
+}
+
 function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zoom) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
-    if (entry?.createdBy === 'manual') return [entry];
     if (assignmentActivities.length === 0) return [entry];
+    if (shouldRenderManualSummaryAssignmentFromSavedRange(entry, assignmentActivities)) {
+        return [{ ...entry, renderManualSavedRange: true }];
+    }
 
     const renderEntries = [];
     assignmentActivities.forEach(activity => {
         const range = getAssignmentActivityRange(entry, activity);
         if (!range) return;
+
+        const displayBounds = getActivityStreamAssignmentDisplayBounds(activity);
+        if (displayBounds && assignmentDisplayBoundsMatchCurrentZoom(activity, renderZoom)) {
+            const duration = getActivitySourceDuration(activity, range.start, range.end);
+            if (duration <= 0) return;
+
+            const renderActivity = {
+                ...activity,
+                start: range.start,
+                end: range.end,
+                duration,
+                assignedDurationMs: duration,
+                assignmentStart: range.start,
+                assignmentEnd: range.end
+            };
+            renderEntries.push({
+                ...entry,
+                start: range.start,
+                end: range.end,
+                renderDisplayStart: displayBounds.start,
+                renderDisplayEnd: displayBounds.end,
+                renderDurationMs: duration,
+                renderExactGeometry: true,
+                activities: [renderActivity]
+            });
+            return;
+        }
 
         if (isAutoAssignedActivityStreamAssignment(activity)) {
             renderEntries.push(...buildAutoRuleActivityStreamAssignmentRenderEntries(
@@ -2890,7 +3431,8 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                 range,
                 getActivitySummaryKey(activity),
                 dateStartOfDay,
-                renderZoom
+                renderZoom,
+                { rowScopedDisplayGroups: Boolean(displayBounds) }
             ));
             return;
         }
@@ -2930,6 +3472,7 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
 const TIME_ENTRY_CONTENT_LEFT_PX = 64;
 const TIME_ENTRY_CONTENT_RIGHT_INSET_PX = 12;
 const TIME_ENTRY_LANE_GAP_PX = 4;
+const TIME_ENTRY_LANE_TOUCH_TOLERANCE_MS = 1000;
 const AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS = 30 * 1000;
 
 function getLoggedTimeEntryLaneRange(item) {
@@ -2952,6 +3495,10 @@ function compareLoggedTimeEntryLaneItems(left, right) {
     return left.index - right.index;
 }
 
+function areLoggedTimeEntryLaneRangesSeparated(previousEnd, nextStart) {
+    return nextStart >= previousEnd - TIME_ENTRY_LANE_TOUCH_TOLERANCE_MS;
+}
+
 function assignLoggedTimeEntryLanes(renderItems) {
     const items = renderItems.map(item => ({
         ...item,
@@ -2969,7 +3516,7 @@ function assignLoggedTimeEntryLanes(renderItems) {
     let currentComponent = null;
 
     for (const laneItem of laneItems) {
-        if (!currentComponent || laneItem.start >= currentComponent.end) {
+        if (!currentComponent || areLoggedTimeEntryLaneRangesSeparated(currentComponent.end, laneItem.start)) {
             currentComponent = {
                 end: laneItem.end,
                 items: []
@@ -2992,7 +3539,7 @@ function assignLoggedTimeEntryLanes(renderItems) {
             const stillActive = [];
 
             for (const activeLane of activeLanes) {
-                if (activeLane.end <= laneItem.start) {
+                if (areLoggedTimeEntryLaneRangesSeparated(activeLane.end, laneItem.start)) {
                     availableLanes.push(activeLane.index);
                 } else {
                     stillActive.push(activeLane);
@@ -3059,6 +3606,23 @@ function getLoggedTimeEntryVisualMergeKey(item) {
     if (!projectId) return null;
 
     const taskId = String(entry?.taskId || '');
+    const sourceBackedProjection = entry?.renderSourceBackedAssignment === true
+        || (Array.isArray(item?.entries) && item.entries.some(itemEntry => itemEntry?.renderSourceBackedAssignment === true));
+    const displayStart = Number(item?.displayStart);
+    const displayEnd = Number(item?.displayEnd);
+    if (sourceBackedProjection
+        && Number.isFinite(displayStart)
+        && Number.isFinite(displayEnd)
+        && displayEnd > displayStart) {
+        return `${projectId}\u0000${taskId}\u0000source-row\u0000${displayStart}\u0000${displayEnd}`;
+    }
+
+    const assignmentActivities = getActivityStreamAssignmentActivities(entry);
+    const displayGroupKey = normalizeActivityText(assignmentActivities[0]?.assignmentDisplayGroupKey).trim();
+    if (displayGroupKey) {
+        return `${projectId}\u0000${taskId}\u0000display\u0000${displayGroupKey}`;
+    }
+
     return `${projectId}\u0000${taskId}`;
 }
 
@@ -3458,9 +4022,7 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
         const renderEntries = buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom);
 
         renderEntries.forEach((renderEntry, renderIndex) => {
-            const assignmentKey = renderEntry?.createdBy === 'manual'
-                ? null
-                : getActivityStreamAssignmentGroupKey(renderEntry);
+            const assignmentKey = getActivityStreamAssignmentGroupKey(renderEntry);
             const renderSourceIndex = sourceIndex + (renderIndex / 1000);
             const displayRange = getRenderEntryDisplayRowRange(renderEntry, dateStartOfDay, zoom);
             if (!assignmentKey) {
@@ -3512,6 +4074,7 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
                     displayStart: displayRange.start,
                     displayEnd: displayRange.end,
                     isAssignedGroup: true,
+                    renderExactGeometry: entry.renderExactGeometry === true,
                     sourceIndex
                 };
                 assignmentItems.push(currentGroup);
@@ -3523,6 +4086,7 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
             currentGroup.end = Math.max(currentGroup.end, entry.end);
             currentGroup.displayStart = Math.min(currentGroup.displayStart, displayRange.start);
             currentGroup.displayEnd = Math.max(currentGroup.displayEnd, displayRange.end);
+            currentGroup.renderExactGeometry = currentGroup.renderExactGeometry || entry.renderExactGeometry === true;
             currentGroup.sourceIndex = Math.min(currentGroup.sourceIndex, sourceIndex);
         }
     }
@@ -4060,6 +4624,60 @@ function getSinglePopupDisplayActivity(activity) {
     return promoteSinglePopupSessionChild(activity, pageChildren);
 }
 
+function getTimelineBlockDisplayActivity(primaryActivity, popupDisplayModel) {
+    const primaryDisplayActivity = getSinglePopupDisplayActivity(
+        popupDisplayModel?.primaryRow || primaryActivity
+    ) || primaryActivity;
+    const primaryTitle = getMeaningfulActivityDisplayTitle(primaryActivity);
+    if (!primaryTitle) {
+        return getTimelineBlockFallbackDisplayActivity(primaryDisplayActivity, popupDisplayModel)
+            || primaryDisplayActivity;
+    }
+
+    const primarySimilarityKey = getActivitySimilarityKey(primaryActivity);
+    const candidates = [];
+    (popupDisplayModel?.visibleRows || []).forEach(row => {
+        const displayRow = getSinglePopupDisplayActivity(row);
+        if (displayRow) candidates.push(displayRow);
+        (Array.isArray(row?.children) ? row.children : []).forEach(child => candidates.push(child));
+    });
+
+    return candidates.find(candidate => {
+        if (!candidate) return false;
+        if (getMeaningfulActivityDisplayTitle(candidate) !== primaryTitle) return false;
+
+        const candidateSimilarityKey = getActivitySimilarityKey(candidate);
+        const hasDistinctMetadata = Boolean(normalizeActivityText(candidate?.url).trim())
+            || (primarySimilarityKey && candidateSimilarityKey && candidateSimilarityKey !== primarySimilarityKey)
+            || normalizeActivityText(candidate?.appPath).trim() !== normalizeActivityText(primaryActivity?.appPath).trim()
+            || normalizeActivityText(candidate?.bundleId).trim() !== normalizeActivityText(primaryActivity?.bundleId).trim();
+        return hasDistinctMetadata;
+    }) || primaryDisplayActivity;
+}
+
+function getBestMeaningfulPopupPrimaryRow(rows) {
+    return [...(Array.isArray(rows) ? rows : [])]
+        .filter(row => {
+            const displayRow = getSinglePopupDisplayActivity(row);
+            const labels = getPopupActivityDisplayLabels(displayRow);
+            const rowTitle = normalizeActivityText(labels?.primary).trim();
+            return rowTitle && !isWeakPopupActivityTitle(rowTitle, displayRow);
+        })
+        .sort((left, right) => {
+            const durationA = Number(left?.duration);
+            const durationB = Number(right?.duration);
+            if (Number.isFinite(durationA) && Number.isFinite(durationB) && durationA !== durationB) {
+                return durationB - durationA;
+            }
+            if (Number.isFinite(durationB) && !Number.isFinite(durationA)) return 1;
+            if (Number.isFinite(durationA) && !Number.isFinite(durationB)) return -1;
+
+            const startA = Number.isFinite(left?.start) ? left.start : Number.MAX_SAFE_INTEGER;
+            const startB = Number.isFinite(right?.start) ? right.start : Number.MAX_SAFE_INTEGER;
+            return startA - startB;
+        })[0] || null;
+}
+
 function sortPopupDisplayRows(rows) {
     return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
         const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
@@ -4174,11 +4792,15 @@ function buildActivityPopupDisplayModel({
     );
     const primaryActivityExactKey = getPopupActivityExactGroupingKey(primaryActivity || {});
     const primaryActivityContextKey = getActivityPopupContextKey(primaryActivity || {});
-    const primaryRow = topLevelRows.find(row => row.popupSessionSummary && row.popupContextKey === primaryActivityContextKey)
-        || topLevelRows.find(row => row.popupContextSummary && getActivityPopupContextKey(row) === primaryActivityContextKey)
-        || topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
+    const isGenericPrimary = isGenericPopupPrimaryActivity(primaryActivity || {});
+    const primaryRow = (isGenericPrimary ? getBestMeaningfulPopupPrimaryRow(topLevelRows) : null)
+        || (!isGenericPrimary
+            ? topLevelRows.find(row => row.popupSessionSummary && row.popupContextKey === primaryActivityContextKey)
+                || topLevelRows.find(row => row.popupContextSummary && getActivityPopupContextKey(row) === primaryActivityContextKey)
+                || topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
+            : null)
         || (topLevelRows.length === 1 ? topLevelRows[0] : null)
-        || (isGenericPopupPrimaryActivity(primaryActivity || {}) ? topLevelRows[0] : null)
+        || (isGenericPrimary ? topLevelRows[0] : null)
         || fallbackPrimaryRow;
     const secondaryRows = topLevelRows.filter(row => row !== primaryRow)
         .sort((left, right) => {
@@ -4218,6 +4840,52 @@ function buildActivityBlockPopupDisplayModel(blockEl) {
     });
 }
 
+function getSelectedActivityScopeStore() {
+    if (!(state.selectedActivityScopes instanceof Map)) {
+        state.selectedActivityScopes = new Map();
+    }
+    return state.selectedActivityScopes;
+}
+
+function normalizeSelectedActivityScope(scope = {}, assignmentKeys = null) {
+    const normalizedAssignmentKeys = Array.isArray(assignmentKeys)
+        ? assignmentKeys
+        : Array.isArray(scope.assignmentKeys)
+        ? scope.assignmentKeys
+        : [];
+    const normalizedMatchKeys = Array.isArray(scope.matchKeys) ? scope.matchKeys : [];
+    const mode = scope.mode ? normalizeSimilarActivityMatchMode(scope.mode) : '';
+    return {
+        mode,
+        matchKeys: Array.from(new Set(normalizedMatchKeys.filter(Boolean))),
+        assignmentKeys: Array.from(new Set(normalizedAssignmentKeys.filter(Boolean)))
+    };
+}
+
+function getStoredSelectedActivityScope(selectionId) {
+    if (selectionId === null || selectionId === undefined) return null;
+    const scope = getSelectedActivityScopeStore().get(selectionId);
+    if (!scope) return null;
+    const normalizedScope = normalizeSelectedActivityScope(scope);
+    if (!normalizedScope.mode && normalizedScope.assignmentKeys.length === 0 && normalizedScope.matchKeys.length === 0) {
+        return null;
+    }
+    return normalizedScope;
+}
+
+function selectedActivityScopeAttributes(scope) {
+    if (!scope) return '';
+    const attributes = [];
+    if (scope.assignmentKeys.length > 0) {
+        attributes.push(`data-selected-similarity-keys="${escapeAttribute(encodeURIComponent(JSON.stringify(scope.assignmentKeys)))}"`);
+    }
+    if (scope.mode && scope.matchKeys.length > 0) {
+        attributes.push(`data-selected-similarity-mode="${escapeAttribute(scope.mode)}"`);
+        attributes.push(`data-selected-similarity-match-keys="${escapeAttribute(encodeURIComponent(JSON.stringify(scope.matchKeys)))}"`);
+    }
+    return attributes.join('\n             ');
+}
+
 // Generate the HTML for an individual activity block in Activity Stream
 function createActivityBlockHTML(block, rowLayout = null) {
     const app = normalizeActivityText(block.app);
@@ -4240,16 +4908,36 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const sourceRange = getTimelineDisplayRowRange(blockStart, blockEnd, dateStartOfDay, state.zoom);
     const startCell = isSessionBlock ? sourceRange.startRow : fallbackStartCell;
     const span = isSessionBlock ? Math.max(1, sourceRange.endRow - sourceRange.startRow) : fallbackSpan;
+    const rawPrimaryActivity = { app, title, url, appPath, bundleId };
+    const blockOverlaps = block.overlaps || [];
+    const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
+    const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
+    const popupDisplayModel = buildActivityPopupDisplayModel({
+        overlaps: uniqueOverlaps,
+        rangeStart: blockStart,
+        rangeEnd: blockEnd,
+        primaryActivity: rawPrimaryActivity,
+        activeDurationMs: block.activeDurationMs,
+        zoom: state.zoom
+    });
+    const displayActivity = getTimelineBlockDisplayActivity(rawPrimaryActivity, popupDisplayModel);
+    const displayLabels = getPopupActivityDisplayLabels(displayActivity);
+    const displayApp = normalizeActivityText(displayActivity.app || app);
+    const displayTitleSource = normalizeActivityText(displayActivity.title || displayLabels.primary || title);
+    const displayUrl = normalizeActivityText(displayActivity.url || displayLabels.externalUrl || url);
+    const displayAppPath = normalizeActivityText(displayActivity.appPath || appPath);
+    const displayBundleId = normalizeActivityText(displayActivity.bundleId || bundleId);
+    const displaySubtitle = normalizeActivityText(displayLabels.secondary || displayApp || app);
+    const displaySessionKey = getActivityStreamSessionKey(displayActivity) || block.similarityKey || block.summaryKey || '';
     const selectionId = isSessionBlock
-        ? `activity:${blockStart}:${blockEnd}:${block.similarityKey || block.summaryKey || ''}`
+        ? `activity:${blockStart}:${blockEnd}:${displaySessionKey}`
         : startCell;
 
     const isSelected = state.selectedActivities.has(selectionId);
     const selectedClass = isSelected ? 'selected' : '';
+    const selectedScope = isSelected ? getStoredSelectedActivityScope(selectionId) : null;
+    const selectedScopeAttributes = selectedActivityScopeAttributes(selectedScope);
 
-    let displayTitle = cleanTitle(title, { app, title, url, appPath, bundleId });
-
-    const blockOverlaps = block.overlaps || [];
     const displayRange = getDisplayRowRangeForSourceRange(layout, startCell, startCell + span);
     const exactGeometry = isSessionBlock
         ? getTimelineExactDisplayRangeGeometry(blockStart, blockEnd, dateStartOfDay, state.zoom, layout)
@@ -4261,27 +4949,24 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const blockStyle = exactGeometry
         ? `top: ${formatCssNumber(exactGeometry.top)}px; height: ${formatCssNumber(exactGeometry.height)}px;`
         : `top: calc(var(--row-height) * ${displayStartRow} + 2px); height: calc(var(--row-height) * ${displayRowSpan} - 3px);`;
-    const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
-    const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
-    const popupDisplayModel = buildActivityPopupDisplayModel({
-        overlaps: uniqueOverlaps,
-        rangeStart: blockStart,
-        rangeEnd: blockEnd,
-        primaryActivity: {
-            app,
-            title,
-            url,
-            appPath,
-            bundleId
-        },
-        activeDurationMs: block.activeDurationMs,
-        zoom: state.zoom
-    });
+    const displayTitleActivity = {
+        ...displayActivity,
+        app: displayApp,
+        title: displayTitleSource,
+        url: displayUrl,
+        appPath: displayAppPath,
+        bundleId: displayBundleId
+    };
+    const displayTitle = getMeaningfulActivityDisplayTitle(displayTitleActivity)
+        || getActivityDisplayTitle(displayTitleActivity)
+        || normalizeActivityText(displayLabels.primary).trim()
+        || displayApp
+        || 'Recorded Activity';
     const visibleSecondaryOverlaps = getInlineBadgePopupRows(popupDisplayModel.secondaryRows);
     const inlineIconOverlaps = visibleSecondaryOverlaps.slice(0, 2);
     const hiddenInlineIconCount = Math.max(0, visibleSecondaryOverlaps.length - inlineIconOverlaps.length);
 
-    const iconHTML = getActivityIconHTML(app, url, title, appPath, bundleId);
+    const iconHTML = getActivityIconHTML(displayApp, displayUrl, displayTitleSource, displayAppPath, displayBundleId);
 
     const fallbackDurationMs = blockEnd - blockStart;
     const actualDurationMs = getActivityDurationTotalMs(uniqueOverlaps) || fallbackDurationMs;
@@ -4316,12 +5001,13 @@ function createActivityBlockHTML(block, rowLayout = null) {
              data-exact-geometry="${isSessionBlock ? 'true' : 'false'}"
              data-fragment-count="${Array.isArray(block.sources) ? block.sources.length : 1}"
              data-interruption-count="${Number.isFinite(block.interruptionCount) ? block.interruptionCount : 0}"
-             data-session-key="${escapeAttribute(block.similarityKey || block.summaryKey || '')}"
-             data-app="${escapeAttribute(app)}"
-             data-title="${escapeAttribute(title)}"
-             data-url="${escapeAttribute(url)}"
-             data-app-path="${escapeAttribute(appPath)}"
-             data-bundle-id="${escapeAttribute(bundleId)}"
+             data-session-key="${escapeAttribute(displaySessionKey)}"
+             data-app="${escapeAttribute(displayApp)}"
+             data-title="${escapeAttribute(displayTitleSource)}"
+             data-url="${escapeAttribute(displayUrl)}"
+             data-app-path="${escapeAttribute(displayAppPath)}"
+             data-bundle-id="${escapeAttribute(displayBundleId)}"
+             ${selectedScopeAttributes}
              ${overlapDataAttribute}>
             <div class="activity-checkbox activity-block__checkbox ${isSelected ? 'is-selected' : ''}">
                 <i class="${isSelected ? 'ph-fill ph-check-square' : 'ph ph-square'} text-base"></i>
@@ -4331,7 +5017,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
             </div>
             <div class="activity-block__content">
                 <span class="activity-block__title">${displayTitle}</span>
-                <span class="activity-block__subtitle">${escapeTimelineText(app)}</span>
+                <span class="activity-block__subtitle">${escapeTimelineText(displaySubtitle)}</span>
             </div>
             <div class="activity-block__actions">
                 ${visibleSecondaryOverlaps.length > 0 ? `
@@ -4370,7 +5056,10 @@ function attachMemoryAidInteractions() {
                 e.stopPropagation();
                 const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
                 const displayModel = buildActivityBlockPopupDisplayModel(b);
-                const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs);
+                const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs, {
+                    assignmentDisplayStart: startMs,
+                    assignmentDisplayEnd: endMs
+                });
                 openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
             });
         }
@@ -4393,14 +5082,17 @@ function attachMemoryAidInteractions() {
             if (e.target.closest('.activity-quick-add') || e.target.closest('.activity-checkbox')) return;
             const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
             const displayModel = buildActivityBlockPopupDisplayModel(b);
-            const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs);
+            const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs, {
+                assignmentDisplayStart: startMs,
+                assignmentDisplayEnd: endMs
+            });
             openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
         });
     });
 }
 
-function parseActivityBlockSelectedSimilarityKeys(blockEl) {
-    const rawValue = blockEl?.dataset?.selectedSimilarityKeys;
+function parseActivityBlockEncodedList(blockEl, datasetKey) {
+    const rawValue = blockEl?.dataset?.[datasetKey];
     if (!rawValue) return [];
 
     try {
@@ -4416,13 +5108,46 @@ function parseActivityBlockSelectedSimilarityKeys(blockEl) {
     }
 }
 
+function parseActivityBlockSelectedSimilarityKeys(blockEl) {
+    return parseActivityBlockEncodedList(blockEl, 'selectedSimilarityKeys');
+}
+
 function getActivityBlockSelectedSimilarityKeys(blockEl) {
     return parseActivityBlockSelectedSimilarityKeys(blockEl);
+}
+
+function getActivityBlockSelectedSimilarityMode(blockEl) {
+    const mode = blockEl?.dataset?.selectedSimilarityMode || '';
+    return mode ? normalizeSimilarActivityMatchMode(mode) : '';
+}
+
+function getActivityBlockSelectedSimilarityMatchKeys(blockEl) {
+    return parseActivityBlockEncodedList(blockEl, 'selectedSimilarityMatchKeys');
+}
+
+function getActivityBlockSelectedSimilarityScope(blockEl) {
+    const storedScope = getStoredSelectedActivityScope(getActivityBlockSelectionId(blockEl));
+    const datasetScope = {
+        mode: getActivityBlockSelectedSimilarityMode(blockEl),
+        matchKeys: getActivityBlockSelectedSimilarityMatchKeys(blockEl),
+        assignmentKeys: getActivityBlockSelectedSimilarityKeys(blockEl)
+    };
+    if (
+        datasetScope.mode
+        || datasetScope.matchKeys.length > 0
+        || datasetScope.assignmentKeys.length > 0
+    ) {
+        return datasetScope;
+    }
+    return storedScope || datasetScope;
 }
 
 function getActivityBlockSelectionKeys(blockEl) {
     const storedKeys = parseActivityBlockSelectedSimilarityKeys(blockEl);
     if (storedKeys.length > 0) return storedKeys;
+
+    const storedScope = getStoredSelectedActivityScope(getActivityBlockSelectionId(blockEl));
+    if (storedScope?.assignmentKeys?.length > 0) return storedScope.assignmentKeys;
 
     const primaryKey = getActivitySimilarityKey(getActivityBlockData(blockEl));
     return primaryKey ? [primaryKey] : [];
@@ -4443,7 +5168,7 @@ function getActivityBlockSelectionId(blockEl) {
     return Number.isFinite(startCell) ? startCell : null;
 }
 
-function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = null) {
+function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = null, selectedSimilarityScope = null) {
     const selectionId = getActivityBlockSelectionId(blockEl);
     const checkbox = blockEl.querySelector('.activity-checkbox');
     const iconEl = blockEl.querySelector('.activity-checkbox i');
@@ -4455,18 +5180,36 @@ function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = nu
         blockEl.classList.add('selected');
         checkbox?.classList.add('is-selected');
         if (iconEl) iconEl.className = 'ph-fill ph-check-square text-base';
-        if (Array.isArray(selectedSimilarityKeys) && selectedSimilarityKeys.length > 0) {
-            const uniqueKeys = Array.from(new Set(selectedSimilarityKeys.filter(Boolean)));
+        const normalizedScope = normalizeSelectedActivityScope(selectedSimilarityScope || {}, selectedSimilarityKeys);
+        if (normalizedScope.assignmentKeys.length > 0 || normalizedScope.mode || normalizedScope.matchKeys.length > 0) {
+            getSelectedActivityScopeStore().set(selectionId, normalizedScope);
+        } else {
+            getSelectedActivityScopeStore().delete(selectionId);
+        }
+        if (normalizedScope.assignmentKeys.length > 0) {
+            const uniqueKeys = normalizedScope.assignmentKeys;
             blockEl.dataset.selectedSimilarityKeys = encodeURIComponent(JSON.stringify(uniqueKeys));
         } else {
             delete blockEl.dataset.selectedSimilarityKeys;
         }
+        const mode = normalizedScope.mode;
+        const matchKeys = normalizedScope.matchKeys;
+        if (mode && matchKeys.length > 0) {
+            blockEl.dataset.selectedSimilarityMode = mode;
+            blockEl.dataset.selectedSimilarityMatchKeys = encodeURIComponent(JSON.stringify(matchKeys));
+        } else {
+            delete blockEl.dataset.selectedSimilarityMode;
+            delete blockEl.dataset.selectedSimilarityMatchKeys;
+        }
     } else {
         state.selectedActivities.delete(selectionId);
+        getSelectedActivityScopeStore().delete(selectionId);
         blockEl.classList.remove('selected');
         checkbox?.classList.remove('is-selected');
         if (iconEl) iconEl.className = 'ph ph-square text-base';
         delete blockEl.dataset.selectedSimilarityKeys;
+        delete blockEl.dataset.selectedSimilarityMode;
+        delete blockEl.dataset.selectedSimilarityMatchKeys;
     }
 }
 
@@ -4475,6 +5218,33 @@ function getPopupActivitySelectionKey(activity) {
         return getActivitySourceKey(activity) || `${getActivitySummaryKey(activity)}|||${activity.start || ''}|||${activity.end || ''}`;
     }
     return getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
+}
+
+function getPopupActivitySelectionKeys(activity) {
+    const keys = [];
+    const addKey = key => {
+        if (key && !keys.includes(key)) keys.push(key);
+    };
+    const addActivityKeys = nextActivity => {
+        if (!nextActivity) return;
+        getActivitySelectionIdentityKeys(nextActivity).forEach(addKey);
+    };
+
+    addActivityKeys(activity);
+    getPopupRowSources(activity).forEach(addActivityKeys);
+    if (Array.isArray(activity?.children)) {
+        activity.children.forEach(child => {
+            addActivityKeys(child);
+            getPopupRowSources(child).forEach(addActivityKeys);
+        });
+    }
+
+    return keys;
+}
+
+function popupActivityMatchesSelectionKeys(activity, selectedKeys) {
+    if (!selectedKeys || selectedKeys.size === 0) return false;
+    return getPopupActivitySelectionKeys(activity).some(key => selectedKeys.has(key));
 }
 
 function isNativeActivity(activity) {
@@ -4533,6 +5303,58 @@ function buildPopupContextSourceActivity(source) {
     };
 }
 
+function getPopupModalAggregateGroupKey(activity) {
+    return getActivitySimilarityKeyForMode(activity, 'app-title') || getActivitySummaryKey(activity) || '';
+}
+
+function applyPopupModalAggregation(activity) {
+    const aggregateKey = getPopupModalAggregateGroupKey(activity);
+    if (!aggregateKey) return activity;
+    return {
+        ...activity,
+        modalAggregateGroupKey: aggregateKey
+    };
+}
+
+function popupActivityMatchesAssignmentKeys(activity, selectedKeys) {
+    if (!selectedKeys || selectedKeys.size === 0) return false;
+    return getActivityAssignmentKeys(activity).some(key => selectedKeys.has(key));
+}
+
+function getScopedPopupAssignmentSources(activity, selectedKeys) {
+    if (!selectedKeys || selectedKeys.size === 0) return [];
+
+    const sources = [];
+    const seen = new Set();
+    const addSource = source => {
+        if (!source || !popupActivityMatchesAssignmentKeys(source, selectedKeys)) return;
+        const key = getActivitySourceKey(source) || getActivitySummaryKey(source);
+        if (key && seen.has(key)) return;
+        if (key) seen.add(key);
+        sources.push(source);
+    };
+
+    getPopupRowSources(activity).forEach(addSource);
+    if (Array.isArray(activity?.children)) {
+        activity.children.forEach(child => {
+            getPopupRowSources(child).forEach(addSource);
+        });
+    }
+
+    return sources;
+}
+
+function expandPopupActivitiesForScopedAssignment(activities, selectedKeys) {
+    if (!selectedKeys || selectedKeys.size === 0) return Array.isArray(activities) ? activities : [];
+
+    const scopedActivities = [];
+    for (const activity of Array.isArray(activities) ? activities : []) {
+        scopedActivities.push(...getScopedPopupAssignmentSources(activity, selectedKeys));
+    }
+
+    return scopedActivities;
+}
+
 function buildPopupContextAssignmentActivity(activity) {
     const sources = getPopupRowSources(activity)
         .map(buildPopupContextSourceActivity)
@@ -4560,23 +5382,45 @@ function buildPopupContextAssignmentActivity(activity) {
         assignmentDisplayZoom: Number.isFinite(state?.zoom) ? state.zoom : undefined,
         sources,
         modalSourceActivities: sources,
-        modalAggregateGroupKey: activity?.popupContextKey || getActivityPopupContextKey(activity)
+        modalAggregateGroupKey: getPopupModalAggregateGroupKey(activity)
     };
 }
 
-function buildPopupAssignmentActivities(activities, startMs, endMs) {
+function buildPopupAssignmentActivities(activities, startMs, endMs, options = {}) {
     const assignmentActivities = [];
+    const selectedKeys = options?.selectedKeys instanceof Set
+        ? options.selectedKeys
+        : new Set(Array.isArray(options?.selectedKeys) ? options.selectedKeys.filter(Boolean) : []);
+    const sourceActivities = selectedKeys.size > 0
+        ? expandPopupActivitiesForScopedAssignment(activities, selectedKeys)
+        : (Array.isArray(activities) ? activities : []);
 
-    for (const activity of Array.isArray(activities) ? activities : []) {
+    for (const activity of sourceActivities) {
         const assignmentInput = getPopupAssignmentActivity(activity);
         if (assignmentInput?.popupContextSummary) {
             const contextAssignment = buildPopupContextAssignmentActivity(assignmentInput);
-            if (contextAssignment) assignmentActivities.push(contextAssignment);
+            if (contextAssignment) {
+                const displayAssignment = Number.isFinite(options?.assignmentDisplayStart)
+                    && Number.isFinite(options?.assignmentDisplayEnd)
+                    && options.assignmentDisplayEnd > options.assignmentDisplayStart
+                    ? applyActivityStreamAssignmentDisplayMetadata(
+                        contextAssignment,
+                        options.assignmentDisplayStart,
+                        options.assignmentDisplayEnd,
+                        options.assignmentDisplayGroupKey || ''
+                    )
+                    : contextAssignment;
+                assignmentActivities.push(applyPopupModalAggregation(displayAssignment));
+            }
             continue;
         }
 
-        const [summaryAssignment] = buildActivityStreamSummaryAssignmentActivities([assignmentInput], startMs, endMs);
-        assignmentActivities.push(summaryAssignment || assignmentInput);
+        const [summaryAssignment] = buildActivityStreamSummaryAssignmentActivities([assignmentInput], startMs, endMs, state.zoom, {
+            assignmentDisplayStart: options?.assignmentDisplayStart,
+            assignmentDisplayEnd: options?.assignmentDisplayEnd,
+            assignmentDisplayGroupKey: options?.assignmentDisplayGroupKey
+        });
+        assignmentActivities.push(applyPopupModalAggregation(summaryAssignment || assignmentInput));
     }
 
     return assignmentActivities.filter(Boolean);
@@ -4609,6 +5453,9 @@ function syncPopupActivitySelectionRows() {
 }
 
 function togglePopupActivitySelection(row) {
+    if (DOM.elPopupMultiListContainer?.dataset) {
+        DOM.elPopupMultiListContainer.dataset.popupSelectionDirty = 'true';
+    }
     setPopupActivityRowSelected(row, !row?.classList?.contains?.('is-selected'));
 }
 
@@ -4625,10 +5472,33 @@ function getPopupRowDisplayActivity(row, displayOverlaps) {
     return parentActivity || null;
 }
 
+function getPopupSelectedSimilarityKeySet() {
+    const rawKeys = DOM.elPopupMultiListContainer?.dataset?.selectedSimilarityKeys;
+    if (!rawKeys) return new Set();
+    try {
+        const parsed = JSON.parse(decodeURIComponent(rawKeys));
+        return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+    } catch {
+        try {
+            const parsed = JSON.parse(rawKeys);
+            return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+        } catch {
+            return new Set();
+        }
+    }
+}
+
+function isPopupSelectionDirty() {
+    return DOM.elPopupMultiListContainer?.dataset?.popupSelectionDirty === 'true';
+}
+
 function getSelectedPopupAssignmentActivities(displayOverlaps, fallbackOverlaps = displayOverlaps) {
     const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
     if (!rows) return fallbackOverlaps;
 
+    const scopedKeys = getPopupSelectedSimilarityKeySet();
+    const hasScopedSelection = scopedKeys.size > 0;
+    const selectionDirty = isPopupSelectionDirty();
     const selectedActivities = [];
     rows.forEach(row => {
         if (!row?.classList?.contains?.('is-selected')) return;
@@ -4638,13 +5508,17 @@ function getSelectedPopupAssignmentActivities(displayOverlaps, fallbackOverlaps 
     });
 
     if (selectedActivities.length > 0) return selectedActivities;
+    if (hasScopedSelection || selectionDirty) return [];
 
     return displayOverlaps.length > 0 ? displayOverlaps : fallbackOverlaps;
 }
 
 function assignPopupActivity(activity, startMs, endMs) {
     dismissActivityDetailsPopup();
-    openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([activity], startMs, endMs));
+    openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([activity], startMs, endMs, {
+        assignmentDisplayStart: startMs,
+        assignmentDisplayEnd: endMs
+    }));
 }
 
 function setPopupActivityChildrenExpanded(parentIndex, expanded, expandButton = null) {
@@ -4707,6 +5581,7 @@ function toggleActivitySelection(blockEl) {
 
 function clearActivitySelection() {
     state.selectedActivities.clear();
+    getSelectedActivityScopeStore().clear();
     DOM.elItemsMemoryAid?.querySelectorAll('.activity-block.selected').forEach(el => {
         setActivityBlockSelected(el, false);
     });
@@ -4747,7 +5622,7 @@ function openSimilarSelectionModal() {
     if (selectedEls.length !== 1) return false;
 
     bindSimilarSelectionModal();
-    updateSimilarModeAvailability(getActivityBlockData(selectedEls[0]));
+    updateSimilarModeAvailability(getActivityBlockSimilarModeActivity(selectedEls[0]));
     DOM.elSimilarModal?.classList?.remove('hidden');
     DOM.elSimilarModalBtnApply?.focus?.();
     return true;
@@ -4762,17 +5637,23 @@ function selectSimilarActivities(options = {}) {
 
     const mode = normalizeSimilarActivityMatchMode(options?.mode);
     const selectedKeys = new Set(selectedEls
-        .map(el => getActivitySimilarityKeyForMode(getActivityBlockData(el), mode))
+        .flatMap(el => getActivityBlockSeedSimilarityEntriesForMode(el, mode))
+        .map(entry => entry.matchKey)
         .filter(Boolean));
 
     let selectedCount = 0;
     itemsMem.querySelectorAll('.activity-block').forEach(el => {
-        const primaryKey = getActivitySimilarityKeyForMode(getActivityBlockData(el), mode);
-        const primaryMatches = primaryKey && selectedKeys.has(primaryKey);
+        const entries = getActivityBlockSimilarityEntriesForMode(el, mode);
+        const matchingEntries = entries
+            .filter(entry => selectedKeys.has(entry.matchKey));
 
-        if (primaryMatches) {
-            setActivityBlockSelected(el, true);
+        if (matchingEntries.length > 0) {
+            const assignmentKeys = matchingEntries.flatMap(entry => entry.assignmentKeys);
+            const matchKeys = matchingEntries.map(entry => entry.matchKey).filter(Boolean);
+            setActivityBlockSelected(el, true, assignmentKeys, { mode, matchKeys });
             selectedCount++;
+        } else {
+            setActivityBlockSelected(el, false);
         }
     });
 
@@ -5263,7 +6144,10 @@ function showActivityDetailsPopup(b) {
             const oDurationStr = formatPositiveActivityDurationLabel(rowDurationMs);
             const rowKey = getPopupActivitySelectionKey(o);
             const selectedKeys = state.selectedActivities.has(getActivityBlockSelectionId(b)) ? getActivityBlockSelectionKeys(b) : [];
-            const isRowSelected = Boolean(rowKey && selectedKeys.includes(rowKey));
+            const selectedKeySet = new Set(selectedKeys);
+            const isRowSelected = selectedKeySet.size > 0
+                ? popupActivityMatchesSelectionKeys(o, selectedKeySet)
+                : false;
             const rowSelectedClass = isRowSelected ? ' is-selected' : '';
             const checkboxIconClass = isRowSelected ? 'ph-fill ph-check-square' : 'ph ph-square';
             const displayLabels = getPopupActivityDisplayLabels(o);
@@ -5335,14 +6219,31 @@ function showActivityDetailsPopup(b) {
                 ${childRowsHTML}
             `;
         };
+        const selectedKeys = state.selectedActivities.has(getActivityBlockSelectionId(b)) ? getActivityBlockSelectionKeys(b) : [];
+        if (DOM.elPopupMultiListContainer?.dataset) {
+            DOM.elPopupMultiListContainer.dataset.selectedSimilarityKeys = selectedKeys.length > 0
+                ? encodeURIComponent(JSON.stringify(selectedKeys))
+                : '';
+            DOM.elPopupMultiListContainer.dataset.popupSelectionDirty = 'false';
+        }
         DOM.elPopupMultiListContainer.innerHTML = displayOverlaps.map((o, index) => renderPopupActivityBreakdownRow(o, index)).join('');
         bindActivityMixTooltipInteractions(DOM.elPopupMultiListContainer);
         bindActivityPopupBreakdownControls(b, displayOverlaps, startMs, endMs);
 
         DOM.elPopupAssignBtn.onclick = () => {
-            dismissActivityDetailsPopup();
             const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps, assignmentOverlaps);
-            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs));
+            const scopedKeys = isPopupSelectionDirty() ? new Set() : getPopupSelectedSimilarityKeySet();
+            const assignmentActivities = buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs, {
+                selectedKeys: scopedKeys,
+                ...(scopedKeys.size === 0 ? {
+                    assignmentDisplayStart: startMs,
+                    assignmentDisplayEnd: endMs
+                } : {})
+            });
+            dismissActivityDetailsPopup();
+            if (selectedOverlaps.length === 0) return;
+            if (assignmentActivities.length === 0) return;
+            openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
         };
     } else {
         const visibleActivity = { app, title, url, appPath, bundleId };
@@ -5409,7 +6310,10 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             dismissActivityDetailsPopup();
-            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([singleActivity], startMs, endMs));
+            openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([singleActivity], startMs, endMs, {
+                assignmentDisplayStart: startMs,
+                assignmentDisplayEnd: endMs
+            }));
         };
     }
 
@@ -5423,6 +6327,10 @@ function dismissActivityDetailsPopup() {
     const popup = DOM.elActivityDetailsPopup;
     if (popup) {
         popup.classList.add('hidden');
+    }
+    if (DOM.elPopupMultiListContainer?.dataset) {
+        delete DOM.elPopupMultiListContainer.dataset.selectedSimilarityKeys;
+        delete DOM.elPopupMultiListContainer.dataset.popupSelectionDirty;
     }
 }
 
@@ -5440,8 +6348,8 @@ window.getTimelineTimeForDisplayTop = getTimelineTimeForDisplayTop;
 window.getTimelineDisplayRangeGeometry = getTimelineDisplayRangeGeometry;
 window.getTimelineExactDisplayRangeGeometry = getTimelineExactDisplayRangeGeometry;
 window.buildVisibleActivityRunsForSummary = buildVisibleActivityRunsForSummary;
-window.buildActivityStreamAssignmentActivities = buildActivityStreamAssignmentActivities;
 window.buildActivityStreamSummaryAssignmentActivity = buildActivityStreamSummaryAssignmentActivity;
+window.buildActivityStreamAssignmentActivities = buildActivityStreamAssignmentActivities;
 window.buildActivityStreamSummaryAssignmentActivities = buildActivityStreamSummaryAssignmentActivities;
 window.buildActivityStreamRenderEntries = buildActivityStreamRenderEntries;
 window.buildLoggedTimeEntryRenderItems = buildLoggedTimeEntryRenderItems;
@@ -5456,9 +6364,14 @@ window.renderMemoryAidActivities = renderMemoryAidActivities;
 window.createActivityBlockHTML = createActivityBlockHTML;
 window.getActivitySummaryKey = getActivitySummaryKey;
 window.getActivitySimilarityKey = getActivitySimilarityKey;
+window.getActivityAssignmentKeys = getActivityAssignmentKeys;
+window.getActivitySelectionIdentityKeys = getActivitySelectionIdentityKeys;
 window.getActivitySimilarityKeyForMode = getActivitySimilarityKeyForMode;
 window.getActivityBlockSelectionKeys = getActivityBlockSelectionKeys;
 window.getActivityBlockSelectedSimilarityKeys = getActivityBlockSelectedSimilarityKeys;
+window.getActivityBlockSelectedSimilarityMode = getActivityBlockSelectedSimilarityMode;
+window.getActivityBlockSelectedSimilarityMatchKeys = getActivityBlockSelectedSimilarityMatchKeys;
+window.getActivityBlockSelectedSimilarityScope = getActivityBlockSelectedSimilarityScope;
 window.getActivityBlockDetailOverlaps = getActivityBlockDetailOverlaps;
 window.getActivityMixInRange = getActivityMixInRange;
 window.summarizeActivityOverlaps = summarizeActivityOverlaps;

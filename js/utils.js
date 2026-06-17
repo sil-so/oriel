@@ -267,6 +267,210 @@ function setBrandIconPreferenceForTesting(enabled) {
     state.settings.logoDevIconsEnabled = Boolean(enabled);
 }
 
+function escapeMarkdownHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeMarkdownAttribute(value) {
+    return escapeMarkdownHtml(value).replace(/`/g, '&#96;');
+}
+
+function isSafeMarkdownUrl(value) {
+    try {
+        const parsed = new URL(String(value || '').trim());
+        return ['http:', 'https:'].includes(parsed.protocol.toLowerCase());
+    } catch {
+        return false;
+    }
+}
+
+function renderOrielInlineMarkdown(value) {
+    const text = String(value ?? '');
+    const codeSegments = [];
+    const codeToken = index => `\u0000CODE${index}\u0000`;
+    let escaped = text.replace(/`([^`]+)`/g, (_, code) => {
+        const index = codeSegments.length;
+        codeSegments.push(`<code>${escapeMarkdownHtml(code)}</code>`);
+        return codeToken(index);
+    });
+
+    escaped = escapeMarkdownHtml(escaped);
+    escaped = escaped.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
+        const decodedLabel = label
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+        const decodedHref = href.replace(/&amp;/g, '&');
+        if (!isSafeMarkdownUrl(decodedHref)) {
+            return escapeMarkdownHtml(decodedLabel);
+        }
+        return `<a href="${escapeMarkdownAttribute(decodedHref)}" target="_blank" rel="noopener noreferrer">${renderOrielInlineMarkdown(decodedLabel)}</a>`;
+    });
+    escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+
+    codeSegments.forEach((html, index) => {
+        escaped = escaped.replace(codeToken(index), html);
+    });
+    return escaped;
+}
+
+function renderOrielMarkdown(markdown) {
+    const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n');
+    const blocks = [];
+    let paragraph = [];
+    let listItems = [];
+    let listType = '';
+
+    const flushParagraph = () => {
+        if (paragraph.length === 0) return;
+        blocks.push(`<p>${renderOrielInlineMarkdown(paragraph.join(' '))}</p>`);
+        paragraph = [];
+    };
+    const flushList = () => {
+        if (listItems.length === 0) return;
+        const tag = listType === 'ol' ? 'ol' : 'ul';
+        blocks.push(`<${tag}>${listItems.map(item => `<li>${renderOrielInlineMarkdown(item)}</li>`).join('')}</${tag}>`);
+        listItems = [];
+        listType = '';
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+            flushParagraph();
+            flushList();
+            continue;
+        }
+
+        const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+        const unorderedMatch = line.match(/^[-*]\s+(.+)$/);
+        if (orderedMatch || unorderedMatch) {
+            const nextType = orderedMatch ? 'ol' : 'ul';
+            flushParagraph();
+            if (listType && listType !== nextType) flushList();
+            listType = nextType;
+            listItems.push((orderedMatch || unorderedMatch)[1]);
+            continue;
+        }
+
+        flushList();
+        paragraph.push(line);
+    }
+
+    flushParagraph();
+    flushList();
+    return blocks.join('');
+}
+
+function formatStatsDuration(ms) {
+    const safeMs = Math.max(0, Number(ms) || 0);
+    if (safeMs < 60000) {
+        return `${Math.round(safeMs / 1000)}s`;
+    }
+    const minutes = Math.round(safeMs / 60000);
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return hrs > 0 ? `${hrs}h ${mins}m` : `${mins} min`;
+}
+
+function formatSidebarProjectDuration(ms) {
+    const totalMins = Math.floor(Math.max(0, Number(ms) || 0) / (60 * 1000));
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    return `${hours}h ${mins}m`;
+}
+
+function getSelectedPeriodTimeEntryDurationMs(entry) {
+    if (typeof isHiddenAutoAssignedTimeEntry === 'function' && isHiddenAutoAssignedTimeEntry(entry)) {
+        return 0;
+    }
+    if (typeof getTimeEntryDurationMs === 'function') {
+        return getTimeEntryDurationMs(entry);
+    }
+    const assignedDuration = Array.isArray(entry?.activities)
+        ? entry.activities.reduce((total, activity) => total + getAssignedActivityDurationMs(activity), 0)
+        : 0;
+    return assignedDuration > 0
+        ? assignedDuration
+        : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
+}
+
+function calculateSelectedPeriodMetrics({
+    activities = [],
+    timeEntries = [],
+    projects = [],
+    allTimeEntries = timeEntries
+} = {}) {
+    const totalCapturedMs = (Array.isArray(activities) ? activities : []).reduce((total, activity) => (
+        total + Math.max(0, (activity?.end || 0) - (activity?.start || 0))
+    ), 0);
+    const projectDurations = {};
+    const entriesByProject = {};
+    let totalLoggedMs = 0;
+
+    for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
+        const duration = getSelectedPeriodTimeEntryDurationMs(entry);
+        if (duration <= 0) continue;
+        totalLoggedMs += duration;
+        projectDurations[entry.projectId] = (projectDurations[entry.projectId] || 0) + duration;
+        entriesByProject[entry.projectId] = (entriesByProject[entry.projectId] || 0) + duration;
+    }
+
+    const historicalHoursByProject = {};
+    for (const entry of Array.isArray(allTimeEntries) ? allTimeEntries : []) {
+        const duration = getSelectedPeriodTimeEntryDurationMs(entry);
+        if (duration <= 0) continue;
+        historicalHoursByProject[entry.projectId] = (historicalHoursByProject[entry.projectId] || 0) + duration / (3600 * 1000);
+    }
+
+    let billableMs = 0;
+    let billableEarnings = 0;
+    let dominantCurrency = '$';
+    const projectList = Array.isArray(projects) ? projects : [];
+
+    for (const projectId of Object.keys(entriesByProject)) {
+        const periodMs = entriesByProject[projectId];
+        const project = projectList.find(candidate => candidate.id === projectId);
+        if (!project) continue;
+
+        const currency = project.currency || '$';
+        dominantCurrency = currency;
+        if (project.billable) billableMs += periodMs;
+
+        const periodHours = periodMs / (3600 * 1000);
+        if (project.rateType === 'hourly') {
+            billableEarnings += periodHours * (project.hourlyRate || 0);
+        } else if (project.rateType === 'fixed') {
+            const totalProjectHours = historicalHoursByProject[projectId] || periodHours;
+            billableEarnings += totalProjectHours > 0
+                ? (periodHours / totalProjectHours) * (project.fixedRate || 0)
+                : (project.fixedRate || 0);
+        }
+    }
+
+    const conversionPercent = totalCapturedMs > 0
+        ? Math.min(100, Math.round((totalLoggedMs / totalCapturedMs) * 100))
+        : 0;
+
+    return {
+        totalCapturedMs,
+        totalLoggedMs,
+        billableMs,
+        billableEarnings,
+        dominantCurrency,
+        conversionPercent,
+        projectDurations
+    };
+}
+
 // Bind utilities to window
 window.setupDateDisplay = setupDateDisplay;
 window.getFormattedDate = getFormattedDate;
@@ -292,3 +496,9 @@ window.normalizeWebsiteDomain = normalizeWebsiteDomain;
 window.websiteFallbackIconHTML = websiteFallbackIconHTML;
 window.NATIVE_ICON_CACHE_VERSION = NATIVE_ICON_CACHE_VERSION;
 window.setBrandIconPreferenceForTesting = setBrandIconPreferenceForTesting;
+window.renderOrielInlineMarkdown = renderOrielInlineMarkdown;
+window.renderOrielMarkdown = renderOrielMarkdown;
+window.formatStatsDuration = formatStatsDuration;
+window.formatSidebarProjectDuration = formatSidebarProjectDuration;
+window.getSelectedPeriodTimeEntryDurationMs = getSelectedPeriodTimeEntryDurationMs;
+window.calculateSelectedPeriodMetrics = calculateSelectedPeriodMetrics;

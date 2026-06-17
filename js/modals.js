@@ -127,16 +127,7 @@ function getSelectedModalActivities() {
     const allActivities = state.currentModalAllActivities || state.currentModalActivities || [];
     const selection = state.modalActivitySelection;
     if (!selection || selection.size === 0) return [];
-    const selectedActivities = allActivities.filter((_, index) => selection.has(index));
-    if (!selectedActivities.some(activity => Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0)) {
-        return selectedActivities;
-    }
-
-    const sourceActivities = [];
-    selectedActivities.forEach(activity => {
-        sourceActivities.push(...getModalActivitySourceActivities(activity));
-    });
-    return sourceActivities;
+    return allActivities.filter((_, index) => selection.has(index));
 }
 
 function getModalActivityDurationMs(activity) {
@@ -150,6 +141,15 @@ function getModalActivityDurationMs(activity) {
         return activity.end - activity.start;
     }
     return 0;
+}
+
+function formatModalActivityDurationLabel(durationMs) {
+    const ms = Number(durationMs) || 0;
+    if (ms > 0 && ms < 60 * 1000) {
+        return `${Math.max(1, Math.round(ms / 1000))}s`;
+    }
+
+    return `${Math.round(ms / (60 * 1000))} min`;
 }
 
 function isVisibleModalActivityCandidate(activity) {
@@ -206,7 +206,7 @@ function buildBulkModalDisplayActivities(activities) {
 
     return displayActivities.filter(activity => {
         const sources = Array.isArray(activity?.modalSourceActivities) ? activity.modalSourceActivities : [];
-        return sources.length === 0 || getModalActivityDurationMs(activity) >= MODAL_ACTIVITY_MIN_VISIBLE_DURATION_MS;
+        return sources.length === 0 || getModalActivityDurationMs(activity) > 0;
     });
 }
 
@@ -231,9 +231,7 @@ function updateModalDurationLabel(startMs = state.currentModalStartMs, endMs = s
     const durationMs = shouldUseSelectedModalActivityDuration(isBulk)
         ? selectedDurationMs
         : rangeDurationMs;
-    const durationMinutes = Math.round(durationMs / (60 * 1000));
-
-    DOM.elModalDuration.innerText = `${durationMinutes} min`;
+    DOM.elModalDuration.innerText = formatModalActivityDurationLabel(durationMs);
 }
 
 function escapeModalText(value) {
@@ -427,7 +425,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         // Render activities breakdown checklist snapshot
         DOM.elModalMemoryAidList.innerHTML = finalActivities.map((act, index) => {
             let displayTitle = cleanTitle(act.title, act);
-            const durMin = Math.round(getModalActivityDurationMs(act) / (60 * 1000));
+            const durationLabel = formatModalActivityDurationLabel(getModalActivityDurationMs(act));
             return `
                 <div class="modal-activity-row is-selected flex items-center justify-between text-xs p-2.5 cursor-pointer"
                      data-modal-activity-index="${index}">
@@ -443,7 +441,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
                             <span class="text-gray-400 text-[10px] truncate leading-normal">${act.app}</span>
                         </div>
                     </div>
-                    <span class="duration-pill shrink-0">${durMin} min</span>
+                    <span class="duration-pill shrink-0">${durationLabel}</span>
                 </div>
             `;
         }).join('');
