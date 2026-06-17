@@ -1061,7 +1061,9 @@ const datePickerConfigs = {
 const aiInsightsState = {
     isLoading: false,
     rows: [],
-    generatingKey: ''
+    generatingKey: '',
+    selectedYear: '',
+    detailRowKey: ''
 };
 
 function requestJumpToCurrentTime() {
@@ -2373,7 +2375,7 @@ function setupMainEventListeners() {
     }
 
     function aiInsightsRangeBounds() {
-        const current = new Date(state.currentDate || new Date());
+        const current = aiInsightsTodayDate();
         current.setHours(0, 0, 0, 0);
         const end = new Date(current);
         const start = new Date(current);
@@ -2382,6 +2384,12 @@ function setupMainEventListeners() {
             startDate: formatAiInsightsDate(start),
             endDate: formatAiInsightsDate(end)
         };
+    }
+
+    function aiInsightsTodayDate() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today;
     }
 
     function aiInsightsFriendlyDate(date) {
@@ -2433,14 +2441,19 @@ function setupMainEventListeners() {
         return `ai-insights-card-${aiInsightsRowKey(row).replace(/[^a-z0-9-]/gi, '-')}`;
     }
 
-    function aiInsightsWeekLabel(date) {
+    function aiInsightsWeekInfo(date) {
         const thursday = new Date(date);
         const day = thursday.getDay() || 7;
         thursday.setDate(thursday.getDate() + 4 - day);
         const year = thursday.getFullYear();
         const yearStart = new Date(year, 0, 1);
         const week = Math.ceil((((thursday - yearStart) / 86400000) + 1) / 7);
-        return `Week ${week}, ${year}`;
+        return { week, year };
+    }
+
+    function aiInsightsWeekLabel(date, { includeYear = true } = {}) {
+        const { week, year } = aiInsightsWeekInfo(date);
+        return includeYear ? `Week ${week}, ${year}` : `Week ${week}`;
     }
 
     function aiInsightsTitle(row) {
@@ -2456,11 +2469,29 @@ function setupMainEventListeners() {
         return aiInsightsFriendlyDate(row.date || '');
     }
 
+    function aiInsightsCardTitle(row) {
+        const type = aiInsightsPeriodType(row);
+        const start = parseAiInsightsDate(aiInsightsPrimaryDate(row));
+        if (!start) return aiInsightsPrimaryDate(row);
+        if (type === 'week') return 'Weekly recap';
+        if (type === 'day') {
+            return start.toLocaleDateString('en-GB', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short'
+            }).replace(',', '');
+        }
+        return aiInsightsTitle(row);
+    }
+
+    function aiInsightsDetailTitle(row) {
+        return aiInsightsTitle(row);
+    }
+
     function aiInsightsMetadataLabel(row) {
         const type = aiInsightsPeriodType(row);
         if (type === 'month') return 'Monthly recap';
-        if (type === 'week') return 'Weekly recap';
-        return 'Daily recap';
+        return '';
     }
 
     function aiInsightsDefaultSummaryText(row) {
@@ -2476,19 +2507,18 @@ function setupMainEventListeners() {
         return `${prefix} daily summary`;
     }
 
+    function aiInsightsOpenLabel(row) {
+        const type = aiInsightsPeriodType(row);
+        if (type === 'month') return 'Open monthly recap';
+        if (type === 'week') return 'Open weekly recap';
+        return 'Open daily summary';
+    }
+
     function aiInsightsReadyNote(row) {
         const type = aiInsightsPeriodType(row);
         if (type === 'month') return 'Successful daily summaries are available for this month.';
         if (type === 'week') return 'Successful daily summaries are available for this week.';
         return 'Screenshot activity summaries are available for this day.';
-    }
-
-    function aiInsightsStatusLabel(status) {
-        if (status === 'succeeded') return 'Generated';
-        if (status === 'ready') return 'Ready';
-        if (status === 'failed') return 'Failed';
-        if (status === 'generating') return 'Generating';
-        return 'Empty';
     }
 
     function createAiInsightsElement(tag, className, text = '') {
@@ -2701,58 +2731,259 @@ function setupMainEventListeners() {
         );
     }
 
-    function visibleAiInsightsRows() {
+    function aiInsightsAddDays(date, days) {
+        const next = new Date(date);
+        next.setDate(next.getDate() + days);
+        next.setHours(0, 0, 0, 0);
+        return next;
+    }
+
+    function aiInsightsWeekStart(date) {
+        if (typeof getWeekStart === 'function') return getWeekStart(date);
+        const start = new Date(date);
+        start.setHours(0, 0, 0, 0);
+        const day = start.getDay();
+        start.setDate(start.getDate() + (day === 0 ? -6 : 1 - day));
+        return start;
+    }
+
+    function aiInsightsWeekStartString(date) {
+        return formatAiInsightsDate(aiInsightsWeekStart(date));
+    }
+
+    function aiInsightsWeekRangeLabel(startDate) {
+        const endDate = aiInsightsAddDays(startDate, 6);
+        const sameMonth = startDate.getMonth() === endDate.getMonth();
+        const sameYear = startDate.getFullYear() === endDate.getFullYear();
+        const startDay = startDate.toLocaleDateString('en-GB', { day: 'numeric' });
+        const endDay = endDate.toLocaleDateString('en-GB', { day: 'numeric' });
+        const startMonth = startDate.toLocaleDateString('en-GB', { month: 'short' });
+        const endMonth = endDate.toLocaleDateString('en-GB', { month: 'short' });
+        const endYear = endDate.toLocaleDateString('en-GB', { year: 'numeric' });
+        if (sameMonth && sameYear) {
+            return `${startDay}–${endDay} ${endMonth} ${endYear}`;
+        }
+        if (sameYear) {
+            return `${startDay} ${startMonth}–${endDay} ${endMonth} ${endYear}`;
+        }
+        const startYear = startDate.toLocaleDateString('en-GB', { year: 'numeric' });
+        return `${startDay} ${startMonth} ${startYear}–${endDay} ${endMonth} ${endYear}`;
+    }
+
+    function aiInsightsRowStatus(row) {
+        return row?.status || 'empty';
+    }
+
+    function aiInsightsPlaceholderNote(row) {
+        return 'Not yet available';
+    }
+
+    function aiInsightsPlaceholderDailyRow(dateText, todayText) {
+        return {
+            date: dateText,
+            status: 'placeholder',
+            sourceSummaryCount: 0,
+            placeholderKind: dateText > todayText ? 'future' : 'missing'
+        };
+    }
+
+    function aiInsightsPlaceholderWeeklyRow(weekStartText) {
+        const start = parseAiInsightsDate(weekStartText);
+        const end = start ? formatAiInsightsDate(aiInsightsAddDays(start, 6)) : weekStartText;
+        return {
+            periodType: 'week',
+            periodStart: weekStartText,
+            periodEnd: end,
+            status: 'placeholder',
+            sourceDailyCount: 0,
+            placeholderKind: 'missing'
+        };
+    }
+
+    function buildAiInsightsViewModel() {
         const rows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
-        return rows
-            .slice()
+        if (!window.OrielData?.isNative && rows.length === 0) {
+            return { monthlyRows: [], sections: [] };
+        }
+
+        const today = aiInsightsTodayDate();
+        const currentYear = String(today.getFullYear());
+        const todayText = formatAiInsightsDate(today);
+        const dailyByDate = new Map();
+        const weeklyByStart = new Map();
+        const monthlyRows = [];
+        const weekStarts = new Set([aiInsightsWeekStartString(today)]);
+        const years = new Set([currentYear]);
+
+        rows.forEach(row => {
+            const type = aiInsightsPeriodType(row);
+            if (type === 'month') {
+                monthlyRows.push(row);
+                const start = parseAiInsightsDate(aiInsightsPrimaryDate(row));
+                if (start) years.add(String(start.getFullYear()));
+                return;
+            }
+            if (type === 'week') {
+                const start = parseAiInsightsDate(aiInsightsPrimaryDate(row));
+                if (!start) return;
+                const key = formatAiInsightsDate(start);
+                weeklyByStart.set(key, row);
+                weekStarts.add(key);
+                years.add(String(aiInsightsWeekInfo(start).year));
+                return;
+            }
+            const dateText = aiInsightsPrimaryDate(row);
+            const date = parseAiInsightsDate(dateText);
+            if (!date) return;
+            dailyByDate.set(dateText, row);
+            weekStarts.add(aiInsightsWeekStartString(date));
+            years.add(String(aiInsightsWeekInfo(date).year));
+        });
+
+        const availableYears = Array.from(years).sort((first, second) => second.localeCompare(first));
+        if (!aiInsightsState.selectedYear || !years.has(String(aiInsightsState.selectedYear))) {
+            aiInsightsState.selectedYear = currentYear;
+        }
+        const selectedYear = String(aiInsightsState.selectedYear);
+
+        const sections = Array.from(weekStarts)
             .sort((first, second) => {
-                const firstDate = aiInsightsSortDate(first);
-                const secondDate = aiInsightsSortDate(second);
-                if (firstDate !== secondDate) {
-                    return secondDate.localeCompare(firstDate);
-                }
-                const order = { month: 0, week: 1, day: 2 };
-                return (order[aiInsightsPeriodType(first)] ?? 9) - (order[aiInsightsPeriodType(second)] ?? 9);
-            });
+                return second.localeCompare(first);
+            })
+            .map(weekStartText => {
+                const weekStart = parseAiInsightsDate(weekStartText);
+                const weekInfo = aiInsightsWeekInfo(weekStart);
+                if (String(weekInfo.year) !== selectedYear) return null;
+                const days = Array.from({ length: 7 }, (_, index) => {
+                    const dateText = formatAiInsightsDate(aiInsightsAddDays(weekStart, 6 - index));
+                    return dailyByDate.get(dateText) || aiInsightsPlaceholderDailyRow(dateText, todayText);
+                });
+                return {
+                    weekStart: weekStartText,
+                    year: weekInfo.year,
+                    title: aiInsightsWeekLabel(weekStart, { includeYear: false }),
+                    rangeLabel: aiInsightsWeekRangeLabel(weekStart),
+                    rows: [
+                        weeklyByStart.get(weekStartText) || aiInsightsPlaceholderWeeklyRow(weekStartText),
+                        ...days
+                    ]
+                };
+            })
+            .filter(Boolean);
+
+        return {
+            monthlyRows: monthlyRows
+                .slice()
+                .filter(row => {
+                    const start = parseAiInsightsDate(aiInsightsPrimaryDate(row));
+                    return start && String(start.getFullYear()) === selectedYear;
+                })
+                .sort((first, second) => aiInsightsSortDate(second).localeCompare(aiInsightsSortDate(first))),
+            sections,
+            years: availableYears,
+            selectedYear
+        };
     }
 
     function renderAiInsightsCards() {
         const grid = document.getElementById('ai-insights-card-grid');
         const emptyState = document.getElementById('ai-insights-empty-state');
         if (!grid) return;
-        const rows = visibleAiInsightsRows();
+        const viewModel = buildAiInsightsViewModel();
+        renderAiInsightsYearTabs(viewModel);
+        const hasContent = viewModel.monthlyRows.length > 0 || viewModel.sections.length > 0;
         grid.replaceChildren();
         if (emptyState) {
-            emptyState.classList.toggle('hidden', rows.length > 0 || aiInsightsState.isLoading);
+            emptyState.classList.toggle('hidden', hasContent || aiInsightsState.isLoading);
             emptyState.textContent = aiInsightsState.isLoading
                 ? 'Loading AI summaries...'
                 : 'No generated or ready-to-generate AI summaries in this range.';
         }
-        if (aiInsightsState.isLoading && rows.length === 0) {
+        if (aiInsightsState.isLoading && !hasContent) {
             const loading = createAiInsightsElement('div', 'ai-insights-loading', 'Loading AI summaries...');
             grid.appendChild(loading);
             return;
         }
-        rows.forEach(row => {
-            grid.appendChild(createAiInsightsCard(row));
+        if (viewModel.monthlyRows.length > 0) {
+            grid.appendChild(createAiInsightsMonthlyStrip(viewModel.monthlyRows));
+        }
+        viewModel.sections.forEach(section => {
+            grid.appendChild(createAiInsightsWeekSection(section));
+        });
+        syncAiInsightsDetailRefreshButton();
+    }
+
+    function renderAiInsightsYearTabs(viewModel) {
+        const container = document.getElementById('ai-insights-year-tabs');
+        if (!container) return;
+        container.replaceChildren();
+        (viewModel.years || []).forEach(year => {
+            const button = createAiInsightsElement('button', 'app-tab ai-insights-year-tab', year);
+            const active = year === viewModel.selectedYear;
+            button.type = 'button';
+            button.setAttribute('role', 'tab');
+            button.setAttribute('aria-selected', String(active));
+            button.classList.toggle('app-tab--active', active);
+            button.addEventListener('click', () => {
+                aiInsightsState.selectedYear = year;
+                renderAiInsightsCards();
+            });
+            container.appendChild(button);
         });
     }
 
-    function createAiInsightsCard(row) {
-        const status = row.status || 'empty';
-        const card = createAiInsightsElement('article', `ai-insights-card ai-insights-card--${status}`);
+    function createAiInsightsMonthlyStrip(rows) {
+        const strip = createAiInsightsElement('section', 'ai-insights-monthly-strip');
+        strip.appendChild(createAiInsightsElement('h2', 'ai-insights-section-title', 'Monthly recaps'));
+        const list = createAiInsightsElement('div', 'ai-insights-monthly-list');
+        rows.forEach(row => {
+            list.appendChild(createAiInsightsCard(row, { compact: true }));
+        });
+        strip.appendChild(list);
+        return strip;
+    }
+
+    function createAiInsightsWeekSection(section) {
+        const sectionEl = createAiInsightsElement('section', 'ai-insights-week-section');
+        const header = createAiInsightsElement('div', 'ai-insights-week-header');
+        const titleBlock = createAiInsightsElement('div', 'ai-insights-week-heading');
+        titleBlock.appendChild(createAiInsightsElement('h2', 'ai-insights-section-title', section.title));
+        titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-section-meta', section.rangeLabel));
+        header.appendChild(titleBlock);
+        sectionEl.appendChild(header);
+
+        const grid = createAiInsightsElement('div', 'ai-insights-week-grid');
+        section.rows.forEach(row => {
+            grid.appendChild(createAiInsightsCard(row));
+        });
+        sectionEl.appendChild(grid);
+        return sectionEl;
+    }
+
+    function createAiInsightsCard(row, options = {}) {
+        const status = aiInsightsRowStatus(row);
+        const type = aiInsightsPeriodType(row);
+        const classes = ['ai-insights-card', `ai-insights-card--${status}`];
+        if (type === 'week') classes.push('ai-insights-card--weekly');
+        if (type === 'month') classes.push('ai-insights-card--monthly');
+        if (status === 'placeholder') classes.push('ai-insights-card--placeholder');
+        if (options.compact) classes.push('ai-insights-card--compact');
+        const card = createAiInsightsElement('article', classes.join(' '));
         if (aiInsightsPrimaryDate(row)) {
             card.id = aiInsightsCardId(row);
+        }
+        if (status === 'placeholder') {
+            card.setAttribute('aria-disabled', 'true');
         }
 
         const header = createAiInsightsElement('div', 'ai-insights-card-header');
         const titleBlock = createAiInsightsElement('div', 'ai-insights-card-title');
-        titleBlock.appendChild(createAiInsightsElement('h2', 'card-title', aiInsightsTitle(row)));
-        titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-card-metadata', aiInsightsMetadataLabel(row)));
-        const statusPill = createAiInsightsElement('span', 'ai-insights-status-pill', aiInsightsStatusLabel(status));
-        statusPill.dataset.state = status;
+        titleBlock.appendChild(createAiInsightsElement('h2', 'card-title', aiInsightsCardTitle(row)));
+        const metadata = aiInsightsMetadataLabel(row);
+        if (metadata) {
+            titleBlock.appendChild(createAiInsightsElement('span', 'ai-insights-card-metadata', metadata));
+        }
         header.appendChild(titleBlock);
-        header.appendChild(statusPill);
         card.appendChild(header);
 
         if (status === 'succeeded') {
@@ -2761,16 +2992,21 @@ function setupMainEventListeners() {
             appendFailedAiInsightsContent(card, row);
         } else if (status === 'ready') {
             appendReadyAiInsightsContent(card, row);
+        } else if (status === 'placeholder') {
+            appendPlaceholderAiInsightsContent(card, row);
         }
         return card;
     }
 
-    function renderAiInsightsTldr(highlights, className = 'ai-insights-tldr') {
+    function renderAiInsightsTldr(highlights, className = 'ai-insights-tldr', options = {}) {
         if (!Array.isArray(highlights)) return;
         const cleanHighlights = highlights.map(item => String(item || '').trim()).filter(Boolean);
         if (cleanHighlights.length === 0) return;
+        const showHeading = options.showHeading !== false;
         const section = createAiInsightsElement('div', className);
-        section.appendChild(createAiInsightsElement('h3', 'ai-insights-tldr-heading', 'TL;DR'));
+        if (showHeading) {
+            section.appendChild(createAiInsightsElement('h3', 'ai-insights-tldr-heading', 'TL;DR'));
+        }
         const list = createAiInsightsElement('ul', 'ai-insights-tldr-list');
         cleanHighlights.forEach(item => {
             const listItem = createAiInsightsElement('li', '');
@@ -2781,12 +3017,36 @@ function setupMainEventListeners() {
         return section;
     }
 
+    function aiInsightsCurrentDetailRow() {
+        const key = aiInsightsState.detailRowKey;
+        if (!key) return null;
+        return (Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [])
+            .find(row => aiInsightsRowKey(row) === key) || null;
+    }
+
+    function syncAiInsightsDetailRefreshButton(row = aiInsightsCurrentDetailRow()) {
+        const refreshButton = document.getElementById('ai-insights-detail-refresh');
+        if (!refreshButton) return;
+        const shouldShow = row && aiInsightsRowStatus(row) === 'succeeded';
+        refreshButton.classList.toggle('hidden', !shouldShow);
+        if (!shouldShow) {
+            refreshButton.disabled = true;
+            return;
+        }
+        const label = aiInsightsGenerateLabel(row, 'Refresh');
+        refreshButton.setAttribute('aria-label', label);
+        refreshButton.setAttribute('title', label);
+        refreshButton.disabled = !window.OrielData?.isNative || aiInsightsState.generatingKey === aiInsightsRowKey(row);
+    }
+
     function openAiInsightsDetail(row) {
         const modal = document.getElementById('ai-insights-detail-modal');
         const title = document.getElementById('ai-insights-detail-title');
         const body = document.getElementById('ai-insights-detail-body');
         if (!modal || !body) return;
-        if (title) title.textContent = aiInsightsTitle(row || {});
+        aiInsightsState.detailRowKey = aiInsightsRowKey(row || {});
+        if (title) title.textContent = aiInsightsDetailTitle(row || {});
+        syncAiInsightsDetailRefreshButton(row);
 
         const summary = row?.summary || {};
         const text = String(summary.text || aiInsightsDefaultSummaryText(row || {})).trim();
@@ -2801,23 +3061,22 @@ function setupMainEventListeners() {
         const summary = row.summary || {};
         const text = String(summary.text || aiInsightsDefaultSummaryText(row)).trim();
         const preview = createAiInsightsElement('div', 'ai-insights-card-preview ai-insights-card-preview--fade');
-        const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-card-tldr ai-insights-tldr');
+        const tldr = renderAiInsightsTldr(summary.highlights, 'ai-insights-card-tldr ai-insights-tldr', { showHeading: false });
         if (tldr) preview.appendChild(tldr);
         preview.appendChild(renderAiInsightsPreview(text));
         card.appendChild(preview);
 
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
-        const openButton = createAiInsightsElement('button', 'button-secondary', 'Open');
+        const openLabel = aiInsightsOpenLabel(row);
+        const openButton = createAiInsightsElement('button', 'icon-button ai-insights-card-open');
         openButton.type = 'button';
+        openButton.dataset.action = 'open';
+        openButton.setAttribute('aria-label', openLabel);
+        openButton.setAttribute('title', openLabel);
+        const openIcon = createAiInsightsElement('i', 'ph ph-arrows-out-simple');
+        openButton.appendChild(openIcon);
         openButton.addEventListener('click', () => openAiInsightsDetail(row));
-        const isGenerating = aiInsightsState.generatingKey === aiInsightsRowKey(row);
-        const regenerateButton = createAiInsightsElement('button', 'button-secondary', isGenerating ? 'Generating...' : 'Regenerate');
-        regenerateButton.type = 'button';
-        regenerateButton.dataset.action = 'generate';
-        regenerateButton.disabled = !window.OrielData?.isNative || isGenerating;
-        regenerateButton.addEventListener('click', () => generateAiInsightsSummary(row));
         actions.appendChild(openButton);
-        actions.appendChild(regenerateButton);
         card.appendChild(actions);
     }
 
@@ -2850,6 +3109,14 @@ function setupMainEventListeners() {
         const actions = createAiInsightsElement('div', 'card-actions ai-insights-card-actions');
         actions.appendChild(retryButton);
         card.appendChild(actions);
+    }
+
+    function appendPlaceholderAiInsightsContent(card, row) {
+        card.appendChild(createAiInsightsElement(
+            'p',
+            'ai-insights-card-note',
+            aiInsightsPlaceholderNote(row)
+        ));
     }
 
     async function refreshAiInsights({ focusDate = '', focusKey = '' } = {}) {
@@ -2905,6 +3172,7 @@ function setupMainEventListeners() {
         try {
             aiInsightsState.generatingKey = key;
             renderAiInsightsCards();
+            syncAiInsightsDetailRefreshButton(row);
             if (type === 'day') {
                 await window.OrielData.request('dailyAISummaries.generate', { date: row.date });
             } else {
@@ -2915,6 +3183,7 @@ function setupMainEventListeners() {
             }
             aiInsightsState.generatingKey = '';
             await refreshAiInsights({ focusKey: key });
+            syncAiInsightsDetailRefreshButton(aiInsightsCurrentDetailRow());
         } catch (error) {
             aiInsightsState.generatingKey = '';
             const existingRows = Array.isArray(aiInsightsState.rows) ? aiInsightsState.rows : [];
@@ -2922,6 +3191,7 @@ function setupMainEventListeners() {
                 ? { ...existing, status: 'failed', errorMessage: error?.message || `Could not generate the ${aiInsightsMetadataLabel(existing).toLowerCase()}.` }
                 : existing);
             renderAiInsightsCards();
+            syncAiInsightsDetailRefreshButton(aiInsightsCurrentDetailRow());
         }
     }
 
@@ -2999,7 +3269,15 @@ function setupMainEventListeners() {
         await refreshAiInsights();
     });
 
+    document.getElementById('ai-insights-detail-refresh')?.addEventListener('click', async () => {
+        const row = aiInsightsCurrentDetailRow();
+        if (!row) return;
+        await generateAiInsightsSummary(row);
+    });
+
     document.getElementById('ai-insights-detail-close')?.addEventListener('click', () => {
+        aiInsightsState.detailRowKey = '';
+        syncAiInsightsDetailRefreshButton(null);
         closeModalById('ai-insights-detail-modal');
     });
 

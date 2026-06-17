@@ -233,8 +233,21 @@ function loadMainControlsContext({
   nativeResponses = null,
   confirmResult = true,
   initialStorage = {},
-  defaultTitleCleanupRules = []
+  defaultTitleCleanupRules = [],
+  nowDate = new Date(2026, 4, 21, 9, 0, 0, 0),
+  currentDate = new Date(2026, 4, 21)
 } = {}) {
+  const RealDate = Date;
+  class FixedDate extends RealDate {
+    constructor(...args) {
+      super(...(args.length > 0 ? args : [nowDate.getTime()]));
+    }
+
+    static now() {
+      return nowDate.getTime();
+    }
+  }
+
   const elements = new Map();
   const hoverCalls = [];
   const fetchCalls = [];
@@ -300,6 +313,7 @@ function loadMainControlsContext({
         windowListeners[type].push(listener);
       }
     },
+    Date: FixedDate,
     document: {
       readyState: 'loading',
       documentElement: { dataset: {} },
@@ -325,7 +339,7 @@ function loadMainControlsContext({
     API_BASE: 'http://localhost:3000/api',
     state: {
       currentView: 'timeline',
-      currentDate: new Date(2026, 4, 21),
+      currentDate,
       zoom: 5,
       projects: [],
       trackingExclusions: [],
@@ -475,6 +489,22 @@ function findChild(root, predicate) {
   return null;
 }
 
+function weeklySections(grid) {
+  return Array.from(grid.children || []).filter(child => String(child.className || '').includes('ai-insights-week-section'));
+}
+
+function weeklyGrid(section) {
+  return findChild(section, child => String(child.className || '').includes('ai-insights-week-grid'));
+}
+
+function monthlyStrip(grid) {
+  return Array.from(grid.children || []).find(child => String(child.className || '').includes('ai-insights-monthly-strip'));
+}
+
+function textOfHeading(root, level = 'H2') {
+  return findChild(root, child => child.tagName === level)?.textContent;
+}
+
 test('opening Projects hides timeline date navigation and closes its open picker', () => {
   const { dom, element } = loadMainControlsContext();
 
@@ -610,6 +640,7 @@ test('AI Insights tab switches to the AI insights workspace and loads summary ca
 
 test('AI Insights renders generated, ready, and failed summary cards without uncertainty text', async () => {
   const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [
         {
@@ -623,7 +654,7 @@ test('AI Insights renders generated, ready, and failed summary cards without unc
           }
         },
         {
-          date: '2026-06-08',
+          date: '2026-06-05',
           status: 'ready',
           sourceSummaryCount: 7
         },
@@ -639,37 +670,95 @@ test('AI Insights renders generated, ready, and failed summary cards without unc
 
   await dom.elTabAiInsights.click();
   const grid = element('ai-insights-card-grid');
-  assert.equal(grid.children.length, 3);
-  assert.match(String(grid.children[0].className), /\bai-insights-card\b/);
-  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('card-title')));
-  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('ai-insights-card-metadata')));
-  assert.ok(findChild(grid.children[0], child => String(child.className || '').includes('card-actions')));
-  for (const card of grid.children) {
+  const sections = weeklySections(grid);
+  assert.equal(sections.length, 1);
+  assert.equal(textOfHeading(sections[0]), 'Week 23');
+  assert.match(sections[0].textContent, /1–7 Jun 2026/);
+  const cards = Array.from(weeklyGrid(sections[0]).children);
+  assert.equal(cards.length, 8);
+  assert.equal(textOfHeading(cards[0]), 'Weekly recap');
+  assert.match(String(cards[0].className), /\bai-insights-card--weekly\b/);
+  assert.equal(textOfHeading(cards[1]), 'Sun 7 Jun');
+  assert.equal(textOfHeading(cards[2]), 'Sat 6 Jun');
+  assert.equal(textOfHeading(cards[3]), 'Fri 5 Jun');
+  assert.equal(textOfHeading(cards[7]), 'Mon 1 Jun');
+  assert.ok(findChild(cards[1], child => String(child.className || '').includes('card-title')));
+  assert.equal(findChild(cards[1], child => String(child.className || '').includes('ai-insights-card-metadata')), null);
+  assert.ok(findChild(cards[1], child => String(child.className || '').includes('card-actions')));
+  for (const card of cards) {
     assert.doesNotMatch(String(card.className || ''), /text-\[(?:10|11|12|13)px\]|text-gray-|text-white|border-\[#2d2f34\]/);
   }
-  assert.match(grid.textContent, /Sunday, 7 June 2026/);
-  assert.doesNotMatch(grid.textContent, /Sun, 7 Jun 2026/);
-  assert.match(grid.textContent, /TL;DR/);
+  assert.match(grid.textContent, /Sun 7 Jun/);
+  assert.doesNotMatch(grid.textContent, /Sunday, 7 June 2026|Daily recap|TL;DR/);
   assert.match(grid.textContent, /Improved AI Insights/);
   assert.match(grid.textContent, /PR review/);
   assert.match(grid.textContent, /Focused implementation work in Oriel/);
-  assert.ok(grid.textContent.indexOf('TL;DR') < grid.textContent.indexOf('Focused implementation work in Oriel'));
-  const generatedCard = Array.from(grid.children).find(card => /Sunday, 7 June 2026/.test(card.textContent));
+  const generatedCard = cards.find(card => /Sun 7 Jun/.test(card.textContent));
   const highlightStrong = findChild(generatedCard, child => child.tagName === 'STRONG' && child.textContent === 'Improved AI Insights');
   assert.ok(highlightStrong);
   const highlightLink = findChild(generatedCard, child => child.tagName === 'A' && child.textContent === 'PR review');
   assert.equal(highlightLink?.attributes.href, 'https://github.com/sil-so/oriel/pull/22');
   assert.equal(highlightLink?.attributes.target, '_blank');
   assert.equal(highlightLink?.attributes.rel, 'noopener noreferrer');
+  assert.equal(findChild(generatedCard, child => child.dataset?.action === 'generate'), null);
+  const openButton = findChild(generatedCard, child => child.dataset?.action === 'open');
+  assert.ok(openButton);
+  assert.match(String(openButton.className || ''), /\bicon-button\b/);
+  assert.equal(openButton.attributes['aria-label'], 'Open daily summary');
+  assert.equal(openButton.attributes.title, 'Open daily summary');
+  assert.ok(findChild(openButton, child => String(child.className || '').includes('ph-arrows-out-simple')));
+  assert.doesNotMatch(generatedCard.textContent, /Open/);
+  assert.doesNotMatch(generatedCard.textContent, /Regenerate/);
+  assert.equal(findChild(generatedCard, child => String(child.className || '').includes('ai-insights-status-pill')), null);
+  assert.doesNotMatch(grid.textContent, /\b(?:Unavailable|Ready|Generated)\b/);
   assert.match(grid.textContent, /Generate daily summary/);
   assert.match(grid.textContent, /Try again/);
   assert.doesNotMatch(grid.textContent, /Based on \d+ screenshot activity summar/);
   assert.doesNotMatch(grid.textContent, /Uncertainties|metadata mismatch/);
 });
 
+test('AI Insights weekly sections keep current-week placeholders in fixed slots', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 17, 9, 0, 0, 0),
+    currentDate: new Date(2026, 5, 16),
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-16',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: { text: 'Generated recap for Tuesday.', highlights: [] }
+        }
+      ],
+      'aiInsightRollups.list': []
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+
+  const sections = weeklySections(element('ai-insights-card-grid'));
+  assert.equal(sections.length, 1);
+  const cards = Array.from(weeklyGrid(sections[0]).children);
+  assert.equal(cards.length, 8);
+  assert.equal(textOfHeading(sections[0]), 'Week 25');
+  assert.match(sections[0].textContent, /15–21 Jun 2026/);
+  assert.equal(textOfHeading(cards[0]), 'Weekly recap');
+  assert.equal(textOfHeading(cards[1]), 'Sun 21 Jun');
+  assert.equal(textOfHeading(cards[4]), 'Thu 18 Jun');
+  assert.equal(textOfHeading(cards[5]), 'Wed 17 Jun');
+  assert.equal(textOfHeading(cards[6]), 'Tue 16 Jun');
+  assert.match(cards[5].textContent, /Not yet available/);
+  assert.match(cards[4].textContent, /Not yet available/);
+  assert.doesNotMatch(cards[4].textContent, /cannot be generated yet/i);
+  assert.match(String(cards[5].className), /\bai-insights-card--placeholder\b/);
+  assert.equal(cards[5].attributes['aria-disabled'], 'true');
+  assert.equal(findChild(cards[5], child => child.dataset?.action === 'generate'), null);
+});
+
 test('AI Insights ready card generation uses the card date and refreshes the grid', async () => {
   let generated = false;
   const { dom, element, nativeRequests } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 8, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': () => generated ? [
         {
@@ -698,7 +787,8 @@ test('AI Insights ready card generation uses the card date and refreshes the gri
   });
 
   await dom.elTabAiInsights.click();
-  const readyCard = element('ai-insights-card-grid').children[0];
+  let cards = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children);
+  const readyCard = cards[7];
   const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
   assert.ok(generateButton);
 
@@ -711,6 +801,8 @@ test('AI Insights ready card generation uses the card date and refreshes the gri
     'aiInsightRollups.list'
   ]);
   assert.equal(nativeRequests[2].payload.date, '2026-06-08');
+  cards = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children);
+  assert.equal(cards.length, 8);
   assert.match(element('ai-insights-card-grid').textContent, /Generated recap/);
 });
 
@@ -726,6 +818,7 @@ test('AI Insights renders weekly and monthly rollup cards alongside daily cards'
     }
   };
   const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [
         {
@@ -768,32 +861,96 @@ test('AI Insights renders weekly and monthly rollup cards alongside daily cards'
   await dom.elTabAiInsights.click();
 
   const grid = element('ai-insights-card-grid');
-  assert.equal(grid.children.length, 4);
-  assert.equal(findChild(grid.children[0], child => child.tagName === 'H2')?.textContent, 'June 2026');
-  assert.equal(findChild(grid.children[1], child => child.tagName === 'H2')?.textContent, 'Tuesday, 30 June 2026');
-  assert.equal(findChild(grid.children[2], child => child.tagName === 'H2')?.textContent, 'Week 23, 2026');
-  assert.equal(findChild(grid.children[3], child => child.tagName === 'H2')?.textContent, 'Sunday, 7 June 2026');
-  assert.match(grid.textContent, /Sunday, 7 June 2026/);
+  const months = monthlyStrip(grid);
+  assert.ok(months);
+  assert.match(String(months.className), /\bai-insights-monthly-strip\b/);
+  const monthCard = findChild(months, child => child.tagName === 'ARTICLE');
+  assert.equal(findChild(monthCard, child => child.tagName === 'H2')?.textContent, 'June 2026');
+  const sections = weeklySections(grid);
+  assert.equal(sections.length, 2);
+  const firstWeekCards = Array.from(weeklyGrid(sections[0]).children);
+  const secondWeekCards = Array.from(weeklyGrid(sections[1]).children);
+  assert.equal(firstWeekCards.length, 8);
+  assert.equal(secondWeekCards.length, 8);
+  assert.equal(textOfHeading(sections[0]), 'Week 27');
+  assert.match(sections[0].textContent, /29 Jun–5 Jul 2026/);
+  assert.equal(textOfHeading(firstWeekCards[0]), 'Weekly recap');
+  assert.equal(textOfHeading(firstWeekCards[1]), 'Sun 5 Jul');
+  assert.equal(textOfHeading(firstWeekCards[6]), 'Tue 30 Jun');
+  assert.equal(textOfHeading(firstWeekCards[7]), 'Mon 29 Jun');
+  assert.equal(textOfHeading(sections[1]), 'Week 23');
+  assert.equal(textOfHeading(secondWeekCards[1]), 'Sun 7 Jun');
+  assert.match(grid.textContent, /Sun 7 Jun/);
   assert.match(grid.textContent, /June 2026/);
-  assert.match(grid.textContent, /Week 23, 2026/);
+  assert.match(grid.textContent, /Week 23/);
   assert.doesNotMatch(grid.textContent, /Week of Monday/);
-  assert.match(grid.textContent, /Daily recap/);
+  assert.equal(findChild(firstWeekCards[6], child => String(child.className || '').includes('ai-insights-card-metadata')), null);
+  assert.equal(findChild(secondWeekCards[1], child => String(child.className || '').includes('ai-insights-card-metadata')), null);
   assert.match(grid.textContent, /Monthly recap/);
   assert.match(grid.textContent, /Weekly recap/);
   assert.match(grid.textContent, /Generate weekly recap/);
   assert.doesNotMatch(grid.textContent, /Oriel rollups/);
   assert.doesNotMatch(grid.textContent, /Longest focus/);
 
-  const monthCard = Array.from(grid.children).find(card => /Monthly recap/.test(card.textContent));
-  await findChild(monthCard, child => child.textContent === 'Open').click();
+  await findChild(monthCard, child => child.dataset?.action === 'open').click();
   assert.equal(element('ai-insights-detail-title').textContent, 'June 2026');
   assert.match(element('ai-insights-detail-body').textContent, /The month centered on recap cards/);
   assert.doesNotMatch(element('ai-insights-detail-body').textContent, /Longest focus/);
 });
 
+test('AI Insights year tabs filter weekly and monthly sections', async () => {
+  const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 17, 9, 0, 0, 0),
+    nativeResponses: {
+      'dailyAISummaries.list': [
+        {
+          date: '2026-06-17',
+          status: 'ready',
+          sourceSummaryCount: 2
+        },
+        {
+          date: '2025-12-28',
+          status: 'succeeded',
+          sourceSummaryCount: 3,
+          summary: { text: 'Late December recap.', highlights: [] }
+        }
+      ],
+      'aiInsightRollups.list': [
+        {
+          periodType: 'month',
+          periodStart: '2025-12-01',
+          periodEnd: '2025-12-31',
+          status: 'succeeded',
+          sourceDailyCount: 1,
+          summary: { text: 'December monthly recap.', highlights: [] }
+        }
+      ]
+    }
+  });
+
+  await dom.elTabAiInsights.click();
+
+  const yearTabs = element('ai-insights-year-tabs');
+  const yearButtons = Array.from(yearTabs.children);
+  assert.deepEqual(yearButtons.map(button => button.textContent), ['2026', '2025']);
+  assert.equal(yearButtons[0].attributes['aria-selected'], 'true');
+  assert.match(element('ai-insights-card-grid').textContent, /Week 25/);
+  assert.doesNotMatch(element('ai-insights-card-grid').textContent, /Late December recap|December monthly recap/);
+
+  await yearButtons[1].click();
+
+  const updatedYearButtons = Array.from(yearTabs.children);
+  assert.equal(updatedYearButtons[1].attributes['aria-selected'], 'true');
+  assert.match(element('ai-insights-card-grid').textContent, /Week 52/);
+  assert.match(element('ai-insights-card-grid').textContent, /Sun 28 Dec/);
+  assert.match(element('ai-insights-card-grid').textContent, /December 2025/);
+  assert.doesNotMatch(element('ai-insights-card-grid').textContent, /Week 25/);
+});
+
 test('AI Insights ready rollup card generation uses the card period and refreshes the grid', async () => {
   let generated = false;
   const { dom, element, nativeRequests } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [],
       'aiInsightRollups.list': () => generated ? [
@@ -829,7 +986,7 @@ test('AI Insights ready rollup card generation uses the card period and refreshe
   });
 
   await dom.elTabAiInsights.click();
-  const readyCard = element('ai-insights-card-grid').children[0];
+  const readyCard = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[0];
   const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
   assert.ok(generateButton);
 
@@ -850,7 +1007,8 @@ test('AI Insights ready rollup card generation uses the card period and refreshe
 });
 
 test('AI Insights generated card Open button shows a full summary modal', async () => {
-  const { dom, element } = loadMainControlsContext({
+  const { dom, element, nativeRequests } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [
         {
@@ -862,19 +1020,26 @@ test('AI Insights generated card Open button shows a full summary modal', async 
             highlights: ['**One**', '[Two](https://example.com/two)', 'Three']
           }
         }
-      ]
+      ],
+      'dailyAISummaries.generate': {}
     }
   });
 
   await dom.elTabAiInsights.click();
-  const card = element('ai-insights-card-grid').children[0];
-  const openButton = findChild(card, child => child.textContent === 'Open');
+  const card = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[1];
+  const openButton = findChild(card, child => child.dataset?.action === 'open');
   assert.ok(openButton);
+  assert.match(String(openButton.className || ''), /\bicon-button\b/);
   assert.equal(element('ai-insights-detail-modal').classList.contains('hidden'), true);
+  const refreshButton = element('ai-insights-detail-refresh');
+  assert.equal(refreshButton.classList.contains('hidden'), true);
 
   await openButton.click();
   assert.equal(element('ai-insights-detail-modal').classList.contains('hidden'), false);
   assert.equal(element('ai-insights-detail-title').textContent, 'Sunday, 7 June 2026');
+  assert.equal(refreshButton.classList.contains('hidden'), false);
+  assert.equal(refreshButton.attributes['aria-label'], 'Refresh daily summary');
+  assert.equal(refreshButton.attributes.title, 'Refresh daily summary');
   assert.match(element('ai-insights-detail-body').textContent, /TL;DR/);
   assert.match(element('ai-insights-detail-body').textContent, /Generated recap/);
   assert.ok(element('ai-insights-detail-body').textContent.indexOf('TL;DR') < element('ai-insights-detail-body').textContent.indexOf('Generated recap'));
@@ -891,11 +1056,22 @@ test('AI Insights generated card Open button shows a full summary modal', async 
   assert.equal(detailLink?.attributes.href, 'https://example.com/two');
   assert.equal(detailLink?.attributes.target, '_blank');
   assert.equal(detailLink?.attributes.rel, 'noopener noreferrer');
-  assert.equal(openButton.textContent, 'Open');
+  assert.doesNotMatch(openButton.textContent, /Open/);
+
+  await refreshButton.click();
+  assert.deepEqual(nativeRequests.map(request => request.operation), [
+    'dailyAISummaries.list',
+    'aiInsightRollups.list',
+    'dailyAISummaries.generate',
+    'dailyAISummaries.list',
+    'aiInsightRollups.list'
+  ]);
+  assert.equal(nativeRequests[2].payload.date, '2026-06-07');
 });
 
 test('AI Insights generated cards render TLDR highlights before narrative preview', async () => {
   const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [
         {
@@ -917,18 +1093,17 @@ test('AI Insights generated cards render TLDR highlights before narrative previe
   });
 
   await dom.elTabAiInsights.click();
-  const card = element('ai-insights-card-grid').children[0];
+  const card = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[1];
   const preview = findChild(card, child => String(child.className || '').includes('ai-insights-card-preview'));
   assert.ok(preview);
-  assert.match(card.textContent, /TL;DR/);
+  assert.doesNotMatch(card.textContent, /TL;DR/);
   assert.match(card.textContent, /Improved card interactions/);
   assert.match(card.textContent, /Rendered recap bullets/);
   assert.match(card.textContent, /Focused implementation work/);
   assert.ok(card.textContent.indexOf('Rendered recap bullets') < card.textContent.indexOf('Focused implementation work'));
   assert.doesNotMatch(card.textContent, /Additional details stayed readable/);
   const cardHeading = findChild(card, child => child.tagName === 'H3' && String(child.className || '').includes('ai-insights-tldr-heading'));
-  assert.ok(cardHeading);
-  assert.equal(cardHeading.textContent, 'TL;DR');
+  assert.equal(cardHeading, null);
   const cardList = findChild(card, child => child.tagName === 'UL' && String(child.className || '').includes('ai-insights-tldr-list'));
   assert.ok(cardList);
   assert.equal(cardList.children.length, 4);
@@ -939,7 +1114,7 @@ test('AI Insights generated cards render TLDR highlights before narrative previe
   const cardLink = findChild(card, child => child.tagName === 'A' && child.textContent === 'daily recap');
   assert.equal(cardLink?.attributes.href, 'https://example.com/recap');
 
-  await findChild(card, child => child.textContent === 'Open').click();
+  await findChild(card, child => child.dataset?.action === 'open').click();
   const detailHeading = findChild(element('ai-insights-detail-body'), child => child.tagName === 'H3' && String(child.className || '').includes('ai-insights-tldr-heading'));
   assert.ok(detailHeading);
   assert.equal(detailHeading.textContent, 'TL;DR');
@@ -984,6 +1159,7 @@ test('AI Insights generated cards and detail modal keep summary metrics hidden',
     ]
   };
   const { dom, element } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 7, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': [
         {
@@ -1002,7 +1178,7 @@ test('AI Insights generated cards and detail modal keep summary metrics hidden',
 
   await dom.elTabAiInsights.click();
 
-  const card = element('ai-insights-card-grid').children[0];
+  const card = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[1];
   const cardMetrics = findChild(card, child => String(child.className || '').includes('ai-insights-card-metrics'));
   assert.equal(cardMetrics, null);
   assert.doesNotMatch(card.textContent, /Longest focus/);
@@ -1010,7 +1186,7 @@ test('AI Insights generated cards and detail modal keep summary metrics hidden',
   assert.doesNotMatch(card.textContent, /1h 5m/);
   assert.doesNotMatch(card.textContent, /3 switches/);
 
-  await findChild(card, child => child.textContent === 'Open').click();
+  await findChild(card, child => child.dataset?.action === 'open').click();
 
   const detailMetrics = findChild(element('ai-insights-detail-body'), child => String(child.className || '').includes('ai-insights-detail-metrics'));
   assert.equal(detailMetrics, null);
@@ -1024,6 +1200,7 @@ test('AI Insights generation buttons show loading state while a request is pendi
   let resolveGenerate;
   let generated = false;
   const { dom, element, nativeRequests } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 8, 9, 0, 0, 0),
     nativeResponses: {
       'dailyAISummaries.list': () => generated ? [
         {
@@ -1050,14 +1227,15 @@ test('AI Insights generation buttons show loading state while a request is pendi
   });
 
   await dom.elTabAiInsights.click();
-  const readyCard = element('ai-insights-card-grid').children[0];
+  const readyCard = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[7];
   const generateButton = findChild(readyCard, child => child.dataset?.action === 'generate');
   assert.ok(generateButton);
 
   const clickPromise = generateButton.click();
   await Promise.resolve();
 
-  const pendingButton = findChild(element('ai-insights-card-grid').children[0], child => child.dataset?.action === 'generate');
+  const pendingCard = Array.from(weeklyGrid(weeklySections(element('ai-insights-card-grid'))[0]).children)[7];
+  const pendingButton = findChild(pendingCard, child => child.dataset?.action === 'generate');
   assert.equal(pendingButton.disabled, true);
   assert.equal(pendingButton.textContent, 'Generating...');
   assert.equal(nativeRequests[2].payload.date, '2026-06-08');
@@ -1069,6 +1247,8 @@ test('AI Insights generation buttons show loading state while a request is pendi
 
 test('AI Insights refreshes when header date navigation changes while active', async () => {
   const { dom, element, nativeRequests } = loadMainControlsContext({
+    nowDate: new Date(2026, 5, 17, 9, 0, 0, 0),
+    currentDate: new Date(2026, 5, 17),
     nativeResponses: {
       'dailyAISummaries.list': payload => []
     }
@@ -1081,13 +1261,13 @@ test('AI Insights refreshes when header date navigation changes while active', a
 
   assert.deepEqual(nativeRequests.map(request => request.operation), ['dailyAISummaries.list', 'aiInsightRollups.list']);
   assert.deepEqual({ ...nativeRequests[0].payload }, {
-    startDate: '2025-05-20',
-    endDate: '2026-05-20',
+    startDate: '2025-06-17',
+    endDate: '2026-06-17',
     includeEmpty: false
   });
   assert.deepEqual({ ...nativeRequests[1].payload }, {
-    startDate: '2025-05-20',
-    endDate: '2026-05-20',
+    startDate: '2025-06-17',
+    endDate: '2026-06-17',
     includeEmpty: false
   });
 });
