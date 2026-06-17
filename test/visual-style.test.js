@@ -325,6 +325,7 @@ test('header and modal icon controls use the icon-button primitive', () => {
     'date-picker-prev-month',
     'date-picker-next-month',
     'popup-close-btn',
+    'ai-insights-detail-refresh',
     'ai-insights-detail-close',
     'rules-modal-btn-close',
     'settings-modal-btn-close',
@@ -359,6 +360,8 @@ test('AI Insights header omits archive controls and workspace separator', () => 
   assert.doesNotMatch(insightsHeader, /ai-insights-summary-date-trigger|ai-insights-range-filter|ai-insights-status-filter/);
   assert.doesNotMatch(insightsHeader, /Jump to date|Range|Status/);
   assert.doesNotMatch(insightsHeader, /justify-between[^"]*border-b/);
+  assert.match(insightsHeader, /id="ai-insights-year-tabs"[^>]*class="[^"]*\bapp-tab-group\b[^"]*\bai-insights-year-tabs\b/);
+  assert.match(insightsHeader, /role="tablist"[^>]*aria-label="AI Insights year"/);
 });
 
 test('AI Insights detail modal puts bottom spacing inside the scroll content', () => {
@@ -367,25 +370,32 @@ test('AI Insights detail modal puts bottom spacing inside the scroll content', (
   const modalPanelClass = html.match(/id="ai-insights-detail-modal"[\s\S]*?<div class="([^"]*\bmodal-panel\b[^"]*)"/)?.[1] || '';
 
   assert.match(modalPanelClass, /\bmodal-panel--scroll\b/);
+  assert.match(html, /id="ai-insights-detail-refresh"[\s\S]*?id="ai-insights-detail-close"/);
+  assert.match(html, /<button(?=[^>]*id="ai-insights-detail-refresh")(?=[^>]*class="[^"]*\bicon-button\b[^"]*\bhidden\b)[^>]*>/);
+  assert.match(html, /id="ai-insights-detail-refresh"[\s\S]*?ph ph-arrows-clockwise/);
   assert.match(html, /id="ai-insights-detail-body"[^>]*class="[^"]*\bmodal-scroll-content\b[^"]*"/);
   assert.match(css, /\.ai-insights-detail-body::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 6px/s);
   assert.doesNotMatch(css.match(/\.ai-insights-detail-body\s*\{[^}]*\}/)?.[0] || '', /padding-bottom:/);
 });
 
-test('AI Insights generated card preview fade starts at the second visible content line', () => {
+test('AI Insights generated card preview fade shows five visible content lines', () => {
   const css = fs.readFileSync('css/index.css', 'utf8');
+  const cardRule = css.match(/\.ai-insights-card\s*\{[^}]*\}/)?.[0] || '';
   const previewRule = css.match(/\.ai-insights-card-preview--fade\s*\{[^}]*\}/)?.[0] || '';
   const fadeRule = css.match(/\.ai-insights-card-preview--fade::after\s*\{[^}]*\}/)?.[0] || '';
   const legacySummaryFadeRule = css.match(/\.ai-insights-card-summary--fade\s*\{[^}]*\}/)?.[0] || '';
   const previewBaseRule = css.match(/\.ai-insights-card-preview\s*\{[^}]*\}/)?.[0] || '';
   const previewLineRules = css.match(/\.ai-insights-card-preview \.ai-insights-card-summary,[\s\S]*?line-height:\s*var\(--ai-insights-preview-line-height\);[\s\S]*?\}/)?.[0] || '';
 
+  assert.match(cardRule, /--ai-insights-card-fade-surface:\s*var\(--surface-panel\)/);
   assert.match(previewBaseRule, /--ai-insights-preview-line-height:\s*18px/);
   assert.match(previewBaseRule, /gap:\s*0/);
-  assert.match(previewRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 6\)/);
-  assert.match(previewRule, /max-height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 6\)/);
+  assert.match(previewRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 5\)/);
+  assert.match(previewRule, /max-height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 5\)/);
   assert.match(fadeRule, /top:\s*calc\(var\(--ai-insights-preview-line-height\) \* 1\)/);
-  assert.match(fadeRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 5\)/);
+  assert.match(fadeRule, /height:\s*calc\(var\(--ai-insights-preview-line-height\) \* 4\)/);
+  assert.match(fadeRule, /var\(--ai-insights-card-fade-surface\)/);
+  assert.doesNotMatch(fadeRule, /var\(--surface-panel\)/);
   assert.match(previewLineRules, /ai-insights-tldr-list li/);
   assert.equal(legacySummaryFadeRule, '');
 });
@@ -753,7 +763,7 @@ test('similar activity selection uses a modal with explicit match modes', () => 
   assert.match(timeline, /function getActivitySimilarityKeyForMode\(/);
 });
 
-test('project and AI Insights card grids share the workspace grid primitive', () => {
+test('AI Insights uses weekly four-column grids instead of the shared workspace grid', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
   const projectsMarkup = html.match(/id="projects-workspace"[\s\S]*?<!-- Reporting workspace -->/)?.[0] || '';
@@ -761,16 +771,34 @@ test('project and AI Insights card grids share the workspace grid primitive', ()
   const sharedGridRule = css.match(/\.workspace-card-grid\s*\{[^}]*\}/)?.[0] || '';
   const projectsGridRule = css.match(/#projects-page-grid\s*\{[^}]*\}/)?.[0] || '';
   const aiGridRule = css.match(/\.ai-insights-card-grid\s*\{[^}]*\}/)?.[0] || '';
+  const cardRule = css.match(/\.ai-insights-card\s*\{[^}]*\}/)?.[0] || '';
+  const actionsRule = css.match(/\.ai-insights-card-actions\s*\{[^}]*\}/)?.[0] || '';
+  const openButtonRule = css.match(/\.ai-insights-card-open\s*\{[^}]*\}/)?.[0] || '';
+  const weekGridRule = css.match(/\.ai-insights-week-grid\s*\{[^}]*\}/)?.[0] || '';
+  const placeholderRule = css.match(/\.ai-insights-card--placeholder\s*\{[^}]*\}/)?.[0] || '';
+  const weeklyCardRule = css.match(/\.ai-insights-card--weekly\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(projectsMarkup, /class="[^"]*\bworkspace-card-grid\b[^"]*\bprojects-card-grid\b[^"]*"[^>]*id="projects-page-grid"/);
-  assert.match(aiMarkup, /class="[^"]*\bworkspace-card-grid\b[^"]*\bai-insights-card-grid\b[^"]*"[^>]*id="ai-insights-card-grid"/);
+  assert.match(aiMarkup, /class="[^"]*\bai-insights-card-grid\b[^"]*"[^>]*id="ai-insights-card-grid"/);
+  assert.doesNotMatch(aiMarkup, /class="[^"]*\bworkspace-card-grid\b[^"]*\bai-insights-card-grid\b/);
   assert.match(sharedGridRule, /display:\s*grid/);
   assert.match(sharedGridRule, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(sharedGridRule, /gap:\s*24px/);
   assert.match(sharedGridRule, /min-width:\s*0/);
+  assert.match(aiGridRule, /display:\s*flex/);
+  assert.match(cardRule, /min-height:\s*var\(--ai-insights-card-min-height\)/);
+  assert.match(cardRule, /--ai-insights-card-min-height:\s*180px/);
+  assert.match(actionsRule, /margin-top:\s*auto/);
+  assert.match(openButtonRule, /background:\s*var\(--surface-raised\)/);
+  assert.match(openButtonRule, /border-color:\s*var\(--border\)/);
+  assert.match(weekGridRule, /display:\s*grid/);
+  assert.match(weekGridRule, /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(weekGridRule, /grid-auto-rows:\s*minmax\(var\(--ai-insights-card-min-height\),\s*1fr\)/);
+  assert.match(placeholderRule, /var\(--surface-panel\)|var\(--surface-recessed\)|var\(--separator/);
+  assert.match(weeklyCardRule, /var\(--surface-raised\)|var\(--surface-recessed\)|var\(--separator/);
+  assert.doesNotMatch(css, /\.ai-insights-status-pill\b/);
   assert.doesNotMatch(html, /grid-cols-1\s+md:grid-cols-2\s+lg:grid-cols-3/);
   assert.doesNotMatch(projectsGridRule, /gap:/);
-  assert.doesNotMatch(aiGridRule, /gap:/);
   assert.doesNotMatch(projectsGridRule, /grid-template-columns:/);
   assert.doesNotMatch(aiGridRule, /grid-template-columns:/);
   assert.doesNotMatch(aiGridRule, /auto-fit/);

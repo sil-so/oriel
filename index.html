@@ -521,8 +521,9 @@
                 <p class="workspace-helper">Generate daily, weekly, and monthly recaps from stored screenshot activity summaries. Screenshots are not stored or shown here.</p>
             </div>
         </div>
+        <div id="ai-insights-year-tabs" class="app-tab-group ai-insights-year-tabs" role="tablist" aria-label="AI Insights year"></div>
 
-        <div class="workspace-card-grid ai-insights-card-grid" id="ai-insights-card-grid" aria-live="polite"></div>
+        <div class="ai-insights-card-grid" id="ai-insights-card-grid" aria-live="polite"></div>
         <div class="ai-insights-empty-state hidden" id="ai-insights-empty-state">
             No generated or ready-to-generate AI summaries in this range.
         </div>
@@ -536,9 +537,14 @@
                     <i class="ph ph-sparkle modal-title-icon"></i>
                     <h3 class="modal-title truncate" id="ai-insights-detail-title">Daily Summary</h3>
                 </div>
-                <button class="icon-button" id="ai-insights-detail-close" aria-label="Close AI summary">
-                    <i class="ph ph-x text-lg"></i>
-                </button>
+                <div class="modal-header-actions">
+                    <button class="icon-button hidden" id="ai-insights-detail-refresh" aria-label="Refresh AI summary" title="Refresh AI summary">
+                        <i class="ph ph-arrows-clockwise text-lg"></i>
+                    </button>
+                    <button class="icon-button" id="ai-insights-detail-close" aria-label="Close AI summary">
+                        <i class="ph ph-x text-lg"></i>
+                    </button>
+                </div>
             </div>
             <div id="ai-insights-detail-body" class="modal-scroll-content ai-insights-detail-body app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0"></div>
         </div>
