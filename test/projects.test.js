@@ -42,6 +42,7 @@ function loadProjectsContext(fetchImpl) {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
   return { context, grid, fetchCalls };
 }
@@ -89,8 +90,10 @@ test('project cards show unavailable historical metrics when all-time loading fa
 
 test('work times displays all recorded activity including short timeline-owned segments', () => {
   const capturedActive = { innerText: '' };
+  const workCaptured = { innerText: '' };
   const context = {
     window: {},
+    URL,
     state: {
       activities: [{ start: 60000, end: 180000, app: 'Codex' }],
       timelineActivities: [
@@ -102,7 +105,12 @@ test('work times displays all recorded activity including short timeline-owned s
     },
     DOM: {
       elStatCapturedActive: capturedActive,
-      elStatProjectTotal: { innerText: '' },
+      elWorkStatCaptured: workCaptured,
+      elWorkStatLogged: { innerText: '' },
+      elWorkStatEarnings: { innerText: '' },
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: { innerText: '' },
+      elWorkStatConversionBar: { style: {} },
       getElStatBillable: { innerText: '' },
       elStatNonbillable: { innerText: '' },
       elBarProject: { style: {} },
@@ -113,17 +121,20 @@ test('work times displays all recorded activity including short timeline-owned s
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
   assert.equal(capturedActive.innerText, '0h 3m');
+  assert.equal(workCaptured.innerText, '3 min');
 });
 
 test('work times uses assigned activity duration instead of visual assignment span', () => {
-  const projectTotal = { innerText: '' };
+  const logged = { innerText: '' };
   const context = {
     window: {},
+    URL,
     state: {
       activities: [],
       timelineActivities: [],
@@ -138,7 +149,12 @@ test('work times uses assigned activity duration instead of visual assignment sp
     },
     DOM: {
       elStatCapturedActive: { innerText: '' },
-      elStatProjectTotal: projectTotal,
+      elWorkStatCaptured: { innerText: '' },
+      elWorkStatLogged: logged,
+      elWorkStatEarnings: { innerText: '' },
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: { innerText: '' },
+      elWorkStatConversionBar: { style: {} },
       getElStatBillable: { innerText: '' },
       elStatNonbillable: { innerText: '' },
       elBarProject: { style: {} },
@@ -149,15 +165,16 @@ test('work times uses assigned activity duration instead of visual assignment sp
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
-  assert.equal(projectTotal.innerText, '0h 5m');
+  assert.equal(logged.innerText, '5 min');
 });
 
 test('work times includes short auto-rule entries', () => {
-  const projectTotal = { innerText: '' };
+  const logged = { innerText: '' };
   const projectsList = { innerHTML: '' };
   const context = {
     window: {},
@@ -181,7 +198,12 @@ test('work times includes short auto-rule entries', () => {
     },
     DOM: {
       elStatCapturedActive: { innerText: '' },
-      elStatProjectTotal: projectTotal,
+      elWorkStatCaptured: { innerText: '' },
+      elWorkStatLogged: logged,
+      elWorkStatEarnings: { innerText: '' },
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: { innerText: '' },
+      elWorkStatConversionBar: { style: {} },
       getElStatBillable: { innerText: '' },
       elStatNonbillable: { innerText: '' },
       elBarProject: { style: {} },
@@ -200,7 +222,7 @@ test('work times includes short auto-rule entries', () => {
 
   context.recalculateStatistics();
 
-  assert.equal(projectTotal.innerText, '0h 0m');
+  assert.equal(logged.innerText, '45s');
   assert.equal(context.DOM.elBarProject.style.width, '38%');
   assert.match(projectsList.innerHTML, /Project One/);
   assert.doesNotMatch(projectsList.innerHTML, /No time entries logged/);
@@ -234,7 +256,7 @@ test('project historical entries render positive sub-minute durations and auto-r
 });
 
 test('work times keeps legacy activity-stream totals on saved assigned duration', () => {
-  const projectTotal = { innerText: '' };
+  const logged = { innerText: '' };
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const context = {
     window: {},
@@ -284,7 +306,12 @@ test('work times keeps legacy activity-stream totals on saved assigned duration'
     },
     DOM: {
       elStatCapturedActive: { innerText: '' },
-      elStatProjectTotal: projectTotal,
+      elWorkStatCaptured: { innerText: '' },
+      elWorkStatLogged: logged,
+      elWorkStatEarnings: { innerText: '' },
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: { innerText: '' },
+      elWorkStatConversionBar: { style: {} },
       getElStatBillable: { innerText: '' },
       elStatNonbillable: { innerText: '' },
       elBarProject: { style: {} },
@@ -295,12 +322,149 @@ test('work times keeps legacy activity-stream totals on saved assigned duration'
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
-  assert.equal(projectTotal.innerText, '0h 2m');
+  assert.equal(logged.innerText, '2 min');
+});
+
+test('work times sidebar metrics use the shared selected-period calculation', () => {
+  const captured = { innerText: '' };
+  const logged = { innerText: '' };
+  const earnings = { innerText: '' };
+  const billableHours = { innerText: '' };
+  const conversion = { innerText: '' };
+  const conversionBar = { style: {} };
+  const context = {
+    window: {},
+    URL,
+    state: {
+      timelineActivities: [
+        { start: 0, end: 60 * 60 * 1000 },
+        { start: 60 * 60 * 1000, end: 2 * 60 * 60 * 1000 }
+      ],
+      activities: [],
+      timeEntries: [{
+        start: 0,
+        end: 60 * 60 * 1000,
+        projectId: 'project-1',
+        billable: true
+      }],
+      projects: [{
+        id: 'project-1',
+        name: 'Client Work',
+        color: '#3b82f6',
+        billable: true,
+        rateType: 'hourly',
+        hourlyRate: 120,
+        currency: '$'
+      }]
+    },
+    DOM: {
+      elStatCapturedActive: { innerText: '' },
+      elWorkStatCaptured: captured,
+      elWorkStatLogged: logged,
+      elWorkStatEarnings: earnings,
+      elWorkStatBillableHours: billableHours,
+      elWorkStatConversionPercent: conversion,
+      elWorkStatConversionBar: conversionBar,
+      getElStatBillable: { innerText: '' },
+      elStatNonbillable: { innerText: '' },
+      elBarProject: { style: {} },
+      elProjectsList: { innerHTML: '' }
+    },
+    document: { getElementById() { return null; } },
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+
+  context.recalculateStatistics();
+  const metrics = context.calculateSelectedPeriodMetrics({
+    activities: context.state.timelineActivities,
+    timeEntries: context.state.timeEntries,
+    projects: context.state.projects,
+    allTimeEntries: context.state.timeEntries
+  });
+
+  assert.equal(metrics.totalCapturedMs, 2 * 60 * 60 * 1000);
+  assert.equal(metrics.totalLoggedMs, 60 * 60 * 1000);
+  assert.equal(captured.innerText, '2h 0m');
+  assert.equal(logged.innerText, '1h 0m');
+  assert.equal(earnings.innerText, '$120.00');
+  assert.equal(billableHours.innerText, '1.0h of billable work');
+  assert.equal(conversion.innerText, '50%');
+  assert.equal(conversionBar.style.width, '50%');
+});
+
+test('work times fixed-rate earnings refresh from all-time entries like Statistics', async () => {
+  const earnings = { innerText: '' };
+  let fetchCount = 0;
+  const context = {
+    window: {},
+    fetchAllTimeEntries: async () => {
+      fetchCount++;
+      return [{
+        id: 'historical-entry',
+        start: -2 * 60 * 60 * 1000,
+        end: 0,
+        projectId: 'project-1',
+        billable: true
+      }];
+    },
+    state: {
+      timelineActivities: [{ start: 0, end: 60 * 60 * 1000 }],
+      activities: [],
+      timeEntries: [{
+        id: 'current-entry',
+        start: 0,
+        end: 60 * 60 * 1000,
+        projectId: 'project-1',
+        billable: true
+      }],
+      projects: [{
+        id: 'project-1',
+        name: 'Fixed Project',
+        color: '#3b82f6',
+        billable: true,
+        rateType: 'fixed',
+        fixedRate: 300,
+        currency: '$'
+      }]
+    },
+    DOM: {
+      elStatCapturedActive: { innerText: '' },
+      elWorkStatCaptured: { innerText: '' },
+      elWorkStatLogged: { innerText: '' },
+      elWorkStatEarnings: earnings,
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: { innerText: '' },
+      elWorkStatConversionBar: { style: {} },
+      getElStatBillable: { innerText: '' },
+      elStatNonbillable: { innerText: '' },
+      elBarProject: { style: {} },
+      elProjectsList: { innerHTML: '' }
+    },
+    document: { getElementById() { return null; } },
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+
+  context.recalculateStatistics();
+  assert.equal(earnings.innerText, '$300.00');
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 1);
+  assert.equal(earnings.innerText, '$100.00');
 });
 
 test('timeline UI omits recorded-active stats and idle preference totals', () => {

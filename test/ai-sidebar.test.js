@@ -99,10 +99,13 @@ function loadAiSidebarContext() {
       warn: console.warn,
       error: console.error
     },
-    URL
+    URL,
+    URLSearchParams
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
+  context.cleanTitle = title => String(title || '').replace(/\s+-\s+Brave Browser$/, '');
   vm.runInContext(fs.readFileSync('js/ai-settings.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/ai-sidebar.js', 'utf8'), context);
   return context;
@@ -434,6 +437,41 @@ test('AI chat payload only sends bounded recent messages', () => {
     ['three', 'four', 'five']
   );
   assert.equal(chats.getChatsForDate('2026-05-25')[0].messages.length, 5);
+});
+
+test('Ask AI renders safe Markdown in assistant responses', async () => {
+  const { context, elements } = createAiSettingsDom();
+  const originalRequest = context.OrielData.request.bind(context.OrielData);
+  context.OrielData.request = async (operation, payload) => {
+    if (operation === 'ai.chat') {
+      return {
+        text: [
+      'Based on the day:',
+      '',
+      '1. **Client Work**',
+      '   - Review `github.com` activity',
+      '',
+      'Visit [Project](https://example.com) and *triage* it.'
+        ].join('\n'),
+        suggestions: []
+      };
+    }
+    return originalRequest(operation, payload);
+  };
+
+  await context.initAiSidebar();
+  elements['ai-chat-input'].value = 'Summarize this as markdown';
+  await elements['ai-send-button'].click();
+
+  const markup = elements['ai-chat-messages'].innerHTML;
+  assert.match(markup, /<ol>/);
+  assert.match(markup, /<strong>Client Work<\/strong>/);
+  assert.match(markup, /<ul>/);
+  assert.match(markup, /<code>github\.com<\/code>/);
+  assert.match(markup, /<a href="https:\/\/example\.com"/);
+  assert.match(markup, /<em>triage<\/em>/);
+  assert.doesNotMatch(markup, /\*\*Client Work\*\*/);
+  assert.doesNotMatch(markup, /javascript:/);
 });
 
 test('AI day context strips raw URLs, query strings, bundle IDs, and local paths', () => {

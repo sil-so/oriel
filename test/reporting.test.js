@@ -158,6 +158,7 @@ function loadReportingContext() {
       return localDate.toISOString().split('T')[0];
     },
     getActivityIconHTML: () => '',
+    URLSearchParams,
     fetch: async url => {
       fetchCalls.push(url);
       return {
@@ -169,6 +170,7 @@ function loadReportingContext() {
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/reporting.js', 'utf8'), context);
 
   return { context, elements, fetchCalls };
@@ -240,6 +242,37 @@ test('reporting chart legends use semantic row classes without changing values',
   assert.match(legendMarkup, /\bduration-pill\b[^>]*>1h 30m/);
   assert.match(legendMarkup, /\breport-row-percent\b[^>]*>75%/);
   assert.doesNotMatch(legendMarkup, /text-\[(?:10|11)px\]|text-gray-|text-white|w-5 h-5/);
+});
+
+test('reporting metrics use the shared selected-period calculation', () => {
+  const { context } = loadReportingContext();
+  context.state.projects = [{
+    id: 'project-1',
+    name: 'Client Work',
+    billable: true,
+    rateType: 'hourly',
+    hourlyRate: 80,
+    currency: '$'
+  }];
+
+  const metrics = context.calculateSelectedPeriodMetrics({
+    activities: [
+      { start: 0, end: 2 * 60 * 60 * 1000 }
+    ],
+    timeEntries: [
+      { start: 0, end: 30 * 60 * 1000, projectId: 'project-1', billable: true }
+    ],
+    projects: context.state.projects,
+    allTimeEntries: [
+      { start: 0, end: 30 * 60 * 1000, projectId: 'project-1', billable: true }
+    ]
+  });
+
+  assert.equal(metrics.totalCapturedMs, 2 * 60 * 60 * 1000);
+  assert.equal(metrics.totalLoggedMs, 30 * 60 * 1000);
+  assert.equal(metrics.billableEarnings, 40);
+  assert.equal(metrics.billableMs, 30 * 60 * 1000);
+  assert.equal(metrics.conversionPercent, 25);
 });
 
 test('app initialization initializes reporting controls', async () => {

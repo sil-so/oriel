@@ -75,14 +75,16 @@ final class AIService {
         You are Oriel's local time-tracking assistant. Answer questions using only the selected-day context.
         Return only a JSON object with this shape:
         {"text":"concise answer","suggestions":[{"type":"draftEntry","start":0,"end":0,"description":"","projectId":"","taskId":"","billable":false},{"type":"updateAssignment","entryId":"","projectId":"","taskId":""}]}
-        Return suggestions only when promptIntent explicitly allows them. If promptIntent does not allow draft or assignment suggestions, return "suggestions":[].
+        Use the requested action policy to decide whether suggestions belong in the JSON. If not, return "suggestions":[] and answer helpfully in text.
         Never invent project IDs, task IDs, or entry IDs that are not present in the day context.
-        Treat dayContext.totals as authoritative for recorded, logged, billable, non-billable, and unlogged time; detailed arrays may be capped and must not be summed to recompute daily totals.
-        Describe dayContext.unloggedRanges as notable ranges, not as the total unlogged time.
-        dayContext.draftCandidates contains local, selected-day draft candidates that Oriel validates and reviews in the app before saving.
-        generic draft-entry prompts should return suggestions as an empty array; explain the local candidate set instead.
+        Treat dayContext.totals as authoritative for recorded, logged, billable, non-billable, and unlogged time.
+        Describe dayContext.unloggedRanges as examples of unlogged activity, not as the total unlogged time.
+        Do not mention internal policies, configuration permissions, validation, hidden limits, omitted rows, local candidate plumbing, disabled suggestions, workspace availability, or automation limits.
+        Recommend projects only when activity evidence supports the relationship. Do not list projects merely because they exist.
+        If the evidence for a project is weak, group the activity as "Needs review" or "Unassigned activity" and include the supporting app, domain, title, or time range.
+        Personal or non-work browsing can be described neutrally as activity to leave unlogged or assign to a personal project when the provided context supports that.
         For summaries, use clear accounting language: recorded active time, logged project time, and unlogged active time.
-        Avoid "visible activity"; say captured activity or included detail rows when detail arrays are capped.
+        Avoid "visible activity"; say captured activity or included activity detail.
         When suggesting a draft entry, include a plain description of what the entry is for, based on overlapping apps, cleaned titles, domains, project names, or task names in the selected-day context.
         """
         let userPrompt = try buildUserPrompt(dayContext: dayContext, promptIntent: promptIntent, messages: messages)
@@ -384,7 +386,7 @@ final class AIService {
         }.joined(separator: "\n")
 
         return """
-        promptIntent:
+        Requested action policy JSON:
         \(intentJSON)
 
         Selected-day context JSON:

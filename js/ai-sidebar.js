@@ -769,10 +769,16 @@
             return;
         }
 
+        const renderMessageContent = content => (
+            typeof global.renderOrielMarkdown === 'function'
+                ? global.renderOrielMarkdown(content)
+                : escapeHtml(content)
+        );
+
         messagesEl.innerHTML = chat.messages.map(message => `
             <div class="ai-message ai-message--${message.role}">
                 <div class="ai-message-role">${message.role === 'user' ? 'You' : 'Oriel AI'}</div>
-                <div class="ai-message-content">${escapeHtml(message.content)}</div>
+                <div class="ai-message-content">${renderMessageContent(message.content)}</div>
                 ${message.suggestions?.length ? `
                     <div class="ai-suggestion-list">
                         ${message.suggestions.map((suggestion, index) => {

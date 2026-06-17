@@ -128,7 +128,10 @@ function createSimilarActivityBlock({
   url = '',
   appPath = '',
   bundleId = '',
-  selected = false
+  selected = false,
+  span = 1,
+  overlaps = [],
+  selectedSimilarityKeys = []
 }) {
   const classes = new Set(selected ? ['activity-block', 'selected'] : ['activity-block']);
   const checkboxClasses = new Set(selected ? ['activity-checkbox', 'is-selected'] : ['activity-checkbox']);
@@ -142,7 +145,19 @@ function createSimilarActivityBlock({
   };
 
   return {
-    dataset: { startCell: String(startCell), app, title, url, appPath, bundleId },
+    dataset: {
+      startCell: String(startCell),
+      span: String(span),
+      app,
+      title,
+      url,
+      appPath,
+      bundleId,
+      overlaps: encodeURIComponent(JSON.stringify(overlaps)),
+      ...(selectedSimilarityKeys.length > 0
+        ? { selectedSimilarityKeys: encodeURIComponent(JSON.stringify(selectedSimilarityKeys)) }
+        : {})
+    },
     classList: {
       add: className => classes.add(className),
       remove: className => classes.delete(className),
@@ -607,6 +622,60 @@ function assertStyleMatchesRowGeometry(style, expected, message = '') {
   assert.equal((style.height + 3) % 40, 0, message ? `${message} height is row aligned` : undefined);
 }
 
+test('blank native app Activity Stream rows use popup-visible source title fallback', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const html = renderMemoryAidHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 5, 16),
+    activities: [
+      {
+        app: 'Affinity',
+        title: '',
+        url: '',
+        appPath: '/Applications/Affinity Photo 2.app',
+        bundleId: 'com.seriflabs.affinityphoto2',
+        start: dateStart + (11 * 60 + 50) * 60 * 1000,
+        end: dateStart + (11 * 60 + 52) * 60 * 1000,
+        duration: 2 * 60 * 1000
+      },
+      {
+        app: 'Affinity',
+        title: 'Affinity - Foto Amber.jpeg @ 134%',
+        url: '/Users/example/Foto Amber.jpeg',
+        appPath: '/Applications/Affinity Photo 2.app',
+        bundleId: 'com.seriflabs.affinityphoto2',
+        start: dateStart + (11 * 60 + 52) * 60 * 1000,
+        end: dateStart + (11 * 60 + 53) * 60 * 1000,
+        duration: 60 * 1000
+      }
+    ]
+  });
+
+  assert.match(html, /class="activity-block__title">Affinity - Foto Amber\.jpeg @ 134%<\/span>/);
+});
+
+test('blank native app Activity Stream rows fall back to app name when no source title is meaningful', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const html = renderMemoryAidHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 5, 16),
+    activities: [
+      {
+        app: 'mymind',
+        title: '',
+        url: '',
+        appPath: '/Applications/mymind.app',
+        bundleId: 'com.mymind.app',
+        start: dateStart + (13 * 60 + 15) * 60 * 1000,
+        end: dateStart + (13 * 60 + 16) * 60 * 1000,
+        duration: 60 * 1000
+      }
+    ]
+  });
+
+  assert.match(html, /class="activity-block__title">mymind<\/span>/);
+});
+
 function expectedExactGeometry({ dateStart, start, end, zoom }) {
   const rowDurationMs = zoom * 60 * 1000;
   const startRow = Math.max(0, (start - dateStart) / rowDurationMs);
@@ -987,9 +1056,13 @@ function renderActivityBlockChromeHtml({
   cleanTitle = title => title,
   zoom = 5,
   blockOverrides = {},
+  currentDate = null,
   iconFactory = null
 }) {
   const context = loadTimelineContext();
+  if (currentDate) {
+    context.state.currentDate = new Date(currentDate);
+  }
   context.state.zoom = zoom;
   context.cleanTitle = cleanTitle;
   context.getActivityIconHTML = iconFactory || ((iconApp) => `<span class="fake-icon" data-icon="${iconApp}"></span>`);
@@ -1016,7 +1089,8 @@ function renderMultipleActivitiesPopup({
   span = 3,
   cleanTitle = title => title,
   zoom = 5,
-  datasetOverrides = {}
+  datasetOverrides = {},
+  selected = false
 }) {
   const context = loadTimelineContext();
   context.state.zoom = zoom;
@@ -1067,6 +1141,7 @@ function renderMultipleActivitiesPopup({
   context.cleanTitle = cleanTitle;
   context.DOM.elPopupSingleDetails = { classList: createClassList(), querySelector: () => null };
   context.DOM.elPopupSingleChildrenContainer = {
+    dataset: {},
     classList: createClassList(['hidden']),
     set innerHTML(value) {
       renderedSingleChildren = value;
@@ -1074,6 +1149,8 @@ function renderMultipleActivitiesPopup({
       for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"(?:[^>]*data-popup-child-index="(\d+)")?/g)) {
         const nextRowIndex = value.indexOf('data-popup-overlap-index="', match.index + 1);
         const rowHtml = value.slice(match.index, nextRowIndex === -1 ? value.length : nextRowIndex);
+        const rowStart = value.lastIndexOf('<div', match.index);
+        const openingTag = value.slice(rowStart, value.indexOf('>', match.index) + 1);
         const selectButton = rowHtml.includes('popup-activity-select')
           ? createButton(['popup-activity-select', 'activity-checkbox'])
           : null;
@@ -1083,9 +1160,12 @@ function renderMultipleActivitiesPopup({
         popupRows.push({
           dataset: {
             popupOverlapIndex: match[1],
-            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] })
+            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] }),
+            ...(openingTag.match(/data-popup-similarity-key="([^"]*)"/)?.[1]
+              ? { popupSimilarityKey: openingTag.match(/data-popup-similarity-key="([^"]*)"/)?.[1] }
+              : {})
           },
-          classList: createClassList(['popup-activity-row']),
+          classList: createClassList(['popup-activity-row', ...(openingTag.includes('is-selected') ? ['is-selected'] : [])]),
           querySelector(selector) {
             if (selector === '.popup-activity-select') return selectButton;
             if (selector === '.popup-activity-quick-add') return quickAddButton;
@@ -1105,12 +1185,15 @@ function renderMultipleActivitiesPopup({
   context.DOM.elPopupUrlContainer = { classList: createClassList() };
   context.DOM.elPopupUrl = {};
   context.DOM.elPopupMultiListContainer = {
+    dataset: {},
     set innerHTML(value) {
       renderedMultiList = value;
       popupRows.length = 0;
       for (const match of value.matchAll(/data-popup-overlap-index="(\d+)"(?:[^>]*data-popup-child-index="(\d+)")?/g)) {
         const nextRowIndex = value.indexOf('data-popup-overlap-index="', match.index + 1);
         const rowHtml = value.slice(match.index, nextRowIndex === -1 ? value.length : nextRowIndex);
+        const rowStart = value.lastIndexOf('<div', match.index);
+        const openingTag = value.slice(rowStart, value.indexOf('>', match.index) + 1);
         const selectButton = rowHtml.includes('popup-activity-select')
           ? createButton(['popup-activity-select', 'activity-checkbox'])
           : null;
@@ -1123,9 +1206,12 @@ function renderMultipleActivitiesPopup({
         popupRows.push({
           dataset: {
             popupOverlapIndex: match[1],
-            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] })
+            ...(match[2] === undefined ? {} : { popupChildIndex: match[2] }),
+            ...(openingTag.match(/data-popup-similarity-key="([^"]*)"/)?.[1]
+              ? { popupSimilarityKey: openingTag.match(/data-popup-similarity-key="([^"]*)"/)?.[1] }
+              : {})
           },
-          classList: createClassList(['popup-activity-row']),
+          classList: createClassList(['popup-activity-row', ...(openingTag.includes('is-selected') ? ['is-selected'] : [])]),
           querySelector(selector) {
             if (selector === '.popup-activity-select') return selectButton;
             if (selector === '.popup-activity-quick-add') return quickAddButton;
@@ -1151,8 +1237,11 @@ function renderMultipleActivitiesPopup({
     modalArgs = args;
   };
   context.window.openTimeEntryModal = context.openTimeEntryModal;
+  if (selected) {
+    context.state.selectedActivities.add(startCell);
+  }
 
-  context.showActivityDetailsPopup({
+  const blockEl = {
     dataset: {
       startCell: String(startCell),
       span: String(span),
@@ -1164,10 +1253,12 @@ function renderMultipleActivitiesPopup({
       overlaps: encodeURIComponent(JSON.stringify(overlaps)),
       ...datasetOverrides
     }
-  });
+  };
+  context.showActivityDetailsPopup(blockEl);
 
   return {
     context,
+    blockEl,
     get renderedMultiList() {
       return renderedMultiList;
     },
@@ -4166,6 +4257,58 @@ test('row-adjacent time entries keep full width when visual rows do not overlap'
   assert.deepEqual(styles.map(style => style.right), [null, null]);
 });
 
+test('saved Activity Stream row units keep full width across millisecond boundary overlap', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const boundary = dateStart + (9 * 60 + 50) * 60 * 1000;
+  const project = { id: 'project-1', name: 'Personal', color: '#ef4444' };
+  const rowUnitEntry = (id, start, end, title) => ({
+    id,
+    start,
+    end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      app: 'Affinity',
+      title,
+      start,
+      end,
+      duration: end - start,
+      assignedDurationMs: end - start,
+      assignmentStart: start,
+      assignmentEnd: end,
+      assignmentDisplayStart: start,
+      assignmentDisplayEnd: end,
+      assignmentDisplayGroupKey: `${id}-display`,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1,
+      sources: [{
+        app: 'Affinity',
+        title,
+        start,
+        end,
+        duration: end - start,
+        assignedDurationMs: end - start
+      }]
+    }]
+  });
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    timeEntries: [
+      rowUnitEntry('entry-1', boundary - 82_666, boundary + 1, 'Affinity'),
+      rowUnitEntry('entry-2', boundary, boundary + 166_004, 'Affinity - photo')
+    ]
+  });
+
+  const styles = extractEntryStyles(html);
+  assert.equal(styles.length, 2);
+  assert.deepEqual(styles.map(style => style.left), [null, null]);
+  assert.deepEqual(styles.map(style => style.width), [null, null]);
+  assert.deepEqual(styles.map(style => style.right), [null, null]);
+});
+
 test('manual entries lane next to assignment groups without changing labels or group edit metadata', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const html = renderLoggedTimeEntriesHtml({
@@ -4664,6 +4807,551 @@ test('similar selection by exact URL does not select other pages on the same sit
   assert.equal(blocks[2].classList.contains('selected'), true);
 });
 
+test('similar base URL selection seeds from selected row identity instead of mixed detail overlaps', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const zoom = 5;
+  const atCell = cell => dateStart + cell * zoom * 60 * 1000;
+  const sourceAt = (cell, source, durationMs = zoom * 60 * 1000) => ({
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    ...source,
+    start: atCell(cell),
+    end: atCell(cell) + durationMs,
+    duration: durationMs
+  });
+  const amazonSearch = {
+    app: 'Brave Browser',
+    title: 'Amazon search results for adapter',
+    url: 'https://www.amazon.nl/s?k=adapter&ref=nb_sb_noss'
+  };
+  const chatgptSource = {
+    app: 'Brave Browser',
+    title: 'Research comparison',
+    url: 'https://chatgpt.com/c/research-comparison'
+  };
+  const bolSource = {
+    app: 'Brave Browser',
+    title: 'Example shop checkout',
+    url: 'https://www.bol.com/nl/nl/checkout/'
+  };
+  const githubSource = {
+    app: 'Brave Browser',
+    title: 'Repository pull request',
+    url: 'https://github.com/example/project/pull/25'
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 148,
+      span: 1,
+      selected: true,
+      ...amazonSearch,
+      overlaps: [
+        sourceAt(148, amazonSearch),
+        sourceAt(148, chatgptSource),
+        sourceAt(148, bolSource),
+        sourceAt(148, githubSource)
+      ]
+    }),
+    createSimilarActivityBlock({
+      startCell: 150,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Amazon.nl - winkelwagen',
+      url: 'https://www.amazon.nl/gp/cart/view.html',
+      overlaps: [sourceAt(150, {
+        app: 'Brave Browser',
+        title: 'Amazon.nl - winkelwagen',
+        url: 'https://www.amazon.nl/gp/cart/view.html'
+      })]
+    }),
+    createSimilarActivityBlock({
+      startCell: 147,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Research comparison',
+      url: 'https://chatgpt.com/c/research-comparison',
+      overlaps: [
+        sourceAt(147, amazonSearch, 20 * 1000),
+        sourceAt(147, chatgptSource)
+      ]
+    }),
+    createSimilarActivityBlock({
+      startCell: 12,
+      span: 1,
+      app: 'Codex',
+      title: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      overlaps: [sourceAt(12, chatgptSource)]
+    }),
+    createSimilarActivityBlock({
+      startCell: 144,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Example shop checkout',
+      url: 'https://www.bol.com/nl/nl/checkout/',
+      overlaps: [sourceAt(144, bolSource)]
+    }),
+    createSimilarActivityBlock({
+      startCell: 9,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Repository pull request',
+      url: 'https://github.com/example/project/pull/25',
+      overlaps: [sourceAt(9, githubSource)]
+    })
+  ];
+
+  context.state.zoom = zoom;
+  context.state.selectedActivities.add(148);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [148, 150]);
+  assert.equal(blocks[1].classList.contains('selected'), true);
+  assert.equal(blocks[2].classList.contains('selected'), false);
+  assert.equal(blocks[3].classList.contains('selected'), false);
+  assert.equal(blocks[4].classList.contains('selected'), false);
+  assert.equal(blocks[5].classList.contains('selected'), false);
+  const selectedKeys = JSON.parse(decodeURIComponent(blocks[0].dataset.selectedSimilarityKeys));
+  const expectedAmazonSourceKey = [
+    amazonSearch.app,
+    amazonSearch.title,
+    amazonSearch.url,
+    '/Applications/Brave Browser.app',
+    'com.brave.Browser',
+    atCell(148),
+    atCell(149)
+  ].join('|||');
+  assert.equal(selectedKeys.includes('brave browser|||amazon.nl'), false);
+  assert.equal(selectedKeys.includes(expectedAmazonSourceKey), true);
+});
+
+test('similar base URL selection clears stale nonmatching selected activity state', () => {
+  const context = loadTimelineContext();
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 147,
+      app: 'Brave Browser',
+      title: 'Research comparison',
+      url: 'https://chatgpt.com/c/research-comparison'
+    }),
+    createSimilarActivityBlock({
+      startCell: 148,
+      app: 'Brave Browser',
+      title: 'Amazon search results for adapter',
+      url: 'https://www.amazon.nl/s?k=adapter&ref=nb_sb_noss',
+      selected: true
+    }),
+    createSimilarActivityBlock({
+      startCell: 150,
+      app: 'Brave Browser',
+      title: 'Repository stars',
+      url: 'https://github.com/example/project/stargazers'
+    })
+  ];
+
+  context.state.selectedActivities.add(147);
+  context.state.selectedActivities.add(148);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 1);
+  assert.deepEqual([...context.state.selectedActivities], [148]);
+  assert.equal(blocks[0].classList.contains('selected'), false);
+  assert.equal(blocks[2].classList.contains('selected'), false);
+});
+
+test('similar base URL selection honors stored selected source keys for mixed rows', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const amazonSource = {
+    app: 'Brave Browser',
+    title: 'Amazon.nl - winkelwagen',
+    url: 'https://www.amazon.nl/cart',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: atCell(144),
+    end: atCell(145)
+  };
+  const chatgptSource = {
+    app: 'Brave Browser',
+    title: 'Research comparison',
+    url: 'https://chatgpt.com/c/research-comparison',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: atCell(144),
+    end: atCell(145)
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 144,
+      app: 'Brave Browser',
+      title: 'Research comparison',
+      url: 'https://chatgpt.com/c/research-comparison',
+      selected: true,
+      selectedSimilarityKeys: ['brave browser|||amazon.nl'],
+      overlaps: [amazonSource, chatgptSource]
+    }),
+    createSimilarActivityBlock({
+      startCell: 160,
+      app: 'Brave Browser',
+      title: 'Other shopping activity',
+      url: '',
+      overlaps: [{
+        ...amazonSource,
+        title: 'Amazon.nl product',
+        url: 'https://www.amazon.nl/product/example',
+        start: atCell(160),
+        end: atCell(161)
+      }]
+    }),
+    createSimilarActivityBlock({
+      startCell: 172,
+      app: 'Brave Browser',
+      title: 'Other ChatGPT activity',
+      url: 'https://chatgpt.com/c/other',
+      overlaps: [{
+        ...chatgptSource,
+        title: 'Other ChatGPT activity',
+        url: 'https://chatgpt.com/c/other',
+        start: atCell(172),
+        end: atCell(173)
+      }]
+    })
+  ];
+
+  context.state.selectedActivities.add(144);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [144, 160]);
+  assert.equal(blocks[1].classList.contains('selected'), true);
+  assert.equal(blocks[2].classList.contains('selected'), false);
+});
+
+test('similar base URL selection includes popup-visible matching rows inside multiple activity blocks', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const sourceAt = (cell, source, durationCells = 1) => ({
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    ...source,
+    start: atCell(cell),
+    end: atCell(cell + durationCells),
+    duration: durationCells * 5 * 60 * 1000
+  });
+  const amazonSource = {
+    app: 'Brave Browser',
+    title: 'Amazon product page',
+    url: 'https://www.amazon.nl/product/example'
+  };
+  const chatgptSource = {
+    app: 'Brave Browser',
+    title: 'Research comparison',
+    url: 'https://chatgpt.com/c/research-comparison'
+  };
+  const mediaSource = {
+    app: 'Music',
+    title: 'Music',
+    appPath: '/System/Applications/Music.app',
+    bundleId: 'com.apple.Music',
+    url: ''
+  };
+  const selectedAmazon = sourceAt(144, {
+    app: 'Brave Browser',
+    title: 'Amazon search results',
+    url: 'https://www.amazon.nl/s?k=adapter'
+  });
+  const popupAmazon = sourceAt(150, amazonSource);
+  const hiddenAmazon = {
+    ...sourceAt(156, {
+      ...amazonSource,
+      title: 'Hidden Amazon scratch',
+      url: 'https://www.amazon.nl/hidden'
+    }),
+    duration: 20 * 1000,
+    end: atCell(156) + 20 * 1000
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 144,
+      span: 1,
+      selected: true,
+      app: selectedAmazon.app,
+      title: selectedAmazon.title,
+      url: selectedAmazon.url,
+      appPath: selectedAmazon.appPath,
+      bundleId: selectedAmazon.bundleId,
+      overlaps: [selectedAmazon]
+    }),
+    createSimilarActivityBlock({
+      startCell: 150,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Research comparison',
+      url: 'https://chatgpt.com/c/research-comparison',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      overlaps: [
+        sourceAt(150, chatgptSource),
+        popupAmazon,
+        sourceAt(150, mediaSource)
+      ]
+    }),
+    createSimilarActivityBlock({
+      startCell: 156,
+      span: 1,
+      app: 'Music',
+      title: 'Multiple Activities',
+      appPath: '/System/Applications/Music.app',
+      bundleId: 'com.apple.Music',
+      overlaps: [
+        hiddenAmazon,
+        sourceAt(156, mediaSource)
+      ]
+    }),
+    createSimilarActivityBlock({
+      startCell: 162,
+      span: 1,
+      app: 'Brave Browser',
+      title: 'Example shop checkout',
+      url: 'https://www.bol.com/nl/nl/checkout/',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      overlaps: [sourceAt(162, {
+        app: 'Brave Browser',
+        title: 'Example shop checkout',
+        url: 'https://www.bol.com/nl/nl/checkout/'
+      })]
+    })
+  ];
+
+  context.state.zoom = 5;
+  context.state.selectedActivities.add(144);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [144, 150]);
+  assert.equal(blocks[1].classList.contains('selected'), true);
+  assert.equal(blocks[2].classList.contains('selected'), false);
+  assert.equal(blocks[3].classList.contains('selected'), false);
+
+  const selectedKeys = JSON.parse(decodeURIComponent(blocks[1].dataset.selectedSimilarityKeys));
+  const expectedAmazonSourceKey = [
+    popupAmazon.app,
+    popupAmazon.title,
+    popupAmazon.url,
+    popupAmazon.appPath,
+    popupAmazon.bundleId,
+    popupAmazon.start,
+    popupAmazon.end
+  ].join('|||');
+  assert.equal(selectedKeys.includes(expectedAmazonSourceKey), true);
+  assert.equal(selectedKeys.some(key => key.includes('chatgpt.com')), false);
+  assert.equal(selectedKeys.some(key => key.includes('com.apple.Music')), false);
+});
+
+test('similar selection scope survives activity stream re-render', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const checkoutSource = {
+    app: 'Brave Browser',
+    title: 'bol | Bestellen',
+    url: 'https://www.bol.com/nl/nl/checkout/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: atCell(144),
+    end: atCell(145)
+  };
+  const basketSource = {
+    ...checkoutSource,
+    title: 'bol | Winkelwagen',
+    url: 'https://www.bol.com/nl/nl/basket/',
+    start: atCell(145),
+    end: atCell(146)
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 144,
+      app: 'Brave Browser',
+      title: 'bol | Bestellen',
+      url: 'https://www.bol.com/nl/nl/checkout/',
+      selected: true,
+      overlaps: [checkoutSource]
+    }),
+    createSimilarActivityBlock({
+      startCell: 145,
+      app: 'Brave Browser',
+      title: 'bol | Winkelwagen',
+      url: 'https://www.bol.com/nl/nl/basket/',
+      overlaps: [basketSource]
+    })
+  ];
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 5;
+  context.state.selectedActivities.add(144);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+
+  const checkoutHtml = context.createActivityBlockHTML({
+    startCell: 144,
+    span: 1,
+    app: 'Brave Browser',
+    title: 'bol | Bestellen',
+    url: 'https://www.bol.com/nl/nl/checkout/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    overlaps: [checkoutSource]
+  });
+  const basketHtml = context.createActivityBlockHTML({
+    startCell: 145,
+    span: 1,
+    app: 'Brave Browser',
+    title: 'bol | Winkelwagen',
+    url: 'https://www.bol.com/nl/nl/basket/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    overlaps: [basketSource]
+  });
+
+  assert.match(checkoutHtml, /data-selected-similarity-mode="host"/);
+  assert.match(basketHtml, /data-selected-similarity-mode="host"/);
+  assert.match(checkoutHtml, /data-selected-similarity-keys="/);
+  assert.match(basketHtml, /data-selected-similarity-keys="/);
+  assert.match(checkoutHtml, /bol%20%7C%20Bestellen/);
+  assert.match(basketHtml, /bol%20%7C%20Winkelwagen/);
+});
+
+test('similar selection matches visible browser source activity by base URL at every zoom level', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const context = loadTimelineContext();
+    context.state.zoom = zoom;
+    const amazonSource = {
+      app: 'Brave Browser',
+      title: 'Amazon.nl - winkelwagen',
+      url: 'https://www.amazon.nl/cart',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: dateStart + 12 * 60 * 60 * 1000,
+      end: dateStart + (12 * 60 + zoom) * 60 * 1000
+    };
+    const otherAmazonSource = {
+      ...amazonSource,
+      title: 'Amazon.nl product',
+      url: 'https://www.amazon.nl/product/example',
+      start: dateStart + 13 * 60 * 60 * 1000,
+      end: dateStart + (13 * 60 + zoom) * 60 * 1000
+    };
+    const blocks = [
+      createSimilarActivityBlock({
+        startCell: 12,
+        app: 'Brave Browser',
+        title: 'Amazon.nl - winkelwagen',
+        url: 'https://www.amazon.nl/cart',
+        selected: true,
+        span: zoom,
+        overlaps: [amazonSource]
+      }),
+      createSimilarActivityBlock({
+        startCell: 72,
+        app: 'Brave Browser',
+        title: 'Amazon.nl product',
+        url: 'https://www.amazon.nl/product/example',
+        span: zoom,
+        overlaps: [otherAmazonSource]
+      }),
+      createSimilarActivityBlock({
+        startCell: 96,
+        app: 'Brave Browser',
+        title: 'Bol checkout',
+        url: 'https://www.bol.com/nl/nl/checkout/',
+        span: zoom,
+        overlaps: [{
+          ...amazonSource,
+          title: 'Bol checkout',
+          url: 'https://www.bol.com/nl/nl/checkout/'
+        }]
+      })
+    ];
+
+    context.state.selectedActivities.add(12);
+    context.DOM.elItemsMemoryAid = {
+      querySelectorAll(selector) {
+        if (selector === '.activity-block.selected') {
+          return blocks.filter(block => block.classList.contains('selected'));
+        }
+        if (selector === '.activity-block') return blocks;
+        return [];
+      }
+    };
+    context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+    context.DOM.elSelectedCount = { innerText: '' };
+
+    assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2, `zoom ${zoom}`);
+    assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [12, 72], `zoom ${zoom}`);
+    assert.equal(blocks[1].classList.contains('selected'), true, `zoom ${zoom}`);
+    assert.equal(blocks[2].classList.contains('selected'), false, `zoom ${zoom}`);
+  }
+});
+
 test('similar modal defaults native app selections to App Name and disables URL modes', () => {
   const context = loadTimelineContext();
   const modalDom = attachSimilarModalDom(context);
@@ -4725,6 +5413,8 @@ test('similar modal keeps URL modes enabled for browser activity with a usable U
   };
 
   assert.equal(context.isBrowserLikeActivity(activity), true);
+  modalDom.app.radio.checked = true;
+  modalDom.host.radio.checked = false;
   assert.equal(context.openSimilarSelectionModal(), true);
   assert.equal(modalDom.host.radio.disabled, false);
   assert.equal(modalDom.url.radio.disabled, false);
@@ -4732,6 +5422,32 @@ test('similar modal keeps URL modes enabled for browser activity with a usable U
   assert.equal(modalDom.url.option.classList.contains('is-disabled'), false);
   assert.equal(modalDom.host.radio.checked, true);
   assert.equal(modalDom.app.radio.checked, false);
+});
+
+test('similar modal detects common browser variants for Base URL defaults', () => {
+  const context = loadTimelineContext();
+  const browsers = [
+    { app: 'Google Chrome Beta', bundleId: 'com.google.Chrome.beta' },
+    { app: 'Google Chrome Dev', bundleId: 'com.google.Chrome.dev' },
+    { app: 'Firefox Nightly', bundleId: 'org.mozilla.nightly' },
+    { app: 'Brave Browser Nightly', bundleId: 'com.brave.Browser.nightly' },
+    { app: 'Microsoft Edge Dev', bundleId: 'com.microsoft.Edge.Dev' },
+    { app: 'Arc', bundleId: 'company.thebrowser.Browser' },
+    { app: 'Zen Browser', bundleId: 'app.zen-browser.zen' },
+    { app: 'Mullvad Browser', bundleId: 'net.mullvad.MullvadBrowser' },
+    { app: 'Opera GX', bundleId: 'com.operasoftware.OperaGX' },
+    { app: 'Vivaldi Snapshot', bundleId: 'com.vivaldi.Vivaldi.snapshot' }
+  ];
+
+  for (const browser of browsers) {
+    const activity = {
+      ...browser,
+      title: 'Example',
+      url: 'https://example.com/'
+    };
+    assert.equal(context.isBrowserLikeActivity(activity), true, browser.app);
+    assert.equal(context.getSimilarModeAvailability(activity).defaultMode, 'host', browser.app);
+  }
 });
 
 test('similar modal defaults browser apps without usable URLs to App Name', () => {
@@ -5255,7 +5971,8 @@ test('auto-rule time entries aggregate short-gap exact fragments without countin
     zoom: 1,
     projects: [project],
     activities,
-    timeEntries
+    timeEntries,
+    currentDate: new Date(dateStart)
   });
   const styles = extractEntryStyles(html);
 
@@ -5294,7 +6011,8 @@ test('one-minute auto-rule entries merge near-continuous same-source capture fra
     zoom: 1,
     projects: [project],
     activities,
-    timeEntries
+    timeEntries,
+    currentDate: new Date(dateStart)
   });
   const styles = extractEntryStyles(html);
 
@@ -5515,6 +6233,732 @@ test('same-project source-backed entries do not merge across a visible empty row
     zoom: 15
   }), 'second coarse source row');
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min', '5 min']);
+});
+
+test('source-backed manual Similar entries do not bridge through hidden subthreshold source rows', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = {
+    id: 'project-personal',
+    name: 'Personal',
+    color: '#ef4444',
+    tasks: [{ id: 'task-shopping', name: 'Shopping' }]
+  };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const bol = (title, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url: 'https://www.bol.com/nl/nl/basket/',
+    start,
+    end,
+    duration: end - start
+  });
+  const sourceBackedEntry = (id, source) => ({
+    id,
+    start: source.start,
+    end: source.end,
+    projectId: project.id,
+    taskId: 'task-shopping',
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...source,
+      assignedDurationMs: source.duration,
+      assignmentStart: source.start,
+      assignmentEnd: source.end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1
+    }]
+  });
+  const firstBol = bol('bol | Winkelwagen', at(12, 0), at(12, 5));
+  const hiddenBol = bol('bol.com/nl/nl/p/hidden-source', at(12, 5, 10), at(12, 5, 11));
+  const secondBol = bol('bol.com/nl/nl/checkout/', at(12, 6), at(12, 10));
+  const activities = [
+    firstBol,
+    {
+      app: 'Codex',
+      title: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      start: at(12, 5),
+      end: at(12, 6),
+      duration: 60 * 1000
+    },
+    hiddenBol,
+    secondBol
+  ];
+  const timeEntries = [
+    sourceBackedEntry('entry-bol-first', firstBol),
+    sourceBackedEntry('entry-bol-hidden', hiddenBol),
+    sourceBackedEntry('entry-bol-second', secondBol)
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 2);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: firstBol.start,
+    end: firstBol.end,
+    zoom: 1
+  }), 'first bol run');
+  assertStyleMatchesRowGeometry(styles[1], expectedRowGeometry({
+    dateStart,
+    start: secondBol.start,
+    end: secondBol.end,
+    zoom: 1
+  }), 'second bol run');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min', '4 min']);
+});
+
+test('user-created Activity Stream assignment renders on saved visible display bounds', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const chatbox = (start, end) => ({
+    app: 'Chatbox',
+    title: 'Chatbox',
+    appPath: '/Applications/Chatbox.app',
+    bundleId: 'xyz.chatboxapp.app',
+    start,
+    end,
+    duration: end - start
+  });
+  const displayStart = at(11, 42, 12);
+  const displayEnd = at(11, 48, 24);
+  const timeEntries = [{
+    id: 'entry-chatbox',
+    start: at(11, 45),
+    end: at(11, 46),
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...chatbox(at(11, 45), at(11, 46)),
+      assignedDurationMs: 60 * 1000,
+      assignmentStart: at(11, 45),
+      assignmentEnd: at(11, 46),
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: 'chatbox-row-11-42',
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1
+    }]
+  }];
+  const activities = [
+    chatbox(at(11, 43), at(11, 44)),
+    chatbox(at(11, 45), at(11, 46)),
+    chatbox(at(11, 47), at(11, 48))
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: displayStart,
+    end: displayEnd,
+    zoom: 1
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min']);
+});
+
+test('separately selected Activity Stream rows do not merge by app alone', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const chatbox = (start, end) => ({
+    app: 'Chatbox',
+    title: 'Chatbox',
+    appPath: '/Applications/Chatbox.app',
+    bundleId: 'xyz.chatboxapp.app',
+    start,
+    end,
+    duration: end - start
+  });
+  const entryForRow = (id, sourceStart, sourceEnd, displayStart, displayEnd) => ({
+    id,
+    start: sourceStart,
+    end: sourceEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...chatbox(sourceStart, sourceEnd),
+      assignedDurationMs: sourceEnd - sourceStart,
+      assignmentStart: sourceStart,
+      assignmentEnd: sourceEnd,
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: `${id}-display`,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1
+    }]
+  });
+  const timeEntries = [
+    entryForRow('entry-chatbox-first', at(11, 40, 8), at(11, 41, 56), at(11, 40, 8), at(11, 41, 56)),
+    entryForRow('entry-chatbox-second', at(11, 45, 14), at(11, 47, 51), at(11, 42, 19), at(11, 48, 37))
+  ];
+  const activities = [
+    chatbox(at(11, 40), at(11, 42)),
+    {
+      app: 'Codex',
+      title: 'Codex',
+      appPath: '/Applications/Codex.app',
+      bundleId: 'com.openai.codex',
+      start: at(11, 42),
+      end: at(11, 45),
+      duration: 3 * 60 * 1000
+    },
+    chatbox(at(11, 45), at(11, 48))
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 2);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: at(11, 40, 8),
+    end: at(11, 41, 56),
+    zoom: 1
+  }), 'first Chatbox row');
+  assertStyleNearlyMatchesGeometry(styles[1], expectedExactGeometry({
+    dateStart,
+    start: at(11, 42, 19),
+    end: at(11, 48, 37),
+    zoom: 1
+  }), 'second Chatbox row');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min', '3 min']);
+});
+
+test('user-created Activity Stream assignments reproject saved row bounds to the active zoom', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const chatbox = (start, end) => ({
+    app: 'Chatbox',
+    title: 'Chatbox',
+    appPath: '/Applications/Chatbox.app',
+    bundleId: 'xyz.chatboxapp.app',
+    start,
+    end,
+    duration: end - start
+  });
+  const entryForRow = (id, sourceStart, sourceEnd, displayStart, displayEnd) => ({
+    id,
+    start: sourceStart,
+    end: sourceEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...chatbox(sourceStart, sourceEnd),
+      assignedDurationMs: sourceEnd - sourceStart,
+      assignmentStart: sourceStart,
+      assignmentEnd: sourceEnd,
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: `${id}-display`,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1,
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKey: 'chatbox'
+    }]
+  });
+  const activities = [
+    chatbox(at(11, 40, 8), at(11, 41, 56)),
+    chatbox(at(11, 45, 14), at(11, 47, 51))
+  ];
+  const timeEntries = [
+    entryForRow('entry-chatbox-first', at(11, 40, 8), at(11, 41, 56), at(11, 40, 8), at(11, 41, 56)),
+    entryForRow('entry-chatbox-second', at(11, 45, 14), at(11, 47, 51), at(11, 42, 19), at(11, 48, 37))
+  ];
+
+  const oneMinuteHtml = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const oneMinuteStyles = extractEntryStyles(oneMinuteHtml);
+
+  assert.equal(oneMinuteStyles.length, 2, '1 min zoom keeps original visible rows separate');
+  assertStyleNearlyMatchesGeometry(oneMinuteStyles[0], expectedExactGeometry({
+    dateStart,
+    start: at(11, 40, 8),
+    end: at(11, 41, 56),
+    zoom: 1
+  }), 'first saved 1 min row');
+  assertStyleNearlyMatchesGeometry(oneMinuteStyles[1], expectedExactGeometry({
+    dateStart,
+    start: at(11, 42, 19),
+    end: at(11, 48, 37),
+    zoom: 1
+  }), 'second saved 1 min row');
+  assert.deepEqual(extractTimeEntryDurationLabels(oneMinuteHtml), ['2 min', '3 min']);
+
+  for (const zoom of [5, 10, 15, 30, 60]) {
+    const activityHtml = renderMemoryAidHtml({
+      zoom,
+      activities,
+      timeEntries,
+      projects: [project],
+      currentDate: new Date(dateStart)
+    });
+    const activityStyles = extractActivityStyles(activityHtml);
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    const styles = extractEntryStyles(html);
+
+    assert.equal(styles.length, activityStyles.length, `${zoom} min zoom follows visible Activity Stream rows`);
+    styles.forEach((style, index) => {
+      assert.equal(style.top, activityStyles[index].top, `${zoom} min zoom row ${index} top`);
+      assert.equal(style.height, activityStyles[index].height, `${zoom} min zoom row ${index} height`);
+    });
+    if (styles.length > 0) {
+      assert.ok(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)) > 0, `${zoom} min zoom duration`);
+    }
+  }
+});
+
+test('saved Affinity Activity Stream row units render vertically and reproject without fragment lanes', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const affinity = (title, start, end) => ({
+    app: 'Affinity',
+    title,
+    appPath: '/Applications/Affinity Photo 2.app',
+    bundleId: 'com.seriflabs.affinityphoto2',
+    start,
+    end,
+    duration: end - start
+  });
+  const firstRowSources = [
+    affinity('Affinity', at(11, 52, 0), at(11, 52, 8)),
+    affinity('Affinity', at(11, 52, 8), at(11, 52, 10)),
+    affinity('Affinity', at(11, 52, 10), at(11, 53, 0))
+  ];
+  const secondRowSources = [
+    affinity('Affinity - leon.afphoto @ 30% [Loading 32%]', at(11, 53, 19), at(11, 53, 31)),
+    affinity('Affinity - leon.afphoto @ 30%', at(11, 53, 42), at(11, 54, 14)),
+    affinity('Affinity - Foto Amber.jpeg @ 134%', at(11, 54, 18), at(11, 55, 30))
+  ];
+  const rowUnitEntry = (id, title, displayStart, displayEnd, sources) => {
+    const assignedDurationMs = sources.reduce((total, source) => total + source.duration, 0);
+    return {
+      id,
+      start: displayStart,
+      end: displayEnd,
+      projectId: project.id,
+      createdBy: 'manual',
+      description: '',
+      activities: [{
+        app: 'Affinity',
+        title,
+        appPath: '/Applications/Affinity Photo 2.app',
+        bundleId: 'com.seriflabs.affinityphoto2',
+        start: displayStart,
+        end: displayEnd,
+        duration: assignedDurationMs,
+        assignedDurationMs,
+        assignmentStart: displayStart,
+        assignmentEnd: displayEnd,
+        assignmentDisplayStart: displayStart,
+        assignmentDisplayEnd: displayEnd,
+        assignmentDisplayGroupKey: `${id}-display`,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: 1,
+        selectedSimilarityMode: 'app',
+        selectedSimilarityMatchKey: 'affinity',
+        sources
+      }]
+    };
+  };
+  const timeEntries = [
+    rowUnitEntry('entry-affinity-1152', 'Affinity', at(11, 52), at(11, 53), firstRowSources),
+    rowUnitEntry('entry-affinity-1153', 'Affinity - leon.afphoto @ 30% [Loading 32%]', at(11, 53), at(11, 56), secondRowSources)
+  ];
+  const activities = [...firstRowSources, ...secondRowSources];
+
+  const oneMinuteHtml = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const oneMinuteStyles = extractEntryStyles(oneMinuteHtml);
+
+  assert.equal(oneMinuteStyles.length, 2);
+  assertStyleNearlyMatchesGeometry(oneMinuteStyles[0], expectedExactGeometry({
+    dateStart,
+    start: at(11, 52),
+    end: at(11, 53),
+    zoom: 1
+  }), 'first Affinity row');
+  assertStyleNearlyMatchesGeometry(oneMinuteStyles[1], expectedExactGeometry({
+    dateStart,
+    start: at(11, 53),
+    end: at(11, 56),
+    zoom: 1
+  }), 'second Affinity row');
+  assert.deepEqual(oneMinuteStyles.map(style => style.left), [null, null]);
+  assert.deepEqual(oneMinuteStyles.map(style => style.width), [null, null]);
+  assert.deepEqual(extractTimeEntryDurationLabels(oneMinuteHtml), ['1 min', '2 min']);
+
+  const activityHtml = renderMemoryAidHtml({
+    zoom: 5,
+    activities,
+    timeEntries,
+    projects: [project],
+    currentDate: new Date(dateStart)
+  });
+  const activityStyles = extractActivityStyles(activityHtml);
+  const fiveMinuteHtml = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const fiveMinuteStyles = extractEntryStyles(fiveMinuteHtml);
+
+  assert.equal(fiveMinuteStyles.length, activityStyles.length);
+  fiveMinuteStyles.forEach((style, index) => {
+    assert.equal(style.left, null, `5 min row ${index} left`);
+    assert.equal(style.width, null, `5 min row ${index} width`);
+    assert.equal(style.top, activityStyles[index].top, `5 min row ${index} top`);
+    assert.equal(style.height, activityStyles[index].height, `5 min row ${index} height`);
+  });
+  assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(fiveMinuteHtml)), 2);
+});
+
+test('saved Activity Stream row units use the primary visible row duration at coarse zoom', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const source = (title, start, end, url = '') => ({
+    app: 'Affinity',
+    title,
+    url,
+    appPath: '/Applications/Affinity Photo 2.app',
+    bundleId: 'com.seriflabs.affinityphoto2',
+    start,
+    end,
+    duration: end - start
+  });
+  const rowUnitEntry = (id, title, displayStart, displayEnd, sources) => ({
+    id,
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      app: 'Affinity',
+      title,
+      appPath: '/Applications/Affinity Photo 2.app',
+      bundleId: 'com.seriflabs.affinityphoto2',
+      start: displayStart,
+      end: displayEnd,
+      duration: sources.reduce((total, item) => total + item.duration, 0),
+      assignedDurationMs: sources.reduce((total, item) => total + item.duration, 0),
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: `${id}-display`,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1,
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKey: 'affinity',
+      sources
+    }]
+  });
+  const savedRowSources = [
+    source('Affinity', at(11, 52), at(11, 54))
+  ];
+  const adjacentDocumentSources = [
+    source(
+      'users',
+      at(11, 54),
+      at(11, 55),
+      '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto'
+    )
+  ];
+  const activities = [...savedRowSources, ...adjacentDocumentSources];
+  const timeEntries = [
+    rowUnitEntry('entry-affinity-1152', 'Affinity', at(11, 52), at(11, 54), savedRowSources)
+  ];
+
+  [
+    { zoom: 5, rowStart: at(11, 50), rowEnd: at(11, 55), labels: ['2 min'] },
+    { zoom: 10, rowStart: at(11, 50), rowEnd: at(12, 0), labels: ['2 min'] },
+    { zoom: 15, rowStart: at(11, 45), rowEnd: at(12, 0), labels: ['2 min'] }
+  ].forEach(({ zoom, rowStart, rowEnd, labels }) => {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    const styles = extractEntryStyles(html);
+
+    assert.equal(styles.length, 1, `${zoom} min block count`);
+    assert.equal(styles[0].left, null, `${zoom} min left`);
+    assert.equal(styles[0].width, null, `${zoom} min width`);
+    assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+      dateStart,
+      start: rowStart,
+      end: rowEnd,
+      zoom
+    }), `${zoom} min geometry`);
+    assert.deepEqual(extractTimeEntryDurationLabels(html), labels, `${zoom} min duration`);
+  });
+
+  [30, 60].forEach(zoom => {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+
+    assert.equal(extractEntryStyles(html).length, 0, `${zoom} min hidden without a matching visible Activity Stream row`);
+    assert.deepEqual(extractTimeEntryDurationLabels(html), [], `${zoom} min duration`);
+  });
+});
+
+test('merged source-backed row units sum stable row labels at coarser zoom', () => {
+  const context = loadTimelineContext();
+  const total = context.getActivityStreamAssignedDurationMs([
+    {
+      renderDisplayRepairKey: 'affinity-row',
+      renderSourceBackedAssignment: true,
+      renderDurationMs: 71291
+    },
+    {
+      renderDisplayRepairKey: 'affinity-document-row',
+      renderSourceBackedAssignment: true,
+      renderDurationMs: 142014
+    }
+  ]);
+
+  assert.equal(total, 3 * 60 * 1000);
+});
+
+test('source-backed row units keep stable rounded labels when merged at 10 minute zoom', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0, millisecond = 0) => (
+    dateStart + ((hour * 60 + minute) * 60 + second) * 1000 + millisecond
+  );
+  const source = (title, start, end, url = '', duration = end - start) => ({
+    app: 'Affinity',
+    title,
+    url,
+    appPath: '/Applications/Affinity.app',
+    bundleId: 'com.canva.affinity',
+    start,
+    end,
+    duration
+  });
+  const rowUnitEntry = (id, title, start, end, url = '', duration = end - start) => {
+    const activitySource = source(title, start, end, url, duration);
+    const displayGroupKey = `activity-stream-row|||affinity|||${title.toLowerCase()}|||${start}|||${end}`;
+    return {
+      id,
+      start,
+      end,
+      projectId: project.id,
+      createdBy: 'manual',
+      description: '',
+      activities: [{
+        ...activitySource,
+        assignedDurationMs: activitySource.duration,
+        assignmentStart: start,
+        assignmentEnd: end,
+        assignmentDisplayStart: start,
+        assignmentDisplayEnd: end,
+        assignmentDisplayGroupKey: displayGroupKey,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: 1,
+        sources: [{
+          ...activitySource,
+          assignedDurationMs: activitySource.duration,
+          assignmentStart: start,
+          assignmentEnd: end,
+          assignmentDisplayStart: start,
+          assignmentDisplayEnd: end,
+          assignmentDisplayGroupKey: displayGroupKey,
+          assignmentSource: 'activity-stream',
+          assignmentModel: 'activity-stream-summary',
+          assignmentDisplayZoom: 1
+        }]
+      }]
+    };
+  };
+
+  const firstStart = at(11, 52, 3, 485);
+  const firstEnd = at(11, 53, 26, 151);
+  const secondStart = at(11, 53, 14, 775);
+  const secondEnd = at(11, 56, 0, 779);
+  const documentUrl = '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto';
+  const timeEntries = [
+    rowUnitEntry('entry-affinity', 'Affinity', firstStart, firstEnd, '', 71291),
+    rowUnitEntry(
+      'entry-affinity-document',
+      'Affinity - leon.afphoto @ 30% [Loading 32%]',
+      secondStart,
+      secondEnd,
+      documentUrl,
+      142014
+    )
+  ];
+  const activities = [
+    source('Affinity', firstStart, firstEnd, '', 71291),
+    source('Affinity - leon.afphoto @ 30% [Loading 32%]', secondStart, secondEnd, documentUrl, 142014),
+    source('Affinity - Foto Amber.jpeg @ 134%', at(11, 55, 40), at(11, 57, 30), documentUrl)
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 10,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+
+  assert.equal(extractEntryStyles(html).length, 1);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
+});
+
+test('source-backed row units saved at coarse zoom render exact visible rows at 1 minute zoom', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0, millisecond = 0) => (
+    dateStart + ((hour * 60 + minute) * 60 + second) * 1000 + millisecond
+  );
+  const source = (title, start, end, url = '', duration = end - start) => ({
+    app: 'Affinity',
+    title,
+    url,
+    appPath: '/Applications/Affinity.app',
+    bundleId: 'com.canva.affinity',
+    start,
+    end,
+    duration
+  });
+  const coarseRowEntry = (id, title, displayStart, displayEnd, duration, url = '') => ({
+    id,
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...source(title, displayStart, displayEnd, url, duration),
+      assignedDurationMs: duration,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayStart: displayStart,
+      assignmentDisplayEnd: displayEnd,
+      assignmentDisplayGroupKey: `activity-stream-row|||affinity|||${title.toLowerCase()}|||${displayStart}|||${displayEnd}`,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 5,
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKey: 'affinity',
+      sources: [{
+        ...source(title, displayStart, displayEnd, url, duration),
+        assignedDurationMs: duration,
+        assignmentStart: displayStart,
+        assignmentEnd: displayEnd,
+        assignmentDisplayStart: displayStart,
+        assignmentDisplayEnd: displayEnd,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayZoom: 5
+      }]
+    }]
+  });
+
+  const firstStart = at(11, 52, 3, 485);
+  const firstEnd = at(11, 53, 26, 151);
+  const secondStart = at(11, 53, 42, 347);
+  const secondEnd = at(11, 56, 12, 154);
+  const documentUrl = '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto';
+  const activities = [
+    source('Affinity', firstStart, firstEnd),
+    source('Affinity - leon.afphoto @ 30%', secondStart, secondEnd, documentUrl, 142014)
+  ];
+  const timeEntries = [
+    coarseRowEntry('entry-affinity-1150', 'Affinity', at(11, 50), at(11, 55), 147789),
+    coarseRowEntry('entry-affinity-1155', 'users', at(11, 55), at(12, 0), 66209, documentUrl)
+  ];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 1,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 2);
+  assert.deepEqual(styles.map(style => style.left), [null, null]);
+  assert.deepEqual(styles.map(style => style.width), [null, null]);
+  assertStyleNearlyMatchesGeometry(styles[0], expectedExactGeometry({
+    dateStart,
+    start: firstStart,
+    end: firstEnd,
+    zoom: 1
+  }), 'first Affinity row');
+  assertStyleNearlyMatchesGeometry(styles[1], expectedExactGeometry({
+    dateStart,
+    start: secondStart,
+    end: secondEnd,
+    zoom: 1
+  }), 'second Affinity row');
+  assertNoOverlappingBlockGeometry(styles, 'coarse saved row units at 1 minute zoom');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min', '2 min']);
 });
 
 test('auto-rule coarse block stops before a hidden boundary row', () => {
@@ -6915,7 +8359,7 @@ test('Multiple Activities popup promotes a single website page instead of render
   popup.context.DOM.elPopupAssignBtn.onclick();
 
   assert.equal(popup.modalArgs[6].length, 2);
-  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
+  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'brave browser|||the ai question no one wants to ask');
   assert.equal(popup.modalArgs[6][0].sources.length, 1);
   assert.equal(popup.modalArgs[6][0].sources[0].title, pageTitle);
   assert.equal(popup.modalArgs[6][0].sources[0].url, pageUrl);
@@ -6960,7 +8404,7 @@ test('single host-primary browser popup promotes one unique page without child r
   popup.context.DOM.elPopupAssignBtn.onclick();
 
   assert.equal(popup.modalArgs[6].length, 1);
-  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
+  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'brave browser|||the ai question no one wants to ask');
   assert.equal(popup.modalArgs[6][0].sources.length, 1);
   assert.equal(popup.modalArgs[6][0].sources[0].title, pageTitle);
   assert.equal(popup.modalArgs[6][0].sources[0].url, pageUrl);
@@ -7165,6 +8609,60 @@ test('Activity Stream browser subtitles show only the app while preserving URL d
   assert.match(html, /data-url="https:\/\/www\.facebook\.com\/home"/);
 });
 
+test('coarse mixed Activity Stream rows use the primary popup row for icon metadata', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const blockStart = dateStart + 17 * 60 * 60 * 1000;
+  const html = renderActivityBlockChromeHtml({
+    startCell: 17 * 12,
+    span: 1,
+    currentDate: new Date(dateStart),
+    app: 'Oriel',
+    title: 'Oriel',
+    url: '',
+    blockOverrides: {
+      appPath: '/Applications/Oriel.app',
+      bundleId: 'so.sil.oriel'
+    },
+    overlaps: [
+      {
+        app: 'Oriel',
+        title: 'Oriel',
+        appPath: '/Applications/Oriel.app',
+        bundleId: 'so.sil.oriel',
+        start: blockStart,
+        end: blockStart + 60 * 1000,
+        duration: 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Alan Watts - What Is Reality?',
+        url: 'https://www.youtube.com/watch?v=reality',
+        appPath: '/Applications/Brave Browser.app',
+        bundleId: 'com.brave.Browser',
+        start: blockStart,
+        end: blockStart + 4 * 60 * 1000,
+        duration: 4 * 60 * 1000
+      }
+    ],
+    iconFactory: (iconApp, iconUrl, iconTitle, iconAppPath, iconBundleId) => (
+      `<span class="fake-icon" data-icon="${iconApp}" data-url="${iconUrl}" data-title="${iconTitle}" data-app-path="${iconAppPath}" data-bundle-id="${iconBundleId}"></span>`
+    )
+  });
+  const primaryIcon = html.match(/<div class="activity-block__icon">\s*<span class="fake-icon" data-icon="([^"]*)" data-url="([^"]*)" data-title="([^"]*)" data-app-path="([^"]*)" data-bundle-id="([^"]*)"/);
+
+  assert.ok(primaryIcon, 'Expected primary Activity Stream icon');
+  assert.deepEqual(primaryIcon.slice(1), [
+    'Brave Browser',
+    'https://www.youtube.com/watch?v=reality',
+    'Alan Watts - What Is Reality?',
+    '/Applications/Brave Browser.app',
+    'com.brave.Browser'
+  ]);
+  assert.match(html, />Alan Watts - What Is Reality\?<\/span>/);
+  assert.match(html, />Brave Browser<\/span>/);
+  assert.doesNotMatch(html, /<div class="activity-block__icon">\s*<span class="fake-icon" data-icon="Oriel"/);
+});
+
 test('same-host browser activity with different page titles keeps the clicked page in single popup', () => {
   const titleCleaner = loadTitleCleaningContext().cleanTitle;
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -7297,6 +8795,41 @@ test('Multiple Activities popup display labels do not rewrite assignment payload
   assert.equal(browserAssignment.assignmentModel, 'activity-stream-summary');
   assert.ok(browserAssignment.sources.some(source => source.url === 'https://chatgpt.com/'));
   assert.ok(browserAssignment.sources.some(source => source.url === 'https://chatgpt.com/c/123'));
+});
+
+test('single Activity Stream popup assignment carries visible display bounds', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const startCell = 702;
+  const span = 6;
+  const zoom = 1;
+  const blockStart = dateStart + startCell * zoom * 60 * 1000;
+  const blockEnd = blockStart + span * zoom * 60 * 1000;
+  const popup = renderMultipleActivitiesPopup({
+    startCell,
+    span,
+    zoom,
+    app: 'Chatbox',
+    title: 'Chatbox',
+    overlaps: [{
+      app: 'Chatbox',
+      title: 'Chatbox',
+      appPath: '/Applications/Chatbox.app',
+      bundleId: 'xyz.chatboxapp.app',
+      start: blockStart + 2 * 60 * 1000,
+      end: blockStart + 3 * 60 * 1000,
+      duration: 60 * 1000
+    }]
+  });
+
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  assert.equal(popup.modalArgs[6][0].app, 'Chatbox');
+  assert.equal(popup.modalArgs[6][0].assignmentDisplayStart, blockStart);
+  assert.equal(popup.modalArgs[6][0].assignmentDisplayEnd, blockEnd);
+  assert.match(popup.modalArgs[6][0].assignmentDisplayGroupKey, /chatbox/);
+  assert.equal(popup.modalArgs[6][0].sources[0].assignmentDisplayStart, blockStart);
+  assert.equal(popup.modalArgs[6][0].sources[0].assignmentDisplayEnd, blockEnd);
 });
 
 test('single visible activity hides unrelated short source rows from popup detail', () => {
@@ -7533,10 +9066,12 @@ test('Activity Stream inline badges use popup-visible secondary rows', () => {
     duration: 3 * 1000
   }));
   const html = renderActivityBlockChromeHtml({
+    app: 'Codex',
+    title: 'Coding Session',
     overlaps: [
       {
         app: 'Codex',
-        title: 'Codex',
+        title: 'Coding Session',
         start: blockStart,
         end: blockStart + 7 * 60 * 1000,
         duration: 7 * 60 * 1000
@@ -8168,6 +9703,237 @@ test('selected activity assignment modal uses clear assignment copy', () => {
   ]);
 
   assert.equal(elements.get('modal-title').innerText, 'Assign Selected Activity');
+});
+
+test('selected activity assignment modal renders positive sub-minute rows as seconds', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 9, 0).getTime();
+
+  context.openTimeEntryModal(startMs, startMs + 10 * 1000, '', null, null, true, [
+    {
+      app: 'Brave Browser',
+      title: 'bol.com/nl/nl/basket/',
+      url: 'https://www.bol.com/nl/nl/basket/',
+      duration: 10 * 1000,
+      assignedDurationMs: 10 * 1000,
+      assignmentSource: 'activity-stream'
+    }
+  ]);
+
+  assert.equal(elements.get('modal-duration-lbl').innerText, '10s');
+  assert.match(elements.get('modal-memory-aid-list').innerHTML, /<span class="duration-pill shrink-0">10s<\/span>/);
+  assert.doesNotMatch(elements.get('modal-memory-aid-list').innerHTML, />0 min</);
+});
+
+test('selected similar base-url assignment renders different titles as separate rows', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 12, 0).getTime();
+  const checkoutTitleKey = 'brave browser|||bol | bestellen';
+  const basketTitleKey = 'brave browser|||bol.com/nl/nl/basket/';
+
+  context.openTimeEntryModal(startMs, startMs + 10 * 60 * 1000, '', null, null, true, [
+    {
+      app: 'Brave Browser',
+      title: 'bol | Bestellen',
+      url: 'https://www.bol.com/nl/nl/checkout/',
+      start: startMs,
+      end: startMs + 25 * 1000,
+      duration: 25 * 1000,
+      assignedDurationMs: 25 * 1000,
+      assignmentSource: 'activity-stream',
+      modalAggregateGroupKey: checkoutTitleKey
+    },
+    {
+      app: 'Brave Browser',
+      title: 'bol.com/nl/nl/basket/',
+      url: 'https://www.bol.com/nl/nl/basket/',
+      start: startMs + 5 * 60 * 1000,
+      end: startMs + 5 * 60 * 1000 + 50 * 1000,
+      duration: 50 * 1000,
+      assignedDurationMs: 50 * 1000,
+      assignmentSource: 'activity-stream',
+      modalAggregateGroupKey: basketTitleKey
+    }
+  ]);
+
+  assert.equal(elements.get('modal-duration-lbl').innerText, '1 min');
+  assert.equal((elements.get('modal-memory-aid-list').innerHTML.match(/modal-activity-row/g) || []).length, 2);
+  assert.doesNotMatch(elements.get('modal-memory-aid-list').innerHTML, />0 min</);
+  assert.equal(context.getSelectedModalActivities().length, 2);
+  assert.equal(context.getSelectedModalActivities().reduce((total, activity) => total + activity.assignedDurationMs, 0), 75 * 1000);
+});
+
+test('selected similar app-name assignment preserves aggregate row units', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 13, 0).getTime();
+
+  context.openTimeEntryModal(startMs, startMs + 15 * 60 * 1000, '', null, null, true, [
+    {
+      app: 'Obsidian',
+      title: 'readme - sil-so',
+      start: startMs,
+      end: startMs + 3 * 60 * 1000,
+      duration: 3 * 60 * 1000,
+      assignedDurationMs: 3 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      modalAggregateGroupKey: 'obsidian|||readme - sil-so'
+    },
+    {
+      app: 'Obsidian',
+      title: 'tasks - sil-so',
+      start: startMs + 5 * 60 * 1000,
+      end: startMs + 8 * 60 * 1000,
+      duration: 3 * 60 * 1000,
+      assignedDurationMs: 3 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      modalAggregateGroupKey: 'obsidian|||tasks - sil-so'
+    },
+    {
+      app: 'Obsidian',
+      title: 'readme - sil-so',
+      start: startMs + 10 * 60 * 1000,
+      end: startMs + 12 * 60 * 1000,
+      duration: 2 * 60 * 1000,
+      assignedDurationMs: 2 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      modalAggregateGroupKey: 'obsidian|||readme - sil-so'
+    }
+  ]);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
+  assert.match(listHtml, /readme - sil-so/);
+  assert.match(listHtml, /tasks - sil-so/);
+  const selectedActivities = context.getSelectedModalActivities();
+  assert.equal(selectedActivities.length, 2);
+  assert.equal(selectedActivities[0].assignedDurationMs, 5 * 60 * 1000);
+  assert.equal(selectedActivities[0].modalSourceActivities.length, 2);
+  assert.equal(selectedActivities[1].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(selectedActivities[1].modalSourceActivities.length, 1);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '8 min');
+});
+
+test('similar-scoped multiple activity popup assigns only matching popup-visible rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const startMs = dateStart + (13 * 60 + 20) * 60 * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const codexSource = {
+    app: 'Codex',
+    title: 'Codex',
+    url: '',
+    appPath: '/Applications/Codex.app',
+    bundleId: 'com.openai.codex',
+    start: startMs,
+    end: startMs + 5 * 60 * 1000,
+    duration: 5 * 60 * 1000
+  };
+  const obsidianSource = {
+    app: 'Obsidian',
+    title: 'readme - sil-so',
+    url: '',
+    appPath: '/Applications/Obsidian.app',
+    bundleId: 'md.obsidian',
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 8 * 60 * 1000,
+    duration: 3 * 60 * 1000
+  };
+  const popup = renderMultipleActivitiesPopup({
+    selected: true,
+    startCell: 80,
+    span: 2,
+    zoom: 10,
+    app: 'Codex',
+    title: 'Multiple Activities',
+    overlaps: [codexSource, obsidianSource],
+    datasetOverrides: {
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(obsidianSource)])),
+      selectedSimilarityMode: 'app',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify(['obsidian']))
+    }
+  });
+
+  assert.equal(popup.popupRows.some(row => row.classList.contains('is-selected')), true);
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  assert.equal(popup.modalArgs[6][0].app, 'Obsidian');
+  assert.equal(popup.modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(popup.blockEl.dataset.selectedSimilarityKeys, encodeURIComponent(JSON.stringify([sourceKey(obsidianSource)])));
+});
+
+test('similar-scoped popup assign filters a selected parent row to matching child sources', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const startMs = dateStart + (14 * 60) * 60 * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const chatSource = {
+    app: 'Brave Browser',
+    title: 'Meal planning notes',
+    url: 'https://chatgpt.com/c/meal-planning',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: startMs,
+    end: startMs + 2 * 60 * 1000,
+    duration: 2 * 60 * 1000
+  };
+  const selectedChatSource = {
+    app: 'Brave Browser',
+    title: 'User Activity Analysis',
+    url: 'https://chatgpt.com/c/activity-analysis',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: startMs + 2 * 60 * 1000,
+    end: startMs + 5 * 60 * 1000,
+    duration: 3 * 60 * 1000
+  };
+  const codexSource = {
+    app: 'Codex',
+    title: 'Codex',
+    url: '',
+    appPath: '/Applications/Codex.app',
+    bundleId: 'com.openai.codex',
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 7 * 60 * 1000,
+    duration: 2 * 60 * 1000
+  };
+  const popup = renderMultipleActivitiesPopup({
+    selected: true,
+    startCell: 84,
+    span: 1,
+    zoom: 10,
+    app: 'Brave Browser',
+    title: 'Multiple Activities',
+    overlaps: [chatSource, selectedChatSource, codexSource],
+    datasetOverrides: {
+      activeDurationMs: String(7 * 60 * 1000),
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([sourceKey(selectedChatSource)])),
+      selectedSimilarityMode: 'app-title',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify(['brave browser|||user activity analysis']))
+    }
+  });
+
+  assert.equal(popup.popupRows.filter(row => row.classList.contains('is-selected')).length, 1);
+  popup.context.DOM.elPopupAssignBtn.onclick();
+
+  assert.equal(popup.modalArgs[6].length, 1);
+  const modalSources = popup.modalArgs[6].flatMap(activity => activity.modalSourceActivities || activity.sources || [activity]);
+  assert.deepEqual(Array.from(modalSources, activity => activity.title), ['User Activity Analysis']);
+  assert.equal(popup.modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
 });
 
 test('multiple activity popover aligns app names separately without dash separators', () => {
@@ -9043,7 +10809,10 @@ test('coarse block secondary badge and popup both include contextual short Vinte
 
   assert.equal(popup.modalArgs[6].length, 2);
   assert.equal(popup.modalArgs[6][0].title, "coulou's vinyl cafe (no. 4) - rainy day selections");
-  assert.equal(popup.modalArgs[6][0].modalAggregateGroupKey, 'browser|||brave browser|||youtube.com');
+  assert.equal(
+    popup.modalArgs[6][0].modalAggregateGroupKey,
+    "brave browser|||coulou's vinyl cafe (no. 4) - rainy day selections"
+  );
   assert.equal(popup.modalArgs[6][0].sources.length, 1);
   assert.equal(popup.modalArgs[6][1].title, 'vinted.nl');
   assert.equal(popup.modalArgs[6][1].sources.length, 4);
@@ -9158,7 +10927,7 @@ test('popup sessions aggregate page children and omit short unrelated scraps', (
   assert.equal(popup.modalArgs[6][1].sources.length, 2);
 });
 
-test('bulk assignment modal renders aggregate rows while selected activities preserve exact fragments', () => {
+test('bulk assignment modal renders aggregate rows while selected activities preserve row units', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 14, 40).getTime();
   const first = {
@@ -9201,7 +10970,8 @@ test('bulk assignment modal renders aggregate rows while selected activities pre
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 1);
   assert.doesNotMatch(listHtml, />0 min</);
   assert.match(listHtml, />2 min</);
-  assert.equal(context.getSelectedModalActivities().length, 3);
+  assert.equal(context.getSelectedModalActivities().length, 1);
+  assert.equal(context.getSelectedModalActivities()[0].modalSourceActivities.length, 3);
   assert.equal(elements.get('modal-duration-lbl').innerText, '2 min');
 
   context.setModalActivityIncluded(0, false);

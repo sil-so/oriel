@@ -1,6 +1,12 @@
 import AppKit
 import WebKit
 
+final class ContextMenuDisabledWebView: WKWebView {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        nil
+    }
+}
+
 final class OrielWebViewController: NSViewController, WKNavigationDelegate {
     private let bridge: OrielBridge
     private let resourceHandler: ResourceSchemeHandler
@@ -27,7 +33,7 @@ final class OrielWebViewController: NSViewController, WKNavigationDelegate {
         )
         configuration.setURLSchemeHandler(resourceHandler, forURLScheme: "oriel-resource")
         configuration.setURLSchemeHandler(iconHandler, forURLScheme: "oriel-icon")
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = ContextMenuDisabledWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         view = webView
     }

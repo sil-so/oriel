@@ -298,27 +298,45 @@
             <div class="side-summary-content app-scrollbar-safe">
                 <div class="sidebar-panel sidebar-panel--work-times" id="work-times-panel" role="tabpanel" aria-labelledby="sidebar-tab-work-times">
 
+                <div class="work-times-stats-stack" id="work-times-stats" aria-label="Selected day statistics">
+                    <div class="summary-metric work-times-stat-card">
+                        <span class="metric-label">Total Captured</span>
+                        <span class="summary-value" id="work-stat-captured">0h 0m</span>
+                        <span class="metric-helper">Total active macOS/Browser time</span>
+                    </div>
+
+                    <div class="summary-metric work-times-stat-card">
+                        <span class="metric-label">Total Logged</span>
+                        <span class="summary-value" id="work-stat-logged">0h 0m</span>
+                        <span class="metric-helper">Time entries allocated to projects</span>
+                    </div>
+
+                    <div class="summary-metric work-times-stat-card">
+                        <span class="metric-label">Billable Earnings</span>
+                        <span class="summary-value summary-value--success" id="work-stat-earnings">$0.00</span>
+                        <span class="metric-helper" id="work-stat-billable-hours">0.0h of billable work</span>
+                    </div>
+
+                    <div class="summary-metric work-times-stat-card">
+                        <div class="flex justify-between items-center">
+                            <span class="metric-label">Conversion Efficiency</span>
+                            <span class="metric-value text-accent" id="work-stat-conversion-percent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" style="width: 0%;" id="work-stat-conversion-bar"></div>
+                        </div>
+                        <span class="metric-helper">Ratio of logged time to captured time</span>
+                    </div>
+                </div>
+
                 <!-- Projects Breakdown List -->
                 <div class="surface-panel project-summary-panel">
                     <div class="project-summary-panel__header">
-                        <h3 class="sidebar-section-title">Total Project Time</h3>
-                        <span class="duration-pill project-summary-total" id="stat-project-total">0h 0m</span>
+                        <h3 class="metric-label project-summary-panel__title">Logged Projects</h3>
                     </div>
                     <div class="sidebar-project-list" id="projects-breakdown-list">
                         <div class="empty-state empty-state--compact">
                             No time entries logged for this day.
-                        </div>
-                    </div>
-                </div>
-
-                <div class="unlogged-work-review surface-panel" id="unlogged-work-review">
-                    <div class="unlogged-work-review-header">
-                        <h3 class="sidebar-section-title">Unlogged Work</h3>
-                        <span class="duration-pill unlogged-work-total" id="unlogged-work-review-total">0s</span>
-                    </div>
-                    <div class="unlogged-work-list app-scrollbar-safe" id="unlogged-work-review-list">
-                        <div class="empty-state empty-state--compact">
-                            All recorded source work is covered.
                         </div>
                     </div>
                 </div>

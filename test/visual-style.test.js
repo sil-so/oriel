@@ -254,6 +254,16 @@ test('app-rendered menu options share primitive option classes', () => {
   assert.doesNotMatch(main, /text-blue-400 text-xs shrink-0/);
 });
 
+test('app context menu uses shared popover and menu option primitives', () => {
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+
+  assert.match(css, /\.app-context-menu\s*\{/);
+  assert.match(css, /\.app-context-menu\s+\.menu-option\s*\{/);
+  assert.match(main, /className = 'app-context-menu popover hidden'/);
+  assert.match(main, /className = 'menu-option app-context-menu__item'/);
+});
+
 test('settings callouts and danger actions use shared modal vocabulary', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
@@ -481,24 +491,28 @@ test('timeline and sidebar chrome use semantic design-system classes', () => {
     'timeline-selection-bar',
     'timeline-selection-bar__summary',
     'side-summary-content',
-    'sidebar-section-title',
+    'work-times-stats-stack',
+    'work-times-stat-card',
     'project-summary-panel',
-    'project-summary-panel__header'
+    'project-summary-panel__header',
+    'project-summary-panel__title'
   ]) {
     assert.match(timelineMarkup, new RegExp(`\\b${className}\\b`), `expected timeline markup to use ${className}`);
     assert.match(css, new RegExp(`\\.${className}\\b`), `expected CSS contract for ${className}`);
   }
 
   assert.doesNotMatch(timelineMarkup, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.doesNotMatch(timelineMarkup, /id="unlogged-work-review"|Unlogged Work/);
   assert.ok(
-    timelineMarkup.indexOf('project-summary-panel') < timelineMarkup.indexOf('id="unlogged-work-review"'),
-    'expected Total Project Time panel before Unlogged Work'
+    timelineMarkup.indexOf('id="work-times-stats"') < timelineMarkup.indexOf('project-summary-panel'),
+    'expected Work Times metric stack before Logged Projects'
   );
+  assert.match(timelineMarkup, /class="metric-label project-summary-panel__title">Logged Projects<\/h3>/);
+  assert.doesNotMatch(timelineMarkup, /stat-project-total|project-summary-total|Total Project Time/);
   assert.doesNotMatch(timelineMarkup, /border-\[#2d2f34\]|bg-\[#0d0e10\]|text-\[(?:10|11|12)px\]|text-gray-|text-white|bg-emerald-|text-emerald-/);
   assert.match(css, /\.activity-details-popup__details\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.activity-details-popup__field\.hidden,\s*\.activity-details-popup__meta-item\.hidden\s*\{[\s\S]*?display:\s*none/);
   assert.match(css, /\.sidebar-panel--work-times\.hidden\s*\{[\s\S]*?display:\s*none/);
-  assert.match(css, /\.unlogged-work-review\.hidden\s*\{[\s\S]*?display:\s*none/);
 });
 
 test('activity details popup reserves a fixed square close button column', () => {
@@ -831,12 +845,19 @@ test('work times sidebar uses compact shared panel surfaces', () => {
   assert.match(css, /\.side-summary-content\s*\{[\s\S]*letter-spacing:\s*0/);
   assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*gap:\s*20px/);
   assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*letter-spacing:\s*0/);
-  assert.doesNotMatch(html, /sidebar-stat-card|Recorded Active Time|Project Logged Time/);
+  assert.doesNotMatch(html, /sidebar-stat-card|Recorded Active Time|Project Logged Time|Unlogged Work|unlogged-work-review/);
+  assert.match(html, /id="work-times-stats"/);
+  assert.match(html, /id="work-stat-captured"/);
+  assert.match(html, /id="work-stat-logged"/);
+  assert.match(html, /id="work-stat-earnings"/);
+  assert.match(html, /id="work-stat-conversion-percent"/);
+  assert.match(css, /\.work-times-stats-stack\s*\{[\s\S]*display:\s*flex[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.work-times-stat-card\s*\{[\s\S]*border-right:\s*0/);
   assert.match(css, /\.project-summary-panel\s*\{[\s\S]*padding:\s*16px/);
   assert.match(css, /\.project-summary-panel__header\s*\{[\s\S]*align-items:\s*center/);
-  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*font-size:\s*11px/);
-  assert.match(css, /\.sidebar-section-title\s*\{[\s\S]*letter-spacing:\s*0\.04em/);
-  assert.match(css, /\.unlogged-work-review\s*\{[\s\S]*background:\s*var\(--surface-panel\)/);
+  assert.match(css, /\.project-summary-panel__title\s*\{[\s\S]*margin:\s*0/);
+  assert.match(html, /class="metric-label project-summary-panel__title">Logged Projects<\/h3>/);
+  assert.doesNotMatch(html, /stat-project-total|project-summary-total|Total Project Time/);
   assert.match(css, /\.project-breakdown-card\s*\{[\s\S]*background:\s*color-mix\(in oklch, var\(--surface-raised\)/);
   assert.doesNotMatch(css, /\.project-breakdown-footer\b/);
 });

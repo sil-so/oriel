@@ -232,7 +232,35 @@ final class OrielApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "Quit Oriel", action: #selector(terminate), keyEquivalent: "q").target = self
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
+        mainMenu.addItem(makeEditMenuItem())
         NSApp.mainMenu = mainMenu
+    }
+
+    private func makeEditMenuItem() -> NSMenuItem {
+        let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        addResponderMenuItem(editMenu, title: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        addResponderMenuItem(editMenu, title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z", modifiers: [.command, .shift])
+        editMenu.addItem(NSMenuItem.separator())
+        addResponderMenuItem(editMenu, title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        addResponderMenuItem(editMenu, title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        addResponderMenuItem(editMenu, title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(NSMenuItem.separator())
+        addResponderMenuItem(editMenu, title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        return editMenuItem
+    }
+
+    private func addResponderMenuItem(
+        _ menu: NSMenu,
+        title: String,
+        action: Selector,
+        keyEquivalent: String,
+        modifiers: NSEvent.ModifierFlags = .command
+    ) {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: keyEquivalent)
+        item.keyEquivalentModifierMask = modifiers
+        item.target = nil
     }
 
     private func presentFatalError(_ error: Error) {

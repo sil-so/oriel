@@ -16,6 +16,8 @@ const PRESET_COLORS = [
 
 let editingProjectTaskId = null;
 let currentProjectDetailEntries = [];
+let sidebarAllTimeEntries = null;
+let sidebarAllTimeEntriesPromise = null;
 
 function escapeProjectText(value) {
     return String(value ?? '')
@@ -28,6 +30,59 @@ function escapeProjectText(value) {
 
 function getProjectTasks(project) {
     return Array.isArray(project?.tasks) ? project.tasks : [];
+}
+
+function getTimeEntryMergeKey(entry) {
+    if (entry?.id) return `id:${entry.id}`;
+    return [
+        entry?.projectId || '',
+        Number.isFinite(entry?.start) ? entry.start : '',
+        Number.isFinite(entry?.end) ? entry.end : '',
+        String(entry?.description || '')
+    ].join('|');
+}
+
+function mergeSidebarHistoricalEntriesWithCurrent(allEntries = []) {
+    const merged = Array.isArray(allEntries) ? [...allEntries] : [];
+    const seen = new Set(merged.map(getTimeEntryMergeKey));
+    for (const entry of Array.isArray(state.timeEntries) ? state.timeEntries : []) {
+        const key = getTimeEntryMergeKey(entry);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(entry);
+    }
+    return merged;
+}
+
+function getSidebarMetricAllTimeEntries() {
+    if (Array.isArray(sidebarAllTimeEntries)) {
+        return mergeSidebarHistoricalEntriesWithCurrent(sidebarAllTimeEntries);
+    }
+    return state.timeEntries;
+}
+
+function shouldFetchSidebarHistoricalEntries() {
+    return (Array.isArray(state.projects) ? state.projects : []).some(project => (
+        project?.rateType === 'fixed' && Number(project?.fixedRate || 0) > 0
+    ));
+}
+
+function refreshSidebarHistoricalEntriesForMetrics() {
+    if (!shouldFetchSidebarHistoricalEntries()) return;
+    if (Array.isArray(sidebarAllTimeEntries) || sidebarAllTimeEntriesPromise) return;
+    if (typeof fetchAllTimeEntries !== 'function') return;
+
+    sidebarAllTimeEntriesPromise = fetchAllTimeEntries()
+        .then(entries => {
+            sidebarAllTimeEntries = Array.isArray(entries) ? entries : [];
+            sidebarAllTimeEntriesPromise = null;
+            recalculateStatistics();
+        })
+        .catch(error => {
+            console.error('Error fetching all-time sidebar stats:', error);
+            sidebarAllTimeEntries = [];
+            sidebarAllTimeEntriesPromise = null;
+        });
 }
 
 function newProjectTaskId() {
@@ -361,60 +416,60 @@ async function archiveProjectTask(event, projectId, taskId) {
 
 // Recalculates stats, charts, and projects breakdown on the right panel
 function recalculateStatistics() {
-    // 1. Recorded active time includes short timeline-owned activity segments.
+    // Recorded active time includes short timeline-owned activity segments.
     const capturedActivities = Array.isArray(state.timelineActivities)
         ? state.timelineActivities
         : state.activities;
-    const totalActiveMs = capturedActivities.reduce(
-        (total, activity) => total + Math.max(0, activity.end - activity.start),
-        0
-    );
+    const metrics = typeof calculateSelectedPeriodMetrics === 'function'
+        ? calculateSelectedPeriodMetrics({
+            activities: capturedActivities,
+            timeEntries: state.timeEntries,
+            projects: state.projects,
+            allTimeEntries: getSidebarMetricAllTimeEntries()
+        })
+        : {
+            totalCapturedMs: 0,
+            totalLoggedMs: 0,
+            billableMs: 0,
+            billableEarnings: 0,
+            dominantCurrency: '$',
+            conversionPercent: 0,
+            projectDurations: {}
+        };
+    const projectDurations = metrics.projectDurations || {};
+    const formatProjectDuration = typeof formatSidebarProjectDuration === 'function'
+        ? formatSidebarProjectDuration
+        : (ms) => {
+            const totalMins = Math.floor(ms / (60 * 1000));
+            const hours = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            return `${hours}h ${mins}m`;
+        };
+    const formatMetricDuration = typeof formatStatsDuration === 'function'
+        ? formatStatsDuration
+        : formatProjectDuration;
 
-    const formatHoursMins = (ms) => {
-        const totalMins = Math.floor(ms / (60 * 1000));
-        const hours = Math.floor(totalMins / 60);
-        const mins = totalMins % 60;
-        return `${hours}h ${mins}m`;
-    };
-
-    if (DOM.elStatCapturedActive) DOM.elStatCapturedActive.innerText = formatHoursMins(totalActiveMs);
-
-    // 2. Time Entries (Logged Projects Calculation)
-    let totalProjectMs = 0;
-    let totalBillableMs = 0;
-    let totalNonBillableMs = 0;
-
-    const projectDurations = {}; // Keep map of project ID to total logged duration
-
-    for (const entry of state.timeEntries) {
-        const duration = getProjectTimeEntryDurationMs(entry);
-        if (duration <= 0) continue;
-        totalProjectMs += duration;
-
-        if (entry.billable) {
-            totalBillableMs += duration;
-        } else {
-            totalNonBillableMs += duration;
-        }
-
-        if (!projectDurations[entry.projectId]) {
-            projectDurations[entry.projectId] = 0;
-        }
-        projectDurations[entry.projectId] += duration;
-    }
-
-    if (DOM.elStatProjectTotal) DOM.elStatProjectTotal.innerText = formatHoursMins(totalProjectMs);
+    if (DOM.elStatCapturedActive) DOM.elStatCapturedActive.innerText = formatProjectDuration(metrics.totalCapturedMs);
+    if (DOM.elWorkStatCaptured) DOM.elWorkStatCaptured.innerText = formatMetricDuration(metrics.totalCapturedMs);
+    if (DOM.elWorkStatLogged) DOM.elWorkStatLogged.innerText = formatMetricDuration(metrics.totalLoggedMs);
+    if (DOM.elWorkStatEarnings) DOM.elWorkStatEarnings.innerText = `${metrics.dominantCurrency || '$'}${(metrics.billableEarnings || 0).toFixed(2)}`;
+    if (DOM.elWorkStatBillableHours) DOM.elWorkStatBillableHours.innerText = `${((metrics.billableMs || 0) / (3600 * 1000)).toFixed(1)}h of billable work`;
+    if (DOM.elWorkStatConversionPercent) DOM.elWorkStatConversionPercent.innerText = `${metrics.conversionPercent || 0}%`;
+    if (DOM.elWorkStatConversionBar) DOM.elWorkStatConversionBar.style.width = `${metrics.conversionPercent || 0}%`;
+    refreshSidebarHistoricalEntriesForMetrics();
 
     // Safety check for getElStatBillable vs elStatBillable in state.js
     const elBillableNode = DOM.getElStatBillable || document.getElementById('stat-billable');
-    if (elBillableNode) elBillableNode.innerText = formatHoursMins(totalBillableMs);
-    if (DOM.elStatNonbillable) DOM.elStatNonbillable.innerText = formatHoursMins(totalNonBillableMs);
+    if (elBillableNode) elBillableNode.innerText = formatProjectDuration(metrics.billableMs);
+    if (DOM.elStatNonbillable) DOM.elStatNonbillable.innerText = formatProjectDuration(Math.max(0, metrics.totalLoggedMs - metrics.billableMs));
 
     // Project bar visual update relative to recorded active time.
-    const projectPct = totalActiveMs > 0 ? Math.min(100, Math.round((totalProjectMs / totalActiveMs) * 100)) : 0;
+    const projectPct = metrics.totalCapturedMs > 0
+        ? Math.min(100, Math.round((metrics.totalLoggedMs / metrics.totalCapturedMs) * 100))
+        : 0;
     if (DOM.elBarProject) DOM.elBarProject.style.width = `${projectPct}%`;
 
-    // 3. Projects Breakdown render
+    // Projects Breakdown render
     const projectIds = Object.keys(projectDurations);
     if (projectIds.length === 0) {
         DOM.elProjectsList.innerHTML = `
@@ -428,7 +483,7 @@ function recalculateStatistics() {
     DOM.elProjectsList.innerHTML = projectIds.map(pid => {
         const proj = state.projects.find(p => p.id === pid) || { name: 'Unknown Project', color: '#4b5563', billable: false };
         const ms = projectDurations[pid];
-        const pct = totalProjectMs > 0 ? Math.round((ms / totalProjectMs) * 100) : 0;
+        const pct = metrics.totalLoggedMs > 0 ? Math.round((ms / metrics.totalLoggedMs) * 100) : 0;
 
         return `
             <div class="project-breakdown-card">
@@ -437,7 +492,7 @@ function recalculateStatistics() {
                         <span class="project-marker" style="background-color: ${proj.color}"></span>
                         ${proj.name}
                     </div>
-                    <span class="metric-value metric-value--success">${formatHoursMins(ms)}</span>
+                    <span class="metric-value metric-value--success">${formatProjectDuration(ms)}</span>
                 </div>
                 <div class="progress-track progress-track--thin">
                     <div class="progress-fill" style="background-color: ${proj.color}; width: ${pct}%"></div>

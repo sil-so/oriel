@@ -1988,26 +1988,31 @@ body.is-column-resizing * {
     transition: width 500ms var(--ease-out);
 }
 
-.sidebar-section-title {
-    color: var(--text-tertiary);
-    font-size: 11px;
-    line-height: 16px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.sidebar-section-title--padded {
-    margin-bottom: 12px;
-    padding: 0 4px;
-}
-
 .project-summary-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
     padding: 16px;
     background: var(--surface-panel);
+}
+
+.work-times-stats-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.work-times-stat-card {
+    min-height: 0;
+    border: 1px solid var(--separator-soft);
+    border-radius: var(--radius-md);
+    border-right: 0;
+    background: var(--surface-panel);
+}
+
+.work-times-stat-card:last-child {
+    border-right: 0;
 }
 
 .project-summary-panel__header {
@@ -2017,10 +2022,8 @@ body.is-column-resizing * {
     gap: 12px;
 }
 
-.project-summary-total {
-    flex: 0 0 auto;
-    min-width: max-content;
-    white-space: nowrap;
+.project-summary-panel__title {
+    margin: 0;
 }
 
 .sidebar-projects-section,
@@ -3067,7 +3070,51 @@ body.is-column-resizing * {
     color: var(--text-primary);
     font-size: 12px;
     line-height: 1.45;
-    white-space: pre-wrap;
+}
+
+.ai-message-content > * + * {
+    margin-top: 8px;
+}
+
+.ai-message-content p {
+    margin: 0;
+}
+
+.ai-message-content ol,
+.ai-message-content ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.ai-message-content li + li {
+    margin-top: 5px;
+}
+
+.ai-message-content strong {
+    font-weight: 700;
+}
+
+.ai-message-content em {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.ai-message-content code {
+    border: 1px solid var(--separator-soft);
+    border-radius: var(--radius-xs);
+    padding: 1px 4px;
+    background: color-mix(in oklch, var(--surface-raised) 62%, var(--surface-panel) 38%);
+    color: var(--text-primary);
+    font-size: 11px;
+}
+
+.ai-message-content a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.ai-message-content a:hover {
+    text-decoration: underline;
 }
 
 .ai-suggestion-list {
@@ -4533,6 +4580,24 @@ body.is-column-resizing * {
 
 .custom-select-menu.hidden {
     display: none;
+}
+
+.app-context-menu {
+    position: fixed;
+    z-index: var(--z-popover);
+    width: 188px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px;
+}
+
+.app-context-menu.hidden {
+    display: none;
+}
+
+.app-context-menu .menu-option {
+    justify-content: flex-start;
 }
 
 .menu-option,

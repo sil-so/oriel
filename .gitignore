@@ -5,6 +5,8 @@ build/
 .worktrees/
 worktrees/
 .agents/
+# Local agent verification notes and machine-specific workflow memory, including
+# .agents/oriel-verification.md.
 docs/superpowers/
 docs/design/
 launch/

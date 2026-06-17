@@ -19,25 +19,6 @@ const STATS_COLORS = [
     'oklch(0.68 0.070 28)'
 ];
 
-function getReportingTimeEntryDurationMs(entry) {
-    if (typeof isHiddenAutoAssignedTimeEntry === 'function' && isHiddenAutoAssignedTimeEntry(entry)) {
-        return 0;
-    }
-    if (typeof getTimeEntryDurationMs === 'function') {
-        return getTimeEntryDurationMs(entry);
-    }
-
-    const assignedDuration = Array.isArray(entry?.activities)
-        ? entry.activities.reduce((total, activity) => {
-            const duration = Number(activity?.assignedDurationMs);
-            return total + (Number.isFinite(duration) && duration > 0 ? duration : 0);
-        }, 0)
-        : 0;
-    return assignedDuration > 0
-        ? assignedDuration
-        : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
-}
-
 /**
  * Initialize Reporting Dashboard events and preset selectors
  */
@@ -174,19 +155,6 @@ function extractDomain(url, title) {
 }
 
 /**
- * Formats duration in ms to clean readable string (e.g. 5h 12m or 45s)
- */
-function formatStatsDuration(ms) {
-    if (ms < 60000) {
-        return `${Math.max(0, Math.round(ms / 1000))}s`;
-    }
-    const minutes = Math.round(ms / 60000);
-    const hrs = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hrs > 0 ? `${hrs}h ${mins}m` : `${mins} min`;
-}
-
-/**
  * Main function to refresh the Statistics dashboard elements
  */
 async function refreshStatsView() {
@@ -239,87 +207,25 @@ async function refreshStatsView() {
             }
         }
 
-        // 2. Process Logged Entries & Earnings
-        let totalLoggedMs = 0;
-        let billableEarnings = 0;
-        let billableMs = 0;
-        const currencySymbols = {};
-
-        // Find standard currency defaults across projects
-        state.projects.forEach(p => {
-            if (p.currency) currencySymbols[p.id] = p.currency;
-        });
-
-        // Group time entries by project ID to perform prorating calculations
-        const entriesByProject = {};
-        for (const entry of timeEntries) {
-            const duration = getReportingTimeEntryDurationMs(entry);
-            if (duration <= 0) continue;
-            totalLoggedMs += duration;
-
-            if (!entriesByProject[entry.projectId]) {
-                entriesByProject[entry.projectId] = 0;
-            }
-            entriesByProject[entry.projectId] += duration;
-        }
-
         // Fetch total historical logs for projects (needed for accurate fixed rate prorating)
         const allEntries = isAllTime ? timeEntries : await fetchAllTimeEntries();
-        const totalHistoricalHrs = {};
-        for (const entry of allEntries) {
-            const duration = getReportingTimeEntryDurationMs(entry);
-            if (duration > 0) {
-                if (!totalHistoricalHrs[entry.projectId]) {
-                    totalHistoricalHrs[entry.projectId] = 0;
-                }
-                totalHistoricalHrs[entry.projectId] += duration / (3600 * 1000);
-            }
-        }
-
-        let dominantCurrency = '$';
-
-        for (const projId in entriesByProject) {
-            const periodMs = entriesByProject[projId];
-            const proj = state.projects.find(p => p.id === projId);
-            if (!proj) continue;
-
-            const currency = proj.currency || '$';
-            dominantCurrency = currency; // Track latest currency for display
-
-            if (proj.billable) {
-                billableMs += periodMs;
-            }
-
-            const periodHrs = periodMs / (3600 * 1000);
-
-            if (proj.rateType === 'hourly') {
-                billableEarnings += periodHrs * (proj.hourlyRate || 0);
-            } else if (proj.rateType === 'fixed') {
-                // Prorate the fixed flat rate: (hours in period / total hours ever) * fixedRate
-                const totalProjHrs = totalHistoricalHrs[projId] || periodHrs;
-                if (totalProjHrs > 0) {
-                    const ratio = periodHrs / totalProjHrs;
-                    billableEarnings += ratio * (proj.fixedRate || 0);
-                } else {
-                    billableEarnings += proj.fixedRate || 0;
-                }
-            }
-        }
+        const metrics = calculateSelectedPeriodMetrics({
+            activities,
+            timeEntries,
+            projects: state.projects,
+            allTimeEntries: allEntries
+        });
 
         // 3. Render Metric Cards
-        document.getElementById('stat-card-captured').innerText = formatStatsDuration(totalCapturedMs);
-        document.getElementById('stat-card-logged').innerText = formatStatsDuration(totalLoggedMs);
-        document.getElementById('stat-card-earnings').innerText = `${dominantCurrency}${billableEarnings.toFixed(2)}`;
+        document.getElementById('stat-card-captured').innerText = formatStatsDuration(metrics.totalCapturedMs);
+        document.getElementById('stat-card-logged').innerText = formatStatsDuration(metrics.totalLoggedMs);
+        document.getElementById('stat-card-earnings').innerText = `${metrics.dominantCurrency}${metrics.billableEarnings.toFixed(2)}`;
         
-        const billableHrs = (billableMs / (3600 * 1000)).toFixed(1);
+        const billableHrs = (metrics.billableMs / (3600 * 1000)).toFixed(1);
         document.getElementById('stat-card-billable-hours').innerText = `${billableHrs}h of billable work`;
 
-        // Conversion efficiency bar (logged / captured)
-        const conversionPercent = totalCapturedMs > 0 
-            ? Math.min(100, Math.round((totalLoggedMs / totalCapturedMs) * 100)) 
-            : 0;
-        document.getElementById('stat-card-conversion-percent').innerText = `${conversionPercent}%`;
-        document.getElementById('stat-card-conversion-bar').style.width = `${conversionPercent}%`;
+        document.getElementById('stat-card-conversion-percent').innerText = `${metrics.conversionPercent}%`;
+        document.getElementById('stat-card-conversion-bar').style.width = `${metrics.conversionPercent}%`;
 
         // 4. Draw Top Applications Donut
         const sortedApps = Object.entries(appsGroup)
