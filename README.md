@@ -5,7 +5,7 @@ time without sending their activity history to a hosted service.
 
 It records foreground app and browser activity on the Mac, shows that activity
 in the Activity Stream Timeline and week view, and helps turn the raw record
-into project, task, billable, and reporting entries.
+into project, category, billable, and reporting entries.
 
 > [!NOTE]
 > Oriel is source-build today. Signed and notarized public macOS releases are
@@ -31,7 +31,7 @@ into project, task, billable, and reporting entries.
   click, and scroll input.
 - Provides the Activity Stream Timeline, Activity Mix, and week view for
   reviewing captured work.
-- Converts activity into project time entries with tasks, billable defaults,
+- Converts activity into project time entries with categories, billable defaults,
   hourly/fixed-rate project settings, and reporting.
 - Supports auto-assignment rules for app, title, and URL patterns.
 - Supports capture exclusions for sensitive apps, titles, or URLs, including
@@ -39,6 +39,9 @@ into project, task, billable, and reporting entries.
 - Exports and restores portable local archives.
 - Offers optional BYOK AI workflows for selected-day chat, entry suggestions,
   screenshot summaries, and daily insights.
+- Groups Ask AI entry suggestions into reviewable project/topic batches so
+  captured activity can be assigned without forcing one project for the whole
+  day.
 
 ## Privacy Model
 
@@ -51,7 +54,7 @@ into project, task, billable, and reporting entries.
 | --- | --- | --- |
 | Core activity tracking | On after running the app | Nothing by design |
 | Logo.dev icons | Off | Website domains, only when enabled |
-| Ask AI | Off until a provider key is configured | Selected-day context when the user asks |
+| Ask AI | Off until a provider key is configured | Prompt plus selected-day context, including project names, categories, and optional project context, when the user asks |
 | AI screenshot summaries | Off | Compressed screenshots and activity metadata when enabled |
 | AI daily insights | Manual | Clustered text summaries and local time statistics when generated |
 | AI model refresh | Manual | Provider model-list request when requested |
@@ -69,8 +72,9 @@ Oriel's networked features are opt-in and provider-specific:
 
 - **Logo.dev icons:** sends website domains to Logo.dev when branded website
   icons are enabled and a publishable key is saved.
-- **Ask AI:** sends the prompt and selected-day context to the configured AI
-  provider when the user submits a question.
+- **Ask AI:** sends the prompt and selected-day context, including project
+  names, categories, and optional project context, to the configured AI provider
+  when the user submits a question.
 - **AI screenshot summaries:** captures, downscales, and JPEG-compresses a
   screenshot in memory, then sends it with activity metadata to the selected
   provider. Oriel stores only validated summary JSON and request metadata needed

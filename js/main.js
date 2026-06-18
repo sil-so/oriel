@@ -116,6 +116,7 @@ function closeCustomSelect(wrapper) {
     wrapper.classList.remove('is-open');
     wrapper._customSelect.button.setAttribute('aria-expanded', 'false');
     wrapper._customSelect.menu.classList.add('hidden');
+    resetCustomSelectMenuPosition(wrapper._customSelect.menu);
 }
 
 function closeAllCustomSelects(exceptWrapper = null) {
@@ -191,8 +192,8 @@ function ensureAppContextMenu() {
         if (ids.length === 0) return;
 
         const message = ids.length > 1
-            ? `Delete ${ids.length} logged time entries permanently?`
-            : 'Delete this logged time entry permanently?';
+            ? `${ids.length} logged entries will be permanently removed.`
+            : 'This logged entry will be permanently removed.';
         const onConfirm = async () => {
             try {
                 await deleteTimeEntriesByIds(ids);
@@ -205,7 +206,7 @@ function ensureAppContextMenu() {
             showCustomConfirm({
                 title: 'Delete Time Entry',
                 message,
-                actionText: ids.length > 1 ? 'Delete Entries' : 'Delete Entry',
+                actionText: 'Delete',
                 actionClass: 'button-danger',
                 onConfirm
             });
@@ -880,6 +881,40 @@ function buildCustomSelectMenu(select) {
     });
 }
 
+function resetCustomSelectMenuPosition(menu) {
+    if (!menu?.style) return;
+    ['position', 'left', 'right', 'top', 'bottom', 'width', 'maxHeight'].forEach(prop => {
+        menu.style[prop] = '';
+    });
+}
+
+function positionCustomSelectMenu(select) {
+    const custom = select?._customSelect;
+    if (!custom?.button || !custom?.menu) return;
+
+    const rect = custom.button.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+    const gap = 4;
+    const viewportMargin = 12;
+    const belowSpace = viewportHeight - rect.bottom - viewportMargin;
+    const aboveSpace = rect.top - viewportMargin;
+    const openUpward = belowSpace < 140 && aboveSpace > belowSpace;
+
+    custom.menu.style.position = 'fixed';
+    custom.menu.style.left = `${Math.max(viewportMargin, rect.left)}px`;
+    custom.menu.style.right = 'auto';
+    custom.menu.style.width = `${rect.width}px`;
+    custom.menu.style.maxHeight = `${Math.max(96, Math.min(220, openUpward ? aboveSpace - gap : belowSpace - gap))}px`;
+
+    if (openUpward) {
+        custom.menu.style.top = 'auto';
+        custom.menu.style.bottom = `${Math.max(viewportMargin, viewportHeight - rect.top + gap)}px`;
+    } else {
+        custom.menu.style.top = `${rect.bottom + gap}px`;
+        custom.menu.style.bottom = 'auto';
+    }
+}
+
 function openCustomSelect(select) {
     const custom = select._customSelect;
     if (!custom || select.disabled) return;
@@ -894,6 +929,7 @@ function openCustomSelect(select) {
 
     syncCustomSelect(select);
     buildCustomSelectMenu(select);
+    positionCustomSelectMenu(select);
     custom.wrapper.classList.add('is-open');
     custom.button.setAttribute('aria-expanded', 'true');
     custom.menu.classList.remove('hidden');
@@ -1445,6 +1481,8 @@ function closeModalById(modalId) {
 
     if (modalId === 'time-entry-modal' && typeof closeTimeEntryModal === 'function') {
         closeTimeEntryModal();
+    } else if (modalId === 'project-details-modal' && typeof window.closeProjectDetailsModal === 'function') {
+        window.closeProjectDetailsModal();
     } else {
         modal.classList.add('hidden');
     }
@@ -2326,9 +2364,9 @@ function setupMainEventListeners() {
             } else if (purgeConfirmCount === 2) {
                 purgeConfirmCount = 0;
                 showCustomConfirm({
-                    title: 'Purge All Data',
-                    message: 'Are you sure you want to wipe all local time tracker records permanently? This cannot be undone.',
-                    actionText: 'Purge Permanently',
+                    title: 'Purge Local Data',
+                    message: 'All local time tracker records will be wiped permanently. This cannot be undone.',
+                    actionText: 'Purge',
                     actionClass: 'button-danger',
                     onConfirm: async () => {
                         try {
@@ -3398,6 +3436,10 @@ function setupMainEventListeners() {
                 state.selectedActivities.clear();
                 state.selectedActivityScopes?.clear?.();
                 updateMultiSelectBar();
+                const pendingAiSuggestionId = window.pendingAiSuggestionCompletion?.suggestionId || '';
+                if (pendingAiSuggestionId && typeof window.completeAiSuggestionAssignment === 'function') {
+                    window.completeAiSuggestionAssignment(pendingAiSuggestionId);
+                }
                 closeTimeEntryModal();
                 await refreshData();
             } else {
@@ -3474,9 +3516,9 @@ function setupMainEventListeners() {
         
         showCustomConfirm({
             title: 'Delete Time Entry',
-            message: 'Are you sure you want to delete this logged time entry permanently?',
-            actionText: 'Delete Entry',
-                    actionClass: 'button-danger',
+            message: 'This logged entry will be permanently removed.',
+            actionText: 'Delete',
+            actionClass: 'button-danger',
             onConfirm: async () => {
                 try {
                     const editingGroupIds = Array.isArray(window.editingTimeEntryGroupIds)
@@ -3835,8 +3877,8 @@ function setupMainEventListeners() {
         btnNewProject.addEventListener('click', () => {
             window.editingProjectId = null;
             DOM.elProjName.value = '';
+            if (DOM.elProjDescription) DOM.elProjDescription.value = '';
             DOM.elProjColor.value = '#3b82f6';
-            DOM.elProjBillable.checked = true;
             
             // Reset rates info
             const rateTypeSelect = document.getElementById('project-rate-type');
@@ -3865,8 +3907,8 @@ function setupMainEventListeners() {
         btnProjPageNew.addEventListener('click', () => {
             window.editingProjectId = null;
             DOM.elProjName.value = '';
+            if (DOM.elProjDescription) DOM.elProjDescription.value = '';
             DOM.elProjColor.value = '#3b82f6';
-            DOM.elProjBillable.checked = true;
             
             const rateTypeSelect = document.getElementById('project-rate-type');
             const hourlyRateInput = document.getElementById('project-hourly-rate');
@@ -3907,12 +3949,14 @@ function setupMainEventListeners() {
             const hourlyRateInput = document.getElementById('project-hourly-rate');
             const fixedRateInput = document.getElementById('project-fixed-rate');
             const currencySelect = document.getElementById('project-currency');
+            const rateType = rateTypeSelect ? rateTypeSelect.value : 'none';
 
             const payload = {
                 name,
+                description: DOM.elProjDescription ? DOM.elProjDescription.value.trim() : '',
                 color: DOM.elProjColor.value,
-                billable: DOM.elProjBillable.checked,
-                rateType: rateTypeSelect ? rateTypeSelect.value : 'none',
+                billable: rateType === 'hourly' || rateType === 'fixed',
+                rateType,
                 hourlyRate: hourlyRateInput && hourlyRateInput.value ? parseFloat(hourlyRateInput.value) : 0,
                 fixedRate: fixedRateInput && fixedRateInput.value ? parseFloat(fixedRateInput.value) : 0,
                 currency: currencySelect ? currencySelect.value : '$'

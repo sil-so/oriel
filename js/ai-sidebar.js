@@ -91,6 +91,14 @@
         return isBrowserLikeApp(activity?.app) && AI_DRAFT_EXCLUDED_BROWSER_TITLE_PATTERN.test(title);
     }
 
+    function aiDraftCandidateId(index) {
+        return `draft-candidate-${index + 1}`;
+    }
+
+    function aiDraftActivityGroupId(index) {
+        return `draft-activity-group-${index + 1}`;
+    }
+
     function getProject(projectId) {
         return (global.state?.projects || []).find(project => project.id === projectId) || null;
     }
@@ -207,7 +215,7 @@
     function sanitizeAiDraftCandidate(activity, index) {
         const durationMs = Math.max(0, Number(activity?.duration || 0));
         return {
-            id: `draft-candidate-${index + 1}`,
+            id: aiDraftCandidateId(index),
             start: activity.start,
             end: activity.end,
             startTime: formatClock(activity.start),
@@ -222,7 +230,11 @@
     }
 
     function buildAiDraftActivitySet(dateStr = getDateString()) {
-        const activities = buildAiDraftActivityFragments(dateStr);
+        const activities = buildAiDraftActivityFragments(dateStr)
+            .map((activity, index) => ({
+                ...activity,
+                draftCandidateId: aiDraftCandidateId(index)
+            }));
         if (activities.length === 0) return null;
 
         const durationMs = activities.reduce((total, activity) => total + Math.max(0, Number(activity.duration || 0)), 0);
@@ -232,6 +244,85 @@
             durationMs,
             duration: formatDuration(durationMs),
             activities
+        };
+    }
+
+    function normalizeAiSuggestionText(value) {
+        return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function normalizeAiGroupConfidence(value) {
+        const confidence = normalizeAiSuggestionText(value).toLowerCase();
+        return ['high', 'medium', 'low'].includes(confidence) ? confidence : '';
+    }
+
+    function aiDraftActivityDurationMs(activity) {
+        const duration = Number(activity?.duration);
+        if (Number.isFinite(duration) && duration > 0) return duration;
+        const assignedDuration = Number(activity?.assignedDurationMs);
+        if (Number.isFinite(assignedDuration) && assignedDuration > 0) return assignedDuration;
+        const start = Number(activity?.start);
+        const end = Number(activity?.end);
+        return Number.isFinite(start) && Number.isFinite(end) && end > start ? end - start : 0;
+    }
+
+    function buildDraftActivityCandidateMap(draftActivitySet) {
+        const map = new Map();
+        (draftActivitySet?.activities || []).forEach((activity, index) => {
+            const candidateId = normalizeAiSuggestionText(activity.draftCandidateId || aiDraftCandidateId(index));
+            if (candidateId) map.set(candidateId, activity);
+        });
+        return map;
+    }
+
+    function normalizeAiDraftActivityGroup(suggestion, index, draftActivitySet, usedCandidateIds) {
+        if (!draftActivitySet || !Array.isArray(draftActivitySet.activities)) return null;
+        const candidateMap = buildDraftActivityCandidateMap(draftActivitySet);
+        const seenCandidateIds = new Set();
+        const candidateIds = [];
+        if (Array.isArray(suggestion?.candidateIds)) {
+            for (const rawCandidateId of suggestion.candidateIds) {
+                const candidateId = normalizeAiSuggestionText(rawCandidateId);
+                if (!candidateId || !candidateMap.has(candidateId)) continue;
+                if (seenCandidateIds.has(candidateId) || usedCandidateIds.has(candidateId)) continue;
+                seenCandidateIds.add(candidateId);
+                candidateIds.push(candidateId);
+            }
+        }
+        if (candidateIds.length === 0) return null;
+
+        const rawProjectId = normalizeAiSuggestionText(suggestion.projectId);
+        const project = rawProjectId ? getProject(rawProjectId) : null;
+        if (!rawProjectId || !project) return null;
+
+        const rawTaskId = normalizeAiSuggestionText(suggestion.taskId);
+        if (rawTaskId && !isValidTask(project, rawTaskId)) return null;
+
+        const confidence = normalizeAiGroupConfidence(suggestion.confidence);
+        if (Boolean(suggestion.needsReview) || confidence === 'low') return null;
+        const projectId = rawProjectId;
+        const taskId = rawTaskId;
+        const activities = candidateIds.map(candidateId => candidateMap.get(candidateId));
+        const durationMs = activities.reduce((total, activity) => total + aiDraftActivityDurationMs(activity), 0);
+        if (durationMs <= 0) return null;
+
+        candidateIds.forEach(candidateId => usedCandidateIds.add(candidateId));
+        const title = normalizeAiSuggestionText(suggestion.title || suggestion.topic)
+            || `${project.name || 'project'} work`;
+        return {
+            type: 'draftActivityGroup',
+            id: aiDraftActivityGroupId(index),
+            title,
+            candidateIds,
+            activities,
+            activityCount: activities.length,
+            durationMs,
+            duration: formatDuration(durationMs),
+            projectId,
+            taskId,
+            billable: typeof suggestion.billable === 'boolean' ? suggestion.billable : undefined,
+            confidence,
+            evidence: normalizeAiSuggestionText(suggestion.evidence || suggestion.reason)
         };
     }
 
@@ -479,6 +570,7 @@
             projects: (global.state?.projects || []).map(project => ({
                 id: String(project.id || ''),
                 name: String(project.name || ''),
+                description: String(project.description || '').trim().slice(0, 1000),
                 billable: Boolean(project.billable),
                 tasks: Array.isArray(project.tasks)
                     ? project.tasks.filter(task => !task.archived).map(task => ({ id: task.id, name: task.name }))
@@ -557,11 +649,16 @@
         const localDraftActivitySet = useLocalDraftSet && options.draftActivitySet?.activityCount > 0
             ? options.draftActivitySet
             : null;
-        const providerSuggestions = useLocalDraftSet ? [] : suggestions;
-        const normalizedSuggestions = providerSuggestions
-            .map(suggestion => {
+        const usedDraftCandidateIds = new Set();
+        const normalizedSuggestions = suggestions
+            .map((suggestion, index) => {
                 const type = suggestion?.type;
+                if (type === 'draftActivityGroup') {
+                    if (!useLocalDraftSet || !localDraftActivitySet) return null;
+                    return normalizeAiDraftActivityGroup(suggestion, index, localDraftActivitySet, usedDraftCandidateIds);
+                }
                 if (type === 'draftEntry') {
+                    if (useLocalDraftSet) return null;
                     if (!intent.allowDraftSuggestions) return null;
                     const start = Number(suggestion.start);
                     const end = Number(suggestion.end);
@@ -602,10 +699,6 @@
                 return null;
             })
             .filter(Boolean);
-
-        if (localDraftActivitySet) {
-            normalizedSuggestions.unshift(localDraftActivitySet);
-        }
 
         return {
             text: text || 'No response text returned.',
@@ -657,6 +750,21 @@
             return {
                 title: `Review ${count} proposed ${count === 1 ? 'activity' : 'activities'}`,
                 detail: duration ? `${duration} captured activity` : ''
+            };
+        }
+        if (suggestion.type === 'draftActivityGroup') {
+            const title = normalizeAiSuggestionText(suggestion.title) || 'project activity';
+            const duration = suggestion.duration || formatDuration(suggestion.durationMs);
+            const project = getProject(suggestion.projectId);
+            const taskName = getTaskName(project, suggestion.taskId);
+            const assignment = project
+                ? [project.name, taskName].filter(Boolean).join(' / ')
+                : '';
+            const activityDetail = duration ? `${duration} captured activity` : '';
+            const evidence = normalizeAiSuggestionText(suggestion.evidence);
+            return {
+                title: `Review ${title}`,
+                detail: [assignment, activityDetail, evidence].filter(Boolean).join(' · ')
             };
         }
         if (suggestion.type === 'draftEntry') {
@@ -772,7 +880,7 @@
         const renderMessageContent = content => (
             typeof global.renderOrielMarkdown === 'function'
                 ? global.renderOrielMarkdown(content)
-                : escapeHtml(content)
+                : escapeHtml(content).replace(/\n/g, '<br>')
         );
 
         messagesEl.innerHTML = chat.messages.map(message => `
@@ -783,12 +891,16 @@
                     <div class="ai-suggestion-list">
                         ${message.suggestions.map((suggestion, index) => {
                             const description = describeAiSuggestion(suggestion);
+                            const isComplete = suggestion.status === 'assigned';
+                            const detail = isComplete
+                                ? ['Assigned', description.detail].filter(Boolean).join(' · ')
+                                : description.detail;
                             return `
-                            <button type="button" class="ai-suggestion-card" data-suggestion-index="${index}" data-message-id="${escapeHtml(message.id)}">
-                                <i class="ph ph-sparkle"></i>
+                            <button type="button" class="ai-suggestion-card${isComplete ? ' is-complete' : ''}" data-suggestion-index="${index}" data-message-id="${escapeHtml(message.id)}"${isComplete ? ' disabled aria-disabled="true"' : ''}>
+                                <i class="${isComplete ? 'ph-fill ph-check-circle' : 'ph ph-sparkle'}"></i>
                                 <span class="ai-suggestion-text">
                                     <span>${escapeHtml(description.title)}</span>
-                                    ${description.detail ? `<span>${escapeHtml(description.detail)}</span>` : ''}
+                                    ${detail ? `<span>${escapeHtml(detail)}</span>` : ''}
                                 </span>
                             </button>
                         `; }).join('')}
@@ -801,7 +913,7 @@
             button.addEventListener('click', () => {
                 const message = chat.messages.find(candidate => candidate.id === button.dataset.messageId);
                 const suggestion = message?.suggestions?.[Number(button.dataset.suggestionIndex)];
-                if (suggestion) applyAiSuggestion(suggestion);
+                if (suggestion && suggestion.status !== 'assigned') applyAiSuggestion(suggestion);
             });
         });
         messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -840,6 +952,34 @@
             global.window.editingTimeEntryId = null;
             global.window.editingTimeEntryGroupIds = null;
             global.openTimeEntryModal(start, end, '', null, null, true, activities);
+            return;
+        }
+
+        if (suggestion.type === 'draftActivityGroup' && typeof global.openTimeEntryModal === 'function') {
+            const activities = Array.isArray(suggestion.activities)
+                ? suggestion.activities.filter(activity => (
+                    Number.isFinite(activity?.start)
+                    && Number.isFinite(activity?.end)
+                    && activity.end > activity.start
+                ))
+                : [];
+            if (activities.length === 0) {
+                setAiStatus('No draftable activity was found for this suggestion.', 'error');
+                return;
+            }
+            const start = Math.min(...activities.map(activity => activity.start));
+            const end = Math.max(...activities.map(activity => activity.end));
+            const defaultProjectId = suggestion.projectId || null;
+            const defaultTaskId = suggestion.taskId || '';
+            const defaultBillable = typeof suggestion.billable === 'boolean' ? suggestion.billable : null;
+            global.window.editingTimeEntryId = null;
+            global.window.editingTimeEntryGroupIds = null;
+            global.window.pendingAiSuggestionCompletion = suggestion.id ? { suggestionId: suggestion.id } : null;
+            global.openTimeEntryModal(start, end, suggestion.title || '', defaultProjectId, defaultBillable, true, activities, defaultTaskId);
+            const descriptionInput = byId('modal-description-input');
+            if (descriptionInput && suggestion.title) {
+                descriptionInput.value = suggestion.title;
+            }
             return;
         }
 
@@ -882,6 +1022,25 @@
                 suggestion.taskId || entry.taskId || ''
             );
         }
+    }
+
+    function completeAiSuggestionAssignment(suggestionId) {
+        const id = normalizeAiSuggestionText(suggestionId);
+        if (!id) return false;
+        const dateStr = getDateString();
+        let didComplete = false;
+        for (const chat of aiChats.getChatsForDate(dateStr)) {
+            for (const message of chat.messages || []) {
+                for (const suggestion of message.suggestions || []) {
+                    if (suggestion?.id === id && suggestion.status !== 'assigned') {
+                        suggestion.status = 'assigned';
+                        didComplete = true;
+                    }
+                }
+            }
+        }
+        if (didComplete) renderAiSidebar();
+        return didComplete;
     }
 
     async function sendAiMessage(promptText = null) {
@@ -999,6 +1158,7 @@
     global.normalizeAiResponse = normalizeAiResponse;
     global.describeAiSuggestion = describeAiSuggestion;
     global.applyAiSuggestion = applyAiSuggestion;
+    global.completeAiSuggestionAssignment = completeAiSuggestionAssignment;
     global.setAiLoadingState = setAiLoadingState;
     global.renderAiSidebar = renderAiSidebar;
     global.initAiSidebar = initAiSidebar;

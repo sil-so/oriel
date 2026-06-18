@@ -653,12 +653,12 @@
                         <input type="hidden" id="modal-project-select" value="">
                     </div>
 
-                    <!-- Task Selector -->
+                    <!-- Category Selector -->
                     <div class="modal-field-group hidden" id="modal-task-container">
-                        <label class="modal-field-label">Task</label>
+                        <label class="modal-field-label">Category</label>
                         <div class="custom-select-wrapper w-full">
-                            <select class="custom-select" id="modal-task-select" aria-label="Task">
-                                <option value="">No task</option>
+                            <select class="custom-select" id="modal-task-select" aria-label="Category">
+                                <option value="">No category</option>
                             </select>
                             <i class="ph ph-caret-down custom-select-icon"></i>
                         </div>
@@ -687,61 +687,64 @@
                 <h3 class="modal-title truncate">Create New Project</h3>
             </div>
 
-            <div class="modal-field-group">
-                <label class="modal-field-label">Project Name</label>
-                <input type="text" placeholder="e.g. Acme Website Design" class="field" id="project-name-input">
-            </div>
+            <div class="project-create-sections flex flex-col gap-4">
+                <div class="surface-panel settings-card">
+                    <div class="modal-field-group">
+                        <label class="settings-card-title" for="project-name-input">Project Name</label>
+                        <input type="text" placeholder="e.g. Acme Website Design" class="field" id="project-name-input">
+                    </div>
 
-            <!-- Color Presets -->
-            <div class="modal-field-group">
-                <label class="modal-field-label">Project Color</label>
-                <div class="project-color-grid" id="project-colors-grid"></div>
-                <input type="color" class="hidden" id="project-color-input" value="#3b82f6">
-            </div>
+                    <div class="modal-field-group">
+                        <label class="settings-card-title" for="project-description-input">Project Context</label>
+                        <p class="modal-field-helper">Used by Ask AI to match captured activity when you explicitly ask it to suggest entries.</p>
+                        <textarea class="field project-context-textarea" id="project-description-input" maxlength="1000" rows="3" placeholder="What kind of work belongs in this project?"></textarea>
+                    </div>
 
-            <!-- Pricing Profile -->
-            <div class="modal-field-group">
-                <label class="modal-field-label">Pricing Mode</label>
-                <div class="custom-select-wrapper w-full">
-                    <select class="custom-select w-full" id="project-rate-type">
-                        <option value="none">No billing rate (Free/Internal)</option>
-                        <option value="hourly">Hourly Rate (Time-based billing)</option>
-                        <option value="fixed">Fixed Rate (Flat project price)</option>
-                    </select>
-                    <i class="ph ph-caret-down custom-select-icon"></i>
+                    <div class="modal-field-group">
+                        <label class="settings-card-title">Project Color</label>
+                        <div class="project-color-grid" id="project-colors-grid"></div>
+                        <input type="color" class="hidden" id="project-color-input" value="#3b82f6">
+                    </div>
                 </div>
-            </div>
 
-            <div class="modal-field-group hidden" id="project-currency-container">
-                <label class="modal-field-label">Currency</label>
-                <div class="custom-select-wrapper w-full">
-                    <select class="custom-select w-full" id="project-currency">
-                        <option value="$">USD ($)</option>
-                        <option value="€">EUR (€)</option>
-                        <option value="£">GBP (£)</option>
-                        <option value="¥">JPY/CNY (¥)</option>
-                        <option value="₹">INR (₹)</option>
-                    </select>
-                    <i class="ph ph-caret-down custom-select-icon"></i>
+                <div class="surface-panel settings-card">
+                    <div class="modal-field-group">
+                        <label class="settings-card-title" for="project-rate-type">Pricing Mode</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full" id="project-rate-type">
+                                <option value="none">No billing rate (Free/Internal)</option>
+                                <option value="hourly">Hourly Rate (Time-based billing)</option>
+                                <option value="fixed">Fixed Rate (Flat project price)</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="modal-field-group hidden" id="project-currency-container">
+                        <label class="settings-card-title" for="project-currency">Currency</label>
+                        <div class="custom-select-wrapper w-full">
+                            <select class="custom-select w-full" id="project-currency">
+                                <option value="$">USD ($)</option>
+                                <option value="€">EUR (€)</option>
+                                <option value="£">GBP (£)</option>
+                                <option value="¥">JPY/CNY (¥)</option>
+                                <option value="₹">INR (₹)</option>
+                            </select>
+                            <i class="ph ph-caret-down custom-select-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="modal-field-group hidden" id="project-hourly-rate-container">
+                        <label class="settings-card-title" for="project-hourly-rate">Hourly Rate</label>
+                        <input type="number" placeholder="0.00" min="0" class="field" id="project-hourly-rate">
+                    </div>
+
+                    <div class="modal-field-group hidden" id="project-fixed-rate-container">
+                        <label class="settings-card-title" for="project-fixed-rate">Fixed Rate</label>
+                        <input type="number" placeholder="0.00" min="0" class="field" id="project-fixed-rate">
+                    </div>
+
                 </div>
-            </div>
-
-            <div class="modal-field-group hidden" id="project-hourly-rate-container">
-                <label class="modal-field-label">Hourly Rate</label>
-                <input type="number" placeholder="0.00" min="0" class="field" id="project-hourly-rate">
-            </div>
-
-            <div class="modal-field-group hidden" id="project-fixed-rate-container">
-                <label class="modal-field-label">Fixed Rate</label>
-                <input type="number" placeholder="0.00" min="0" class="field" id="project-fixed-rate">
-            </div>
-
-            <div class="project-billable-row">
-                <span class="settings-card-title">Default Billable</span>
-                <label class="oriel-toggle oriel-toggle--sm" for="project-billable-toggle">
-                    <input type="checkbox" value="" class="oriel-toggle-input" id="project-billable-toggle" checked>
-                    <span class="oriel-toggle-track" aria-hidden="true"></span>
-                </label>
             </div>
 
             <div class="modal-footer">
@@ -1261,8 +1264,8 @@
     </div>
 
     <!-- Confirmation modal -->
-    <div class="modal-overlay modal-overlay--centered fixed inset-0 z-50 flex items-center justify-center hidden" id="confirm-modal">
-        <div class="modal-panel modal-size--confirm relative flex flex-col gap-4">
+    <div class="modal-overlay modal-overlay--centered confirm-modal-overlay fixed inset-0 flex items-center justify-center hidden" id="confirm-modal">
+        <div class="modal-panel modal-size--confirm relative flex flex-col">
             <div class="modal-header">
                 <div class="modal-header-title" id="confirm-modal-title">Confirm Action</div>
             </div>
@@ -1289,116 +1292,199 @@
                 </button>
             </div>
 
-            <div class="modal-scroll-content app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
-                <!-- Statistics Quick Row -->
-                <div class="project-details-stats">
-                    <div class="project-detail-stat">
-                        <span class="metric-label">Total Time Logged</span>
-                        <span class="metric-value" id="proj-details-total-duration">0h 0m</span>
-                    </div>
-                    <div class="project-detail-stat">
-                        <span class="metric-label">Billing Type</span>
-                        <span class="metric-value" id="proj-details-billing-type">Hourly</span>
-                    </div>
-                    <div class="project-detail-stat">
-                        <span class="metric-label">Total Value / Earnings</span>
-                        <span class="metric-value metric-value--success" id="proj-details-total-earnings">$0.00</span>
-                    </div>
-                </div>
+            <div class="app-tab-group project-details-tabs" role="tablist" aria-label="Project sections">
+                <button type="button" class="app-tab project-details-tab app-tab--active is-active" data-project-details-tab="overview" role="tab" aria-selected="true">Overview</button>
+                <button type="button" class="app-tab project-details-tab" data-project-details-tab="settings" role="tab" aria-selected="false">Settings</button>
+            </div>
 
-                <!-- Project Tasks -->
-                <div class="flex flex-col gap-2 shrink-0">
-                    <div class="flex items-center justify-between gap-3">
-                        <h4 class="section-label shrink-0">Tasks</h4>
-                        <div class="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                            <input type="text" placeholder="New task" class="field max-w-[220px]" id="proj-details-task-name">
-                            <button type="button" class="button-secondary shrink-0" id="proj-details-task-add">
-                                <i class="ph ph-plus"></i> Add
-                            </button>
+            <div class="modal-scroll-content app-scrollbar-safe flex flex-col gap-4 overflow-y-auto min-h-0">
+                <div class="project-details-panel flex-col gap-4" data-project-details-panel="overview" role="tabpanel">
+                    <div class="project-details-stats">
+                        <div class="project-detail-stat">
+                            <span class="metric-label">Total Time Logged</span>
+                            <span class="metric-value" id="proj-details-total-duration">0h 0m</span>
+                        </div>
+                        <div class="project-detail-stat">
+                            <span class="metric-label">Billing Type</span>
+                            <span class="metric-value" id="proj-details-billing-type">Hourly</span>
+                        </div>
+                        <div class="project-detail-stat">
+                            <span class="metric-label">Total Value / Earnings</span>
+                            <span class="metric-value metric-value--success" id="proj-details-total-earnings">$0.00</span>
                         </div>
                     </div>
-                    <div class="flex flex-col gap-2 max-h-[130px] overflow-y-auto pr-1 app-scrollbar-safe" id="proj-details-tasks-list"></div>
-                </div>
 
-                <!-- Manual Time Logging Collapsible Form -->
-                <div class="flex flex-col gap-2 shrink-0">
-                    <button class="button-primary w-full flex items-center justify-between px-4" id="proj-details-toggle-manual-form">
-                        <span class="flex items-center gap-1.5">
-                            <i class="ph ph-plus-circle"></i>
-                            Log Manual Time / Import History
-                        </span>
-                        <i class="ph ph-caret-down transition-transform duration-200" id="proj-details-form-caret"></i>
-                    </button>
-
-                    <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
-                        <div class="grid grid-cols-3 gap-3">
-                            <div class="project-manual-date-picker flex flex-col gap-1">
-                                <label class="metric-label" id="proj-details-manual-date-label-heading">Date</label>
-                                <input type="hidden" id="proj-details-manual-date">
-                                <div class="relative">
-                                    <button type="button" class="field project-manual-date-trigger" id="proj-details-manual-date-trigger" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="proj-details-manual-date-label-heading proj-details-manual-date-label">
-                                        <span id="proj-details-manual-date-label">Today</span>
-                                        <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                    <div class="surface-panel settings-card project-task-buckets">
+                        <div class="settings-card-header project-task-header">
+                            <div class="min-w-0">
+                                <span class="settings-card-title">Categories</span>
+                                <p class="modal-field-helper">Optional sub-categories for organizing logged time.</p>
+                            </div>
+                            <button type="button" class="icon-button project-task-add-toggle shrink-0" id="proj-details-task-add-toggle" aria-label="Add category" title="Add category">
+                                <i class="ph ph-plus"></i>
+                            </button>
+                        </div>
+                        <div class="project-task-items">
+                            <div class="project-task-list app-scrollbar-safe" id="proj-details-tasks-list"></div>
+                            <div id="proj-details-task-create-row" class="project-task-create-row hidden">
+                                <input type="text" placeholder="Category name" class="field" id="proj-details-task-name">
+                                <div class="project-task-create-actions">
+                                    <button type="button" class="button-secondary shrink-0" id="proj-details-task-add">
+                                        Add
                                     </button>
-                                    <div id="proj-details-manual-date-picker-popover" role="dialog" aria-label="Select manual entry date" class="popover project-manual-date-popover hidden absolute left-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
-                                        <div class="calendar-popover-header">
-                                            <button id="proj-details-manual-date-picker-prev-month" type="button" class="icon-button" aria-label="Previous month">
-                                                <i class="ph ph-caret-left"></i>
-                                            </button>
-                                            <div id="proj-details-manual-date-picker-month-label" class="calendar-month-label"></div>
-                                            <button id="proj-details-manual-date-picker-next-month" type="button" class="icon-button" aria-label="Next month">
-                                                <i class="ph ph-caret-right"></i>
-                                            </button>
-                                        </div>
-                                        <div id="proj-details-manual-date-picker-weekdays" class="calendar-weekdays grid grid-cols-7 gap-1"></div>
-                                        <div id="proj-details-manual-date-picker-days" class="grid grid-cols-7 gap-1"></div>
-                                        <div class="calendar-popover-actions">
-                                            <button id="proj-details-manual-date-picker-clear" type="button" class="calendar-popover-close">Close</button>
-                                            <button id="proj-details-manual-date-picker-today" type="button" class="button-primary">Today</button>
+                                    <button type="button" class="button-secondary shrink-0" id="proj-details-task-cancel">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="project-time-history">
+                        <div class="project-time-history-header">
+                            <h4 class="section-label shrink-0">Time History</h4>
+                            <div class="project-time-history-controls">
+                                <button id="proj-details-time-history-prev-month" type="button" class="icon-button" aria-label="Previous month">
+                                    <i class="ph ph-caret-left"></i>
+                                </button>
+                                <div id="proj-details-time-history-month-label" class="calendar-month-label"></div>
+                                <button id="proj-details-time-history-next-month" type="button" class="icon-button" aria-label="Next month">
+                                    <i class="ph ph-caret-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="proj-details-time-history-weekdays" class="calendar-weekdays project-time-history-weekdays"></div>
+                        <div id="proj-details-time-history-days" class="project-time-history-days">
+                            <div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>
+                        </div>
+                    </div>
+
+                    <div class="project-details-manual-section flex flex-col gap-2 shrink-0">
+                        <button class="button-primary w-full flex items-center justify-between px-4" id="proj-details-toggle-manual-form">
+                            <span class="flex items-center gap-1.5">
+                                <i class="ph ph-plus-circle"></i>
+                                Log Manual Time / Import History
+                            </span>
+                            <i class="ph ph-caret-down transition-transform duration-200" id="proj-details-form-caret"></i>
+                        </button>
+
+                        <div class="project-details-manual-form hidden flex flex-col gap-4" id="proj-details-manual-form-container">
+                            <div class="grid grid-cols-3 gap-3">
+                                <div class="project-manual-date-picker flex flex-col gap-1">
+                                    <label class="metric-label" id="proj-details-manual-date-label-heading">Date</label>
+                                    <input type="hidden" id="proj-details-manual-date">
+                                    <div class="relative">
+                                        <button type="button" class="field project-manual-date-trigger" id="proj-details-manual-date-trigger" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="proj-details-manual-date-label-heading proj-details-manual-date-label">
+                                            <span id="proj-details-manual-date-label">Today</span>
+                                            <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+                                        </button>
+                                        <div id="proj-details-manual-date-picker-popover" role="dialog" aria-label="Select manual entry date" class="popover project-manual-date-popover hidden absolute left-0 top-full mt-2 w-[294px] p-3 z-50 cursor-default">
+                                            <div class="calendar-popover-header">
+                                                <button id="proj-details-manual-date-picker-prev-month" type="button" class="icon-button" aria-label="Previous month">
+                                                    <i class="ph ph-caret-left"></i>
+                                                </button>
+                                                <div id="proj-details-manual-date-picker-month-label" class="calendar-month-label"></div>
+                                                <button id="proj-details-manual-date-picker-next-month" type="button" class="icon-button" aria-label="Next month">
+                                                    <i class="ph ph-caret-right"></i>
+                                                </button>
+                                            </div>
+                                            <div id="proj-details-manual-date-picker-weekdays" class="calendar-weekdays grid grid-cols-7 gap-1"></div>
+                                            <div id="proj-details-manual-date-picker-days" class="grid grid-cols-7 gap-1"></div>
+                                            <div class="calendar-popover-actions">
+                                                <button id="proj-details-manual-date-picker-clear" type="button" class="calendar-popover-close">Close</button>
+                                                <button id="proj-details-manual-date-picker-today" type="button" class="button-primary">Today</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="metric-label">Hours Worked</label>
+                                    <input type="number" min="0" max="24" placeholder="0" class="field" id="proj-details-manual-hours">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="metric-label">Minutes Worked</label>
+                                    <input type="number" min="0" max="59" placeholder="0" class="field" id="proj-details-manual-minutes">
+                                </div>
                             </div>
-                            <div class="flex flex-col gap-1">
-                                <label class="metric-label">Hours Worked</label>
-                                <input type="number" min="0" max="24" placeholder="0" class="field" id="proj-details-manual-hours">
-                            </div>
-                            <div class="flex flex-col gap-1">
-                                <label class="metric-label">Minutes Worked</label>
-                                <input type="number" min="0" max="59" placeholder="0" class="field" id="proj-details-manual-minutes">
-                            </div>
-                        </div>
 
-                        <div class="flex flex-col gap-1">
-                            <label class="metric-label">Activity Description / Import Notes</label>
-                            <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field" id="proj-details-manual-description">
-                        </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="metric-label">Activity Description / Import Notes</label>
+                                <input type="text" placeholder="e.g. Historic import / worked from memory..." class="field" id="proj-details-manual-description">
+                            </div>
 
-                        <div class="modal-footer">
-                            <button type="button" class="button-secondary" id="proj-details-manual-cancel">Cancel</button>
-                            <button type="button" class="button-primary" id="proj-details-manual-save">
-                                <i class="ph-bold ph-check"></i> Log Time
-                            </button>
+                            <div class="modal-footer">
+                                <button type="button" class="button-secondary" id="proj-details-manual-cancel">Cancel</button>
+                                <button type="button" class="button-primary" id="proj-details-manual-save">
+                                    <i class="ph-bold ph-check"></i> Log Time
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="project-time-history">
-                    <div class="project-time-history-header">
-                        <h4 class="section-label shrink-0">Time History</h4>
-                        <div class="project-time-history-controls">
-                            <button id="proj-details-time-history-prev-month" type="button" class="icon-button" aria-label="Previous month">
-                                <i class="ph ph-caret-left"></i>
-                            </button>
-                            <div id="proj-details-time-history-month-label" class="calendar-month-label"></div>
-                            <button id="proj-details-time-history-next-month" type="button" class="icon-button" aria-label="Next month">
-                                <i class="ph ph-caret-right"></i>
-                            </button>
+                <div class="project-details-panel hidden flex-col gap-4" data-project-details-panel="settings" role="tabpanel">
+                    <div class="surface-panel settings-card">
+                        <div class="modal-field-group">
+                            <label class="settings-card-title" for="proj-details-name">Project Name</label>
+                            <input type="text" placeholder="e.g. Acme Website Design" class="field" id="proj-details-name">
+                        </div>
+
+                        <div class="project-details-context">
+                            <label class="settings-card-title" for="proj-details-description">Project Context</label>
+                            <p class="modal-field-helper" id="proj-details-description-status">Used by Ask AI to match captured activity when you explicitly ask it to suggest entries.</p>
+                            <textarea class="field project-context-textarea" id="proj-details-description" maxlength="1000" rows="3" placeholder="What kind of work belongs in this project?"></textarea>
+                        </div>
+
+                        <div class="modal-field-group">
+                            <label class="settings-card-title">Project Color</label>
+                            <div class="project-color-grid" id="proj-details-colors-grid"></div>
+                            <input type="color" class="hidden" id="proj-details-color-input" value="#3b82f6">
                         </div>
                     </div>
-                    <div id="proj-details-time-history-weekdays" class="calendar-weekdays project-time-history-weekdays"></div>
-                    <div id="proj-details-time-history-days" class="project-time-history-days">
-                        <div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>
+
+                    <div class="surface-panel settings-card">
+                        <div class="modal-field-group">
+                            <label class="settings-card-title" for="proj-details-rate-type">Pricing Mode</label>
+                            <div class="custom-select-wrapper w-full">
+                                <select class="custom-select w-full" id="proj-details-rate-type">
+                                    <option value="none">No billing rate (Free/Internal)</option>
+                                    <option value="hourly">Hourly Rate (Time-based billing)</option>
+                                    <option value="fixed">Fixed Rate (Flat project price)</option>
+                                </select>
+                                <i class="ph ph-caret-down custom-select-icon"></i>
+                            </div>
+                        </div>
+
+                        <div class="modal-field-group hidden" id="proj-details-currency-container">
+                            <label class="settings-card-title" for="proj-details-currency">Currency</label>
+                            <div class="custom-select-wrapper w-full">
+                                <select class="custom-select w-full" id="proj-details-currency">
+                                    <option value="$">USD ($)</option>
+                                    <option value="€">EUR (€)</option>
+                                    <option value="£">GBP (£)</option>
+                                    <option value="¥">JPY/CNY (¥)</option>
+                                    <option value="₹">INR (₹)</option>
+                                </select>
+                                <i class="ph ph-caret-down custom-select-icon"></i>
+                            </div>
+                        </div>
+
+                        <div class="modal-field-group hidden" id="proj-details-hourly-rate-container">
+                            <label class="settings-card-title" for="proj-details-hourly-rate">Hourly Rate</label>
+                            <input type="number" placeholder="0.00" min="0" class="field" id="proj-details-hourly-rate">
+                        </div>
+
+                        <div class="modal-field-group hidden" id="proj-details-fixed-rate-container">
+                            <label class="settings-card-title" for="proj-details-fixed-rate">Fixed Rate</label>
+                            <input type="number" placeholder="0.00" min="0" class="field" id="proj-details-fixed-rate">
+                        </div>
+
+                    </div>
+
+                    <div class="modal-footer">
+                        <span class="modal-field-helper project-details-settings-status" id="proj-details-settings-status" role="status" aria-live="polite"></span>
+                        <button type="button" class="button-secondary" id="proj-details-settings-cancel">Cancel</button>
+                        <button type="button" class="button-primary" id="proj-details-settings-save">Save changes</button>
                     </div>
                 </div>
             </div>

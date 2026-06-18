@@ -14,8 +14,10 @@ const PRESET_COLORS = [
     '#84cc16'  // Lime
 ];
 
-let editingProjectTaskId = null;
 let currentProjectDetailEntries = [];
+let currentProjectDetailsId = null;
+let projectDescriptionAutosave = null;
+const PROJECT_DESCRIPTION_AUTOSAVE_DELAY_MS = 300;
 let projectTimeHistoryState = {
     projectId: null,
     entries: [],
@@ -102,7 +104,7 @@ async function saveProjectTasks(projectId, tasks) {
         body: JSON.stringify({ tasks })
     });
     if (!response.ok) {
-        alert('Failed to save project task');
+        alert('Failed to save project category');
         return null;
     }
 
@@ -112,6 +114,103 @@ async function saveProjectTasks(projectId, tasks) {
         state.projects[index] = updatedProject;
     }
     return updatedProject;
+}
+
+function getProjectDescriptionHelperText() {
+    return 'Used by Ask AI to match captured activity when you explicitly ask it to suggest entries.';
+}
+
+function clearProjectDescriptionAutosaveTimer() {
+    if (projectDescriptionAutosave?.timer) {
+        clearTimeout(projectDescriptionAutosave.timer);
+        projectDescriptionAutosave.timer = null;
+    }
+}
+
+async function saveProjectDescriptionNow() {
+    const autosave = projectDescriptionAutosave;
+    if (!autosave) return null;
+
+    clearProjectDescriptionAutosaveTimer();
+    const description = autosave.textarea.value.trim();
+    if (description === autosave.lastSavedDescription) {
+        if (autosave.status) {
+            autosave.status.textContent = description
+                ? 'Saved.'
+                : getProjectDescriptionHelperText();
+        }
+        return null;
+    }
+
+    if (autosave.status) autosave.status.textContent = 'Saving...';
+
+    try {
+        const response = await fetch(`${API_BASE}/projects/${autosave.projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to save project context.');
+        }
+
+        const updated = await response.json().catch(() => null);
+        const index = state.projects.findIndex(project => project.id === autosave.projectId);
+        if (index >= 0) {
+            state.projects[index] = updated && typeof updated === 'object'
+                ? updated
+                : { ...state.projects[index], description };
+        }
+        autosave.lastSavedDescription = description;
+        if (autosave.status) autosave.status.textContent = 'Saved.';
+        return state.projects[index] || updated;
+    } catch (error) {
+        console.error('Error saving project context:', error);
+        if (autosave.status) {
+            autosave.status.textContent = 'Unable to save project context.';
+        }
+        return null;
+    }
+}
+
+function setupProjectDescriptionAutosave(projectId) {
+    clearProjectDescriptionAutosaveTimer();
+
+    const textarea = document.getElementById('proj-details-description');
+    const status = document.getElementById('proj-details-description-status');
+    const project = state.projects.find(p => p.id === projectId);
+    if (!textarea || !project) {
+        projectDescriptionAutosave = null;
+        return null;
+    }
+
+    projectDescriptionAutosave = {
+        projectId,
+        textarea,
+        status,
+        timer: null,
+        lastSavedDescription: String(project.description || '').trim()
+    };
+
+    if (status) status.textContent = getProjectDescriptionHelperText();
+
+    textarea.oninput = () => {
+        clearProjectDescriptionAutosaveTimer();
+        if (status) status.textContent = 'Saving...';
+        projectDescriptionAutosave.timer = setTimeout(() => {
+            saveProjectDescriptionNow();
+        }, PROJECT_DESCRIPTION_AUTOSAVE_DELAY_MS);
+    };
+    textarea.onblur = () => {
+        saveProjectDescriptionNow();
+    };
+
+    return projectDescriptionAutosave;
+}
+
+function flushProjectDescriptionAutosave() {
+    return saveProjectDescriptionNow();
 }
 
 function formatProjectTaskDuration(ms) {
@@ -316,6 +415,9 @@ function shiftProjectTimeHistoryMonth(delta) {
 async function openProjectTimeHistoryDay(dateKey) {
     const targetDate = parseProjectTimeHistoryDate(dateKey);
     if (!targetDate) return;
+    if (currentProjectDetailsId) {
+        flushProjectTaskNameEdits(currentProjectDetailsId);
+    }
     const modal = document.getElementById('project-details-modal');
     modal?.classList?.add('hidden');
     if (typeof window.openTimelineDate === 'function') {
@@ -367,6 +469,9 @@ function renderProjectTimeHistoryCalendar(projectId, entries = [], options = {})
         const isToday = dateKey === todayStr;
         const isOutsideMonth = day.getMonth() !== currentMonth;
         const durationLabel = hasTime ? formatProjectTimeHistoryDuration(daySummary.totalMs) : '';
+        const durationClass = hasTime
+            ? 'project-time-history-day__duration'
+            : 'project-time-history-day__duration project-time-history-day__duration--empty';
         const dayClasses = [
             'calendar-day',
             'project-time-history-day',
@@ -386,7 +491,7 @@ function renderProjectTimeHistoryCalendar(projectId, entries = [], options = {})
                     ${hasTime ? `data-date="${dateKey}"` : 'disabled'}
                     aria-label="${ariaLabel}">
                 <span class="project-time-history-day__number">${day.getDate()}</span>
-                ${hasTime ? `<span class="project-time-history-day__duration">${durationLabel}</span>` : ''}
+                <span class="${durationClass}" ${hasTime ? '' : 'aria-hidden="true"'}>${hasTime ? durationLabel : '0 min'}</span>
             </button>
         `);
     }
@@ -406,7 +511,7 @@ function renderProjectTasks(project, projectEntries = []) {
 
     const activeTasks = getProjectTasks(project).filter(task => !task.archived);
     if (activeTasks.length === 0) {
-        list.innerHTML = '<div class="empty-state empty-state--spacious">No tasks yet.</div>';
+        list.innerHTML = '<div class="empty-state empty-state--compact">No categories yet.</div>';
         return;
     }
 
@@ -422,57 +527,31 @@ function renderProjectTasks(project, projectEntries = []) {
         const taskName = escapeProjectText(task.name);
         const loggedDuration = formatProjectTaskDuration(taskDurations[task.id] || 0);
 
-        if (task.id === editingProjectTaskId) {
-            return `
-                <div class="surface-panel project-task-row project-task-row--editing">
-                    <input type="text"
-                           class="field flex-1 min-w-0"
-                           value="${taskName}"
-                           data-project-task-edit="${taskId}"
-                           onkeydown="handleProjectTaskRenameKeydown(event, '${projectId}', '${taskId}')">
-                    <button type="button"
-                            class="button-primary shrink-0"
-                            title="Save task name"
-                            onclick="saveProjectTaskRename(event, '${projectId}', '${taskId}')">
-                        <i class="ph ph-check"></i>
-                    </button>
-                    <button type="button"
-                            class="button-secondary shrink-0"
-                            title="Cancel rename"
-                            onclick="cancelProjectTaskRename(event, '${projectId}')">
-                        <i class="ph ph-x"></i>
-                    </button>
-                </div>
-            `;
-        }
-
         return `
-            <div class="surface-panel project-task-row">
-                <div class="flex-1 min-w-0">
-                    <div class="project-task-name">${taskName}</div>
-                    <div class="project-task-meta">${loggedDuration} logged</div>
+            <div class="project-task-row">
+                <input type="text"
+                       class="field project-task-name-input"
+                       value="${taskName}"
+                       aria-label="Category name"
+                       data-project-task-name="${taskId}"
+                       data-original-name="${taskName}"
+                       onblur="saveProjectTaskNameOnBlur(event, '${projectId}', '${taskId}')"
+                       onkeydown="handleProjectTaskNameKeydown(event, '${projectId}', '${taskId}')">
+                <div class="project-task-row-meta">
+                    <div class="project-task-duration">${loggedDuration} logged</div>
+                    <div class="project-task-actions">
+                        <button type="button"
+                                class="icon-button icon-button--danger project-task-delete"
+                                aria-label="Remove category ${taskName}"
+                                title="Remove category"
+                                onclick="deleteProjectTask(event, '${projectId}', '${taskId}')">
+                            <i class="ph ph-trash"></i>
+                        </button>
+                    </div>
                 </div>
-                <button type="button"
-                        class="button-secondary shrink-0"
-                        title="Rename task"
-                        onclick="startProjectTaskRename(event, '${projectId}', '${taskId}')">
-                    <i class="ph ph-pencil-simple-line"></i>
-                </button>
-                <button type="button"
-                        class="button-secondary shrink-0"
-                        title="Archive task"
-                        onclick="archiveProjectTask(event, '${projectId}', '${taskId}')">
-                    <i class="ph ph-archive"></i>
-                </button>
             </div>
         `;
     }).join('');
-
-    const editInput = list.querySelector('[data-project-task-edit]');
-    if (editInput) {
-        editInput.focus();
-        editInput.select();
-    }
 }
 
 async function addProjectTask(event, projectId) {
@@ -482,7 +561,7 @@ async function addProjectTask(event, projectId) {
     const input = document.getElementById('proj-details-task-name');
     const name = input ? input.value.trim() : '';
     if (!name) {
-        alert('Please enter a task name.');
+        alert('Please enter a category name.');
         return;
     }
 
@@ -497,7 +576,7 @@ async function addProjectTask(event, projectId) {
     if (!updatedProject) return;
 
     if (input) input.value = '';
-    await openProjectDetails(projectId);
+    await openProjectDetails(projectId, { tab: 'overview' });
     if (typeof renderModalTaskSelect === 'function') {
         renderModalTaskSelect('', projectId);
     }
@@ -506,71 +585,86 @@ async function addProjectTask(event, projectId) {
     }
 }
 
-function startProjectTaskRename(event, projectId, taskId) {
-    event?.stopPropagation();
-    event?.preventDefault();
+function setProjectTaskCreateVisible(visible) {
+    const row = document.getElementById('proj-details-task-create-row');
+    const input = document.getElementById('proj-details-task-name');
+    const btnTaskAddToggle = document.getElementById('proj-details-task-add-toggle');
+    if (!row) return;
 
-    const project = state.projects.find(p => p.id === projectId);
-    if (!project) return;
-
-    editingProjectTaskId = taskId;
-    renderProjectTasks(project, currentProjectDetailEntries);
+    row.classList.toggle('hidden', !visible);
+    if (visible) {
+        if (btnTaskAddToggle) btnTaskAddToggle.classList.add('hidden');
+    } else if (btnTaskAddToggle) {
+        btnTaskAddToggle.classList.remove('hidden');
+    }
+    if (visible) {
+        input?.focus?.();
+    } else if (input) {
+        input.value = '';
+    }
 }
 
-async function saveProjectTaskRename(event, projectId, taskId) {
-    event?.stopPropagation();
-    event?.preventDefault();
-
+async function saveProjectTaskName(projectId, taskId, input) {
     const project = state.projects.find(p => p.id === projectId);
-    if (!project) return;
+    if (!project || !input) return null;
 
-    const input = Array.from(document.querySelectorAll('[data-project-task-edit]'))
-        .find(element => element.dataset.projectTaskEdit === taskId);
     const name = input ? input.value.trim() : '';
+    const originalName = String(input.dataset?.originalName || '').trim();
     if (!name) {
-        alert('Please enter a task name.');
-        return;
+        input.value = originalName;
+        return null;
+    }
+    if (name === originalName) {
+        input.value = originalName;
+        return null;
     }
 
     const tasks = getProjectTasks(project).map(task =>
         task.id === taskId ? { ...task, name } : task
     );
     const updatedProject = await saveProjectTasks(projectId, tasks);
-    if (!updatedProject) return;
+    if (!updatedProject) {
+        input.value = originalName;
+        return null;
+    }
 
-    editingProjectTaskId = null;
-    await openProjectDetails(projectId);
+    input.dataset.originalName = name;
+    renderProjectTasks(updatedProject, currentProjectDetailEntries);
     if (typeof renderModalTaskSelect === 'function') {
         renderModalTaskSelect('', projectId);
     }
     if (state.currentView === 'projects' && window.renderProjectsPage) {
         renderProjectsPage();
     }
+    return updatedProject;
 }
 
-function cancelProjectTaskRename(event, projectId) {
-    event?.stopPropagation();
-    event?.preventDefault();
-
-    const project = state.projects.find(p => p.id === projectId);
-    if (!project) return;
-
-    editingProjectTaskId = null;
-    renderProjectTasks(project, currentProjectDetailEntries);
+function saveProjectTaskNameOnBlur(event, projectId, taskId) {
+    saveProjectTaskName(projectId, taskId, event?.currentTarget || event?.target);
 }
 
-function handleProjectTaskRenameKeydown(event, projectId, taskId) {
+function handleProjectTaskNameKeydown(event, projectId, taskId) {
     if (event.key === 'Enter') {
-        saveProjectTaskRename(event, projectId, taskId);
+        event.preventDefault();
+        event.currentTarget?.blur?.();
     } else if (event.key === 'Escape') {
-        cancelProjectTaskRename(event, projectId);
+        event.preventDefault();
+        const originalName = String(event.currentTarget?.dataset?.originalName || '');
+        if (event.currentTarget) event.currentTarget.value = originalName;
+        event.currentTarget?.blur?.();
     }
 }
 
-async function archiveProjectTask(event, projectId, taskId) {
-    event?.stopPropagation();
-    event?.preventDefault();
+function flushProjectTaskNameEdits(projectId) {
+    if (!projectId || !document?.querySelectorAll) return Promise.resolve([]);
+    const inputs = Array.from(document.querySelectorAll('[data-project-task-name]'));
+    return Promise.all(inputs.map(input => {
+        const taskId = input.dataset?.projectTaskName;
+        return taskId ? saveProjectTaskName(projectId, taskId, input) : null;
+    }));
+}
 
+async function archiveProjectTask(projectId, taskId) {
     const project = state.projects.find(p => p.id === projectId);
     if (!project) return;
 
@@ -579,13 +673,30 @@ async function archiveProjectTask(event, projectId, taskId) {
     );
     const updatedProject = await saveProjectTasks(projectId, tasks);
     if (!updatedProject) return;
-    await openProjectDetails(projectId);
+    await openProjectDetails(projectId, { tab: 'overview' });
     if (typeof renderModalTaskSelect === 'function') {
         renderModalTaskSelect('', projectId);
     }
     if (state.currentView === 'projects' && window.renderProjectsPage) {
         renderProjectsPage();
     }
+}
+
+function deleteProjectTask(event, projectId, taskId) {
+    event?.stopPropagation();
+    event?.preventDefault();
+
+    const project = state.projects.find(p => p.id === projectId);
+    const task = getProjectTasks(project).find(candidate => candidate.id === taskId);
+    if (!project || !task) return;
+
+    showCustomConfirm({
+        title: 'Remove Category',
+        message: `"${task.name}" will no longer appear in category lists. Existing time entries keep their stored reference.`,
+        actionText: 'Remove',
+        actionClass: 'button-danger',
+        onConfirm: () => archiveProjectTask(projectId, taskId)
+    });
 }
 
 // Recalculates stats, charts, and projects breakdown on the right panel
@@ -739,13 +850,6 @@ async function renderProjectsPage() {
                     <span class="metric-helper">Project fixed pricing</span>
                 </div>
             `;
-        } else {
-            earningsHTML = `
-                <div class="project-card-metric project-card-metric--end">
-                    <span class="metric-label">Financial Mode</span>
-                    <span class="metric-value metric-value--muted">No billing rate set</span>
-                </div>
-            `;
         }
 
         return `
@@ -758,16 +862,7 @@ async function renderProjectsPage() {
                             ${isDefault ? '<i class="ph-fill ph-lock shrink-0" title="Protected System Default"></i>' : ''}
                         </h3>
                     </div>
-                    <span class="status-pill shrink-0 ${
-                        proj.billable
-                        ? 'status-pill--success'
-                        : ''
-                    }">
-                        ${proj.billable ? 'Billable' : 'Non-Billable'}
-                    </span>
                 </div>
-
-                <div class="border-t my-0.5" style="border-color: var(--border);"></div>
 
                 <div class="project-card-body">
                     <div class="project-card-metric">
@@ -781,10 +876,6 @@ async function renderProjectsPage() {
                     <button class="button-secondary"
                             onclick="openProjectDetails('${proj.id}')">
                         <i class="ph ph-folder-open"></i> Details
-                    </button>
-                    <button class="button-secondary"
-                            onclick="editProjectInline('${proj.id}')">
-                        <i class="ph ph-pencil-simple-line"></i> Edit
                     </button>
                     ${isDefault ? '' : `
                     <button class="button-danger"
@@ -800,37 +891,7 @@ async function renderProjectsPage() {
 
 // Inline edit a project
 function editProjectInline(id) {
-    const proj = state.projects.find(p => p.id === id);
-    if (!proj) return;
-
-    window.editingProjectId = id;
-    DOM.elProjName.value = proj.name;
-    DOM.elProjColor.value = proj.color;
-    DOM.elProjBillable.checked = proj.billable;
-
-    // Select rate type and fill rates
-    const rateTypeSelect = document.getElementById('project-rate-type');
-    const hourlyRateInput = document.getElementById('project-hourly-rate');
-    const fixedRateInput = document.getElementById('project-fixed-rate');
-    const currencySelect = document.getElementById('project-currency');
-
-    if (rateTypeSelect) rateTypeSelect.value = proj.rateType || 'none';
-    if (hourlyRateInput) hourlyRateInput.value = proj.hourlyRate || '';
-    if (fixedRateInput) fixedRateInput.value = proj.fixedRate || '';
-    if (currencySelect) currencySelect.value = proj.currency || '$';
-
-    // Trigger display toggle
-    toggleProjectRateFields();
-    window.refreshCustomSelects?.(DOM.elProjModal);
-
-    // Highlight the selected circle color
-    highlightSelectedColorCircle(proj.color);
-
-    DOM.elProjModal.querySelector('h3').innerText = 'Edit Project';
-    const btnSave = DOM.getElProjBtnSave || document.getElementById('project-btn-save');
-    if (btnSave) btnSave.innerText = 'Save Changes';
-
-    DOM.elProjModal.classList.remove('hidden');
+    openProjectDetails(id, { tab: 'settings' });
 }
 
 // Inline delete a project
@@ -840,8 +901,8 @@ function deleteProjectInline(id) {
 
     showCustomConfirm({
         title: 'Delete Project',
-        message: `Are you sure you want to delete project "${proj.name}"? All time entries for this project will be reassigned.`,
-        actionText: 'Delete Project',
+        message: `"${proj.name}" will be removed. All time entries for this project will be reassigned.`,
+        actionText: 'Delete',
         actionClass: 'button-danger',
         onConfirm: async () => {
             try {
@@ -928,10 +989,184 @@ function highlightSelectedColorCircle(color) {
     });
 }
 
+function setProjectDetailsTab(tab = 'overview') {
+    const safeTab = ['overview', 'settings'].includes(tab) ? tab : 'overview';
+    document.querySelectorAll?.('[data-project-details-tab]')?.forEach(button => {
+        const isActive = button.getAttribute('data-project-details-tab') === safeTab;
+        button.classList.toggle('app-tab--active', isActive);
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    document.querySelectorAll?.('[data-project-details-panel]')?.forEach(panel => {
+        panel.classList.toggle('hidden', panel.getAttribute('data-project-details-panel') !== safeTab);
+    });
+}
+
+function highlightProjectDetailsColorCircle(color) {
+    const container = document.getElementById('proj-details-colors-grid');
+    if (!container) return;
+
+    container.querySelectorAll('button').forEach(btn => {
+        const btnColor = btn.getAttribute('data-color');
+        btn.className = btnColor?.toLowerCase() === String(color || '').toLowerCase()
+            ? 'color-ring selected'
+            : 'color-ring';
+    });
+}
+
+function renderProjectDetailsColorGrid(selectedColor = '#3b82f6') {
+    const container = document.getElementById('proj-details-colors-grid');
+    const input = document.getElementById('proj-details-color-input');
+    if (!container) return;
+
+    container.innerHTML = PRESET_COLORS.map(color => `
+        <button type="button"
+                class="color-ring"
+                style="background-color: ${color};"
+                data-color="${color}"
+                title="${color}">
+        </button>
+    `).join('');
+
+    container.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', event => {
+            event.stopPropagation();
+            const color = btn.getAttribute('data-color');
+            if (input) input.value = color;
+            highlightProjectDetailsColorCircle(color);
+        });
+    });
+
+    if (input) input.value = selectedColor || '#3b82f6';
+    highlightProjectDetailsColorCircle(selectedColor || '#3b82f6');
+}
+
+function toggleProjectDetailsRateFields() {
+    const rateTypeSelect = document.getElementById('proj-details-rate-type');
+    const containerHourly = document.getElementById('proj-details-hourly-rate-container');
+    const containerFixed = document.getElementById('proj-details-fixed-rate-container');
+    const containerCurrency = document.getElementById('proj-details-currency-container');
+    const rateType = rateTypeSelect?.value || 'none';
+
+    containerHourly?.classList?.toggle('hidden', rateType !== 'hourly');
+    containerFixed?.classList?.toggle('hidden', rateType !== 'fixed');
+    containerCurrency?.classList?.toggle('hidden', rateType === 'none');
+}
+
+function populateProjectDetailsSettings(project) {
+    if (!project) return;
+
+    const elName = document.getElementById('proj-details-name');
+    const elDescription = document.getElementById('proj-details-description');
+    const elColorInput = document.getElementById('proj-details-color-input');
+    const elRateType = document.getElementById('proj-details-rate-type');
+    const elHourlyRate = document.getElementById('proj-details-hourly-rate');
+    const elFixedRate = document.getElementById('proj-details-fixed-rate');
+    const elCurrency = document.getElementById('proj-details-currency');
+    const elStatus = document.getElementById('proj-details-settings-status');
+
+    if (elName) elName.value = project.name || '';
+    if (elDescription) elDescription.value = String(project.description || '');
+    if (elColorInput) elColorInput.value = project.color || '#3b82f6';
+    if (elRateType) elRateType.value = project.rateType || 'none';
+    if (elHourlyRate) elHourlyRate.value = project.hourlyRate || '';
+    if (elFixedRate) elFixedRate.value = project.fixedRate || '';
+    if (elCurrency) elCurrency.value = project.currency || '$';
+    if (elStatus) elStatus.textContent = '';
+
+    renderProjectDetailsColorGrid(project.color || '#3b82f6');
+    toggleProjectDetailsRateFields();
+    window.refreshCustomSelects?.(document.getElementById('project-details-modal'));
+}
+
+function readProjectDetailsSettingsPayload() {
+    const elName = document.getElementById('proj-details-name');
+    const elDescription = document.getElementById('proj-details-description');
+    const elColorInput = document.getElementById('proj-details-color-input');
+    const elRateType = document.getElementById('proj-details-rate-type');
+    const elHourlyRate = document.getElementById('proj-details-hourly-rate');
+    const elFixedRate = document.getElementById('proj-details-fixed-rate');
+    const elCurrency = document.getElementById('proj-details-currency');
+    const rateType = elRateType?.value || 'none';
+
+    return {
+        name: String(elName?.value || '').trim(),
+        description: String(elDescription?.value || '').trim(),
+        color: elColorInput?.value || '#3b82f6',
+        billable: rateType === 'hourly' || rateType === 'fixed',
+        rateType,
+        hourlyRate: elHourlyRate?.value ? parseFloat(elHourlyRate.value) : 0,
+        fixedRate: elFixedRate?.value ? parseFloat(elFixedRate.value) : 0,
+        currency: elCurrency?.value || '$'
+    };
+}
+
+async function saveProjectDetailsSettings(projectId) {
+    const payload = readProjectDetailsSettingsPayload();
+    if (!payload.name) {
+        alert('Please enter a project name.');
+        return null;
+    }
+
+    const status = document.getElementById('proj-details-settings-status');
+    if (status) status.textContent = 'Saving...';
+
+    try {
+        const response = await fetch(`${API_BASE}/projects/${projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            throw new Error('Failed to save project');
+        }
+
+        const updatedProject = await response.json();
+        const index = state.projects.findIndex(project => project.id === projectId);
+        if (index !== -1) {
+            state.projects[index] = updatedProject;
+        }
+
+        const project = index !== -1 ? state.projects[index] : updatedProject;
+        const elColor = document.getElementById('proj-details-color');
+        const elTitle = document.getElementById('proj-details-title');
+        if (elColor) elColor.style.backgroundColor = project.color;
+        if (elTitle) elTitle.innerText = project.name;
+
+        populateProjectDetailsSettings(project);
+        if (status) status.textContent = 'Saved.';
+        if (state.currentView === 'projects' && window.renderProjectsPage) {
+            renderProjectsPage();
+        }
+        return project;
+    } catch (error) {
+        console.error('Error saving project settings:', error);
+        if (status) status.textContent = 'Unable to save project settings.';
+        alert('Failed to save project');
+        return null;
+    }
+}
+
+function resetProjectDetailsSettings(projectId) {
+    const project = state.projects.find(p => p.id === projectId);
+    if (project) populateProjectDetailsSettings(project);
+}
+
+function closeProjectDetailsModal() {
+    if (currentProjectDetailsId) {
+        flushProjectTaskNameEdits(currentProjectDetailsId);
+    }
+    if (currentProjectDetailsId) {
+        resetProjectDetailsSettings(currentProjectDetailsId);
+    }
+    document.getElementById('project-details-modal')?.classList?.add('hidden');
+}
+
 // Open and populate the Project Details Modal
-async function openProjectDetails(projectId) {
+async function openProjectDetails(projectId, options = {}) {
     const proj = state.projects.find(p => p.id === projectId);
     if (!proj) return;
+    currentProjectDetailsId = projectId;
 
     // Reset manual form inputs
     const elManualDate = document.getElementById('proj-details-manual-date');
@@ -939,7 +1174,9 @@ async function openProjectDetails(projectId) {
     const elManualMinutes = document.getElementById('proj-details-manual-minutes');
     const elManualDescription = document.getElementById('proj-details-manual-description');
     const elTaskName = document.getElementById('proj-details-task-name');
+    const btnTaskAddToggle = document.getElementById('proj-details-task-add-toggle');
     const btnTaskAdd = document.getElementById('proj-details-task-add');
+    const btnTaskCancel = document.getElementById('proj-details-task-cancel');
     const formContainer = document.getElementById('proj-details-manual-form-container');
     const formCaret = document.getElementById('proj-details-form-caret');
 
@@ -957,7 +1194,9 @@ async function openProjectDetails(projectId) {
     if (elManualHours) elManualHours.value = '';
     if (elManualMinutes) elManualMinutes.value = '';
     if (elManualDescription) elManualDescription.value = '';
+    populateProjectDetailsSettings(proj);
     if (elTaskName) elTaskName.value = '';
+    setProjectTaskCreateVisible(false);
     if (formContainer) formContainer.classList.add('hidden');
     if (formCaret) {
         formCaret.style.transform = 'rotate(0deg)';
@@ -990,14 +1229,64 @@ async function openProjectDetails(projectId) {
         };
     }
 
+    if (btnTaskAddToggle) {
+        btnTaskAddToggle.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setProjectTaskCreateVisible(true);
+        };
+    }
     if (btnTaskAdd) {
         btnTaskAdd.onclick = (e) => addProjectTask(e, projectId);
+    }
+    if (btnTaskCancel) {
+        btnTaskCancel.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setProjectTaskCreateVisible(false);
+        };
     }
     if (elTaskName) {
         elTaskName.onkeydown = (e) => {
             if (e.key === 'Enter') {
                 addProjectTask(e, projectId);
+            } else if (e.key === 'Escape') {
+                e.stopPropagation();
+                setProjectTaskCreateVisible(false);
             }
+        };
+    }
+
+    document.querySelectorAll?.('[data-project-details-tab]')?.forEach(button => {
+        button.onclick = event => {
+            event.stopPropagation();
+            setProjectDetailsTab(button.getAttribute('data-project-details-tab'));
+        };
+    });
+
+    const rateTypeSelect = document.getElementById('proj-details-rate-type');
+    if (rateTypeSelect) {
+        rateTypeSelect.onchange = () => {
+            toggleProjectDetailsRateFields();
+            window.refreshCustomSelects?.(document.getElementById('project-details-modal'));
+        };
+    }
+
+    const settingsSave = document.getElementById('proj-details-settings-save');
+    if (settingsSave) {
+        settingsSave.onclick = event => {
+            event.stopPropagation();
+            event.preventDefault();
+            saveProjectDetailsSettings(projectId);
+        };
+    }
+
+    const settingsCancel = document.getElementById('proj-details-settings-cancel');
+    if (settingsCancel) {
+        settingsCancel.onclick = event => {
+            event.stopPropagation();
+            event.preventDefault();
+            closeProjectDetailsModal();
         };
     }
 
@@ -1058,7 +1347,7 @@ async function openProjectDetails(projectId) {
                     if (formCaret) formCaret.style.transform = 'rotate(0deg)';
 
                     // Reload modal contents
-                    await openProjectDetails(projectId);
+                    await openProjectDetails(projectId, { tab: 'overview' });
 
                     // Refresh main workspace datasets
                     if (window.refreshData) {
@@ -1158,13 +1447,12 @@ async function openProjectDetails(projectId) {
     // Modal show
     const modal = document.getElementById('project-details-modal');
     if (modal) {
+        setProjectDetailsTab(options.tab || 'overview');
         modal.classList.remove('hidden');
 
         // Bind close event handlers once
         const btnClose = document.getElementById('proj-details-btn-close');
-        const hideModal = () => modal.classList.add('hidden');
-
-        if (btnClose) btnClose.onclick = hideModal;
+        if (btnClose) btnClose.onclick = closeProjectDetailsModal;
     }
 }
 
@@ -1176,13 +1464,22 @@ window.deleteProjectInline = deleteProjectInline;
 window.toggleProjectRateFields = toggleProjectRateFields;
 window.renderPresetColorGrid = renderPresetColorGrid;
 window.highlightSelectedColorCircle = highlightSelectedColorCircle;
+window.populateProjectDetailsSettings = populateProjectDetailsSettings;
+window.saveProjectDetailsSettings = saveProjectDetailsSettings;
+window.resetProjectDetailsSettings = resetProjectDetailsSettings;
+window.closeProjectDetailsModal = closeProjectDetailsModal;
+window.toggleProjectDetailsRateFields = toggleProjectDetailsRateFields;
+window.setProjectDetailsTab = setProjectDetailsTab;
 window.openProjectDetails = openProjectDetails;
 window.addProjectTask = addProjectTask;
-window.startProjectTaskRename = startProjectTaskRename;
-window.saveProjectTaskRename = saveProjectTaskRename;
-window.cancelProjectTaskRename = cancelProjectTaskRename;
-window.handleProjectTaskRenameKeydown = handleProjectTaskRenameKeydown;
+window.setProjectTaskCreateVisible = setProjectTaskCreateVisible;
+window.saveProjectTaskNameOnBlur = saveProjectTaskNameOnBlur;
+window.handleProjectTaskNameKeydown = handleProjectTaskNameKeydown;
+window.flushProjectTaskNameEdits = flushProjectTaskNameEdits;
 window.archiveProjectTask = archiveProjectTask;
+window.deleteProjectTask = deleteProjectTask;
+window.setupProjectDescriptionAutosave = setupProjectDescriptionAutosave;
+window.flushProjectDescriptionAutosave = flushProjectDescriptionAutosave;
 window.getProjectEntryDescriptionHTML = getProjectEntryDescriptionHTML;
 window.buildProjectTimeHistoryDayMap = buildProjectTimeHistoryDayMap;
 window.formatProjectTimeHistoryDuration = formatProjectTimeHistoryDuration;

@@ -576,6 +576,38 @@ test('workspace tabs expose semantic selected state rather than rewritten utilit
   assert.equal(dom.elTabTimeline.attributes['aria-selected'], 'false');
 });
 
+test('project create payload derives billable from pricing mode', async () => {
+  const { context, dom, element, fetchCalls } = loadMainControlsContext();
+  context.fetchProjects = async () => {};
+  context.window.fetchProjects = context.fetchProjects;
+  dom.elProjName = element('project-name-input');
+  dom.elProjDescription = element('project-description-input');
+  dom.elProjColor = element('project-color-input');
+  dom.elProjName.value = 'Client Billing';
+  dom.elProjDescription.value = 'Client delivery work';
+  dom.elProjColor.value = '#3b82f6';
+  element('project-rate-type').value = 'hourly';
+  element('project-hourly-rate').value = '120';
+  element('project-fixed-rate').value = '';
+  element('project-currency').value = '€';
+
+  await element('project-btn-save').click();
+
+  assert.equal(fetchCalls.at(-1).url, 'http://localhost:3000/api/projects');
+  assert.equal(fetchCalls.at(-1).body.billable, true);
+  assert.equal(fetchCalls.at(-1).body.rateType, 'hourly');
+
+  dom.elProjName.value = 'Internal Work';
+  element('project-rate-type').value = 'none';
+  element('project-hourly-rate').value = '';
+  element('project-currency').value = '$';
+
+  await element('project-btn-save').click();
+
+  assert.equal(fetchCalls.at(-1).body.billable, false);
+  assert.equal(fetchCalls.at(-1).body.rateType, 'none');
+});
+
 test('sidebar collapse control is only visible on the Timeline workspace', async () => {
   const { dom, element } = loadMainControlsContext({
     nativeResponses: {
@@ -1908,7 +1940,8 @@ test('Time Entry context menu delete confirms and removes all grouped entries', 
   await menu.children[1].click();
 
   assert.equal(context.confirmOptions.title, 'Delete Time Entry');
-  assert.match(context.confirmOptions.message, /2 logged time entries/);
+  assert.equal(context.confirmOptions.message, '2 logged entries will be permanently removed.');
+  assert.equal(context.confirmOptions.actionText, 'Delete');
 
   await context.confirmOptions.onConfirm();
 

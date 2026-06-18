@@ -263,7 +263,7 @@ function renderModalTaskSelect(selectedTaskId = '', projectId = DOM.elModalProje
         : activeTasks;
 
     if (visibleTasks.length === 0) {
-        select.innerHTML = '<option value="">No task</option>';
+        select.innerHTML = '<option value="">No category</option>';
         select.value = '';
         container.classList.add('hidden');
         if (typeof refreshCustomSelects === 'function') refreshCustomSelects(container);
@@ -274,7 +274,7 @@ function renderModalTaskSelect(selectedTaskId = '', projectId = DOM.elModalProje
         const archivedLabel = task.archived ? ' (archived)' : '';
         return `<option value="${escapeModalText(task.id)}">${escapeModalText(task.name)}${archivedLabel}</option>`;
     }).join('');
-    select.innerHTML = `<option value="">No task</option>${taskOptions}`;
+    select.innerHTML = `<option value="">No category</option>${taskOptions}`;
     select.value = visibleTasks.some(task => task.id === selectedTaskId) ? selectedTaskId : '';
     container.classList.remove('hidden');
     if (typeof refreshCustomSelects === 'function') refreshCustomSelects(container);
@@ -493,6 +493,8 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         // Pre-fill according to the selected project default billable status
         const selectedProj = state.projects.find(p => p.id === DOM.elModalProjectSelect.value);
         DOM.elModalBillable.checked = selectedProj ? selectedProj.billable : false;
+    } else {
+        DOM.elModalBillable.checked = false;
     }
 
     // Title setup
@@ -560,6 +562,7 @@ function closeTimeEntryModal() {
     window.editingTimeEntryId = null;
     window.editingTimeEntryGroupIds = null;
     window.isBulkAllocation = false;
+    window.pendingAiSuggestionCompletion = null;
     state.currentModalAllActivities = [];
     state.currentModalActivities = [];
     state.modalActivitySelection = new Set();

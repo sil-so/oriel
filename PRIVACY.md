@@ -18,7 +18,7 @@ Oriel can record local activity data needed for time tracking:
 - Activity start and end times.
 - Hands-on or hands-off interaction state based on recent keyboard, mouse,
   click, or scroll input.
-- Projects, tasks, billable state, manual time entries, assignment rules,
+- Projects, categories, billable state, manual time entries, assignment rules,
   capture exclusions, settings, and backup/restore archives.
 
 Oriel does not intentionally record keystroke contents, passwords, clipboard
@@ -47,8 +47,9 @@ Network access is limited to explicit user-enabled features:
   Logo.dev publishable key, Oriel may send website domains to Logo.dev to fetch
   brand icons. Raw local activity history is not sent for this feature.
 - **Ask AI:** disabled until the user configures a provider API key. When used,
-  Oriel sends the prompt and selected-day context to the chosen provider. API
-  keys are stored in Keychain.
+  Oriel sends the prompt and selected-day context, including project names,
+  categories, and optional project context, to the chosen provider. API keys are
+  stored in Keychain.
 - **AI screenshot summaries:** disabled by default. When enabled, Oriel may
   capture a foreground activity screenshot, downscale and JPEG-compress it in
   memory, and send it with activity metadata to the selected provider. Oriel

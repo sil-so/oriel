@@ -729,9 +729,9 @@
 
         if (typeof global.showCustomConfirm === 'function') {
             return global.showCustomConfirm({
-                title: `Remove ${providerLabel(provider)} API key?`,
-                message: `Remove the saved ${providerLabel(provider)} API key from macOS Keychain?`,
-                actionText: 'Remove key',
+                title: 'Remove API Key',
+                message: `${providerLabel(provider)} will be removed from macOS Keychain.`,
+                actionText: 'Remove',
                 actionClass: 'button-secondary',
                 onConfirm: removeKey
             });

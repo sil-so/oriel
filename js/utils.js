@@ -331,7 +331,7 @@ function renderOrielMarkdown(markdown) {
 
     const flushParagraph = () => {
         if (paragraph.length === 0) return;
-        blocks.push(`<p>${renderOrielInlineMarkdown(paragraph.join(' '))}</p>`);
+        blocks.push(`<p>${paragraph.map(line => renderOrielInlineMarkdown(line)).join('<br>')}</p>`);
         paragraph = [];
     };
     const flushList = () => {
