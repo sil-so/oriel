@@ -5281,8 +5281,22 @@ function getPopupAssignmentActivity(activity) {
     };
 }
 
+function getPopupContextSourceDuration(source) {
+    const assignedDuration = Number(source?.assignedDurationMs);
+    if (Number.isFinite(assignedDuration) && assignedDuration > 0) {
+        return assignedDuration;
+    }
+
+    const duration = Number(source?.duration);
+    if (Number.isFinite(duration) && duration > 0) {
+        return duration;
+    }
+
+    return getActivitySourceDuration(source);
+}
+
 function buildPopupContextSourceActivity(source) {
-    const duration = getActivitySourceDuration(source);
+    const duration = getPopupContextSourceDuration(source);
     const start = Number.isFinite(source?.start) ? source.start : undefined;
     const end = Number.isFinite(source?.end) ? source.end : undefined;
 

@@ -90,6 +90,9 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
   const scrollContentRule = css.match(/\.modal-scroll-content\s*\{[^}]*\}/)?.[0] || '';
+  const projectDetailsPanelRule = css.match(/\.project-details-panel\s*\{[^}]*\}/)?.[0] || '';
+  const projectDetailsSettingsPanelRule = css.match(/\.project-details-panel\[data-project-details-panel="settings"\]\s*\{[^}]*\}/)?.[0] || '';
+  const projectManualSectionRule = css.match(/\.project-details-manual-section\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(html, /id="settings-modal"[\s\S]*?class="[^"]*\bmodal-panel--scroll\b[^"]*"/);
   assert.match(html, /id="project-details-modal"[\s\S]*?class="[^"]*\bmodal-panel--scroll\b[^"]*"/);
@@ -97,10 +100,15 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
   assert.match(html, /id="project-details-modal"[\s\S]*?<div class="[^"]*\bmodal-scroll-content\b[^"]*"/);
   assert.match(css, /\.modal-panel--scroll\s*\{[\s\S]*padding-bottom:\s*0/);
   assert.doesNotMatch(scrollContentRule, /padding-bottom:/);
+  assert.doesNotMatch(scrollContentRule, /scrollbar-gutter:/);
+  assert.doesNotMatch(scrollContentRule, /padding-right:/);
   assert.doesNotMatch(css, /\.modal-scroll-content\s*>\s*:last-child\s*\{/);
   assert.match(css, /\.settings-section-panel\s*\{[^}]*padding-bottom:\s*22px/s);
   assert.doesNotMatch(css, /\.settings-section-panel::after\s*\{/);
-  assert.match(css, /\.project-time-history\s*\{[^}]*padding-bottom:\s*22px/s);
+  assert.doesNotMatch(css.match(/\.project-time-history\s*\{[^}]*\}/)?.[0] || '', /padding-bottom:/);
+  assert.match(projectDetailsPanelRule, /padding-bottom:\s*22px/);
+  assert.match(projectDetailsSettingsPanelRule, /padding-bottom:\s*22px/);
+  assert.doesNotMatch(projectManualSectionRule, /padding-bottom:/);
   assert.doesNotMatch(css, /#proj-details-entries-list::after/);
   assert.doesNotMatch(html.match(/id="confirm-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
   assert.doesNotMatch(html.match(/id="time-entry-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
@@ -172,13 +180,197 @@ test('confirmation modal keeps compact centered overlay treatment', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
   const centeredRule = css.match(/\.modal-overlay--centered\s*\{[^}]*\}/)?.[0] || '';
+  const confirmOverlayRule = css.match(/\.confirm-modal-overlay\s*\{[^}]*\}/)?.[0] || '';
+  const confirmPanelRule = css.match(/#confirm-modal \.modal-panel\s*\{[^}]*\}/)?.[0] || '';
+  const confirmHeaderRule = css.match(/#confirm-modal \.modal-header\s*\{[^}]*\}/)?.[0] || '';
+  const confirmFooterRule = css.match(/#confirm-modal \.modal-footer\s*\{[^}]*\}/)?.[0] || '';
   const confirmOverlay = html.match(/<div class="[^"]*" id="confirm-modal">/)?.[0] || '';
   const confirmMarkup = html.match(/id="confirm-modal"[\s\S]*?<\/div>\s*<\/div>\s*<!-- MODAL: Project Details Viewer -->/)?.[0] || '';
 
   assert.match(centeredRule, /align-items:\s*center/);
   assert.match(centeredRule, /padding:\s*16px/);
   assert.match(confirmOverlay, /class="[^"]*\bmodal-overlay--centered\b[^"]*"/);
+  assert.match(confirmOverlay, /class="[^"]*\bconfirm-modal-overlay\b[^"]*"/);
+  assert.doesNotMatch(confirmOverlay, /\bz-50\b/);
+  assert.match(confirmOverlayRule, /z-index:\s*var\(--z-confirm\)/);
+  assert.doesNotMatch(confirmOverlayRule, /display:\s*flex/);
+  assert.match(confirmPanelRule, /gap:\s*12px/);
+  assert.match(confirmHeaderRule, /border-bottom:\s*0/);
+  assert.match(confirmHeaderRule, /padding-bottom:\s*0/);
+  assert.match(confirmFooterRule, /border-top:\s*0/);
+  assert.match(confirmFooterRule, /padding-top:\s*0/);
+  assert.match(confirmFooterRule, /margin-top:\s*0/);
   assert.doesNotMatch(confirmMarkup, /\bz-\[100\]\b/);
+});
+
+test('project context textareas use settings-style helper placement and shared field focus', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const projectModal = html.match(/id="project-modal"[\s\S]*?<!-- MODAL: Auto-Assignment Rules Manager -->/)?.[0] || '';
+  const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const contextRule = css.match(/\.project-context-textarea\s*\{[^}]*\}/)?.[0] || '';
+  const contextFocusRule = css.match(/\.project-context-textarea:focus\s*\{[^}]*\}/)?.[0] || '';
+  const detailsContextRule = css.match(/\.project-details-context\s*\{[^}]*\}/)?.[0] || '';
+  const helperCopy = 'Used by Ask AI to match captured activity when you explicitly ask it to suggest entries.';
+
+  assert.match(projectModal, /<textarea[^>]+id="project-description-input"/);
+  assert.match(projectModal, /Project Context/);
+  assert.match(detailsModal, /<textarea[^>]+id="proj-details-description"/);
+  assert.match(detailsModal, /Project Context/);
+  assert.doesNotMatch(detailsModal, /id="proj-details-description-save"/);
+  assert.match(contextRule, /resize:\s*none/);
+  assert.match(contextRule, /width:\s*100%/);
+  assert.doesNotMatch(contextFocusRule, /outline:\s*none/);
+  assert.doesNotMatch(contextFocusRule, /box-shadow:\s*inset 0 0 0 1px/);
+  assert.match(css, /\.field:focus/);
+  assert.doesNotMatch(detailsContextRule, /padding:\s*4px/);
+  assert.ok(
+    projectModal.indexOf('Project Context') < projectModal.indexOf(helperCopy),
+    'create Project Context helper should appear below the label'
+  );
+  assert.ok(
+    projectModal.indexOf(helperCopy) < projectModal.indexOf('id="project-description-input"'),
+    'create Project Context helper should appear above the textarea'
+  );
+  assert.ok(
+    detailsModal.indexOf('Project Context') < detailsModal.indexOf(helperCopy),
+    'details Project Context helper should appear below the label'
+  );
+  assert.ok(
+    detailsModal.indexOf(helperCopy) < detailsModal.indexOf('id="proj-details-description"'),
+    'details Project Context helper should appear above the textarea'
+  );
+});
+
+test('project details modal consolidates overview and settings tabs', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+
+  assert.match(detailsModal, /app-tab-group project-details-tabs/);
+  assert.match(detailsModal, /role="tablist" aria-label="Project sections"/);
+  assert.match(detailsModal, /data-project-details-tab="overview"[^>]*aria-selected="true"/);
+  assert.match(detailsModal, /data-project-details-tab="settings"/);
+  assert.doesNotMatch(detailsModal, /data-project-details-tab="categories"/);
+  assert.match(detailsModal, /data-project-details-panel="overview"/);
+  assert.match(detailsModal, /data-project-details-panel="settings"/);
+  assert.doesNotMatch(detailsModal, /data-project-details-panel="categories"/);
+  assert.match(detailsModal, /id="proj-details-name"/);
+  assert.match(detailsModal, /id="proj-details-color-input"/);
+  assert.match(detailsModal, /id="proj-details-rate-type"/);
+  assert.doesNotMatch(detailsModal, /id="proj-details-billable-toggle"/);
+  assert.doesNotMatch(detailsModal, /Default Billable/);
+  assert.match(detailsModal, /id="proj-details-settings-save"/);
+  assert.match(detailsModal, /id="proj-details-settings-cancel"/);
+  assert.match(css, /\.project-details-tabs\s*\{/);
+  assert.match(css.match(/\.project-details-tabs\s*\{[^}]*\}/)?.[0] || '', /display:\s*grid/);
+  assert.match(css.match(/\.project-details-tabs\s*\{[^}]*\}/)?.[0] || '', /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /\.project-details-panel\s*\{/);
+  assert.match(css, /\.project-details-panel\.hidden\s*\{[^}]*display:\s*none/);
+  assert.match(css, /#project-details-modal \.modal-header\s*\{[^}]*border-bottom:\s*0/s);
+  assert.match(css, /#project-details-modal \.modal-header\s*\{[^}]*padding-bottom:\s*0/s);
+  assert.match(css, /#project-details-modal \.modal-footer\s*\{[^}]*border-top:\s*0/s);
+  assert.match(css, /#project-details-modal \.modal-footer\s*\{[^}]*padding-top:\s*0/s);
+  assert.match(css, /#ai-insights-detail-modal \.modal-header\s*\{[^}]*border-bottom:\s*0/s);
+  assert.match(css, /#project-modal \.modal-header\s*\{[^}]*border-bottom:\s*0/s);
+  assert.match(css, /#project-modal \.modal-header\s*\{[^}]*padding-bottom:\s*0/s);
+  assert.match(css, /#project-modal \.modal-footer\s*\{[^}]*border-top:\s*0/s);
+  assert.match(css, /#project-modal \.modal-footer\s*\{[^}]*padding-top:\s*0/s);
+  assert.match(css, /#project-modal \.modal-panel,\s*\n#project-details-modal \.modal-panel\s*\{[^}]*gap:\s*12px/s);
+});
+
+test('project details categories use compact categorization UI', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+  const taskRowRule = css.match(/\.project-task-row\s*\{[^}]*\}/)?.[0] || '';
+  const taskCreateRowRule = css.match(/\.project-task-create-row\s*\{[^}]*\}/)?.[0] || '';
+  const taskRowHoverRules = css.match(/\.project-task-row[^{]*:hover[\s\S]*?\}/g)?.join('\n') || '';
+  const taskNameInputRule = css.match(/\.project-task-name-input\s*\{[^}]*\}/)?.[0] || '';
+  const taskNameInputFocusRule = css.match(/\.project-task-name-input:focus\s*\{[^}]*\}/)?.[0] || '';
+  const taskItemsRule = css.match(/\.project-task-items\s*\{[^}]*\}/)?.[0] || '';
+  const taskListRule = css.match(/\.project-task-list\s*\{[^}]*\}/)?.[0] || '';
+  const taskRowMetaRule = css.match(/\.project-task-row-meta\s*\{[^}]*\}/)?.[0] || '';
+  const taskDeleteRule = css.match(/\.project-task-delete\s*\{[^}]*\}/)?.[0] || '';
+  const taskAddToggleRule = css.match(/\.project-task-add-toggle\s*\{[^}]*\}/)?.[0] || '';
+  const overviewPanel = detailsModal.match(/data-project-details-panel="overview"[\s\S]*?data-project-details-panel="settings"/)?.[0] || '';
+
+  assert.match(overviewPanel, /surface-panel settings-card project-task-buckets/);
+  assert.match(overviewPanel, /settings-card-header/);
+  assert.match(overviewPanel, /settings-card-title/);
+  assert.match(overviewPanel, /modal-field-helper/);
+  assert.ok(
+    overviewPanel.indexOf('project-task-buckets') < overviewPanel.indexOf('project-time-history'),
+    'categories should render above Time History in the Overview tab'
+  );
+  assert.match(detailsModal, />\s*Categories\s*</);
+  assert.match(detailsModal, /Optional sub-categories for organizing logged time\./);
+  assert.match(detailsModal, /id="proj-details-task-add-toggle"/);
+  assert.match(detailsModal, /id="proj-details-task-add-toggle"[^>]*aria-label="Add category"/);
+  assert.match(detailsModal, /<button[^>]*class="[^"]*\bicon-button\b[^"]*\bproject-task-add-toggle\b[^"]*"[^>]*id="proj-details-task-add-toggle"/);
+  assert.doesNotMatch(detailsModal, /Add task bucket/);
+  assert.doesNotMatch(detailsModal, />\s*\+ Add task bucket\s*</);
+  assert.doesNotMatch(detailsModal, /Task buckets|task bucket|Bucket name/);
+  assert.match(detailsModal, /placeholder="Category name"/);
+  assert.doesNotMatch(detailsModal, /placeholder="New task"/);
+  assert.match(detailsModal, /id="proj-details-task-create-row"[^>]*\bhidden\b/);
+  assert.ok(
+    detailsModal.indexOf('id="proj-details-tasks-list"') < detailsModal.indexOf('id="proj-details-task-create-row"'),
+    'add category input should render below existing categories'
+  );
+  assert.match(css, /\.project-task-create-row\.hidden\s*\{[^}]*display:\s*none/);
+  assert.match(css, /#proj-details-task-add-toggle\.hidden\s*\{[^}]*display:\s*none/);
+  assert.match(taskCreateRowRule, /min-height:\s*36px/);
+  assert.match(taskCreateRowRule, /padding:\s*2px 0/);
+  assert.match(taskItemsRule, /gap:\s*6px/);
+  assert.match(taskItemsRule, /overflow:\s*visible/);
+  assert.match(taskListRule, /gap:\s*6px/);
+  assert.match(taskListRule, /overflow:\s*visible/);
+  assert.doesNotMatch(taskListRule, /overflow-y:\s*auto/);
+  assert.doesNotMatch(taskListRule, /padding-left|padding-right/);
+  assert.match(taskCreateRowRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--project-category-actions-width\)/);
+  assert.match(taskRowRule, /grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--project-category-actions-width\)/);
+  assert.match(taskRowRule, /border:\s*0/);
+  assert.match(taskRowRule, /background:\s*transparent/);
+  assert.doesNotMatch(taskRowRule, /border-bottom/);
+  assert.doesNotMatch(taskRowHoverRules, /background:\s*var\(--surface-hover\)/);
+  assert.match(taskNameInputRule, /width:\s*100%/);
+  assert.doesNotMatch(taskNameInputRule, /border-color:\s*transparent/);
+  assert.doesNotMatch(taskNameInputRule, /background:\s*transparent/);
+  assert.doesNotMatch(taskNameInputRule, /box-shadow:\s*none/);
+  assert.doesNotMatch(taskNameInputFocusRule, /outline:\s*none/);
+  assert.doesNotMatch(taskNameInputFocusRule, /box-shadow:\s*inset 0 0 0 1px var\(--focus-ring\)/);
+  assert.match(taskRowMetaRule, /justify-content:\s*flex-end/);
+  assert.match(taskDeleteRule, /width:\s*28px/);
+  assert.match(taskAddToggleRule, /width:\s*28px/);
+  assert.match(css, /\.project-task-list\s*\{/);
+  assert.match(projects, /project-task-actions/);
+  assert.match(projects, /project-task-name-input/);
+  assert.match(projects, /data-project-task-name/);
+  assert.match(projects, /saveProjectTaskNameOnBlur/);
+  assert.match(projects, /deleteProjectTask\(event,/);
+  assert.match(projects, /setProjectTaskCreateVisible\(true\)/);
+  assert.match(projects, /btnTaskAddToggle\.classList\.add\('hidden'\)/);
+  assert.match(projects, /btnTaskAddToggle\.classList\.remove\('hidden'\)/);
+  assert.match(projects, /No categories yet\./);
+  assert.match(projects, /Please enter a category name\./);
+  assert.match(projects, /aria-label="Remove category/);
+  assert.match(projects, /showCustomConfirm/);
+  assert.doesNotMatch(projects, />Rename</);
+  assert.doesNotMatch(projects, /startProjectTaskRename/);
+  assert.doesNotMatch(projects, /toggleProjectTaskMenu/);
+  assert.doesNotMatch(projects, /task bucket|Task bucket|task name|Task name/);
+});
+
+test('project details manual import appears below time history', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
+
+  assert.ok(
+    detailsModal.indexOf('project-time-history') < detailsModal.indexOf('proj-details-toggle-manual-form'),
+    'manual import should be rendered below Time History'
+  );
 });
 
 test('settings tabs reuse the app tab active treatment', () => {
@@ -189,6 +381,9 @@ test('settings tabs reuse the app tab active treatment', () => {
   assert.match(html, /<div class="[^"]*\bapp-tab-group\b[^"]*\bsettings-section-tabs\b[^"]*"[^>]*role="tablist" aria-label="Settings sections"/);
   assert.match(html, /class="[^"]*\bapp-tab\b[^"]*\bsettings-section-tab\b[^"]*\bapp-tab--active\b[^"]*\bis-active\b[^"]*" data-settings-section-button="general"/);
   assert.match(html, /class="[^"]*\bapp-tab\b[^"]*\bsettings-section-tab\b[^"]*" data-settings-section-button="capture"/);
+  assert.match(css, /#settings-modal \.modal-panel\s*\{[^}]*gap:\s*12px/s);
+  assert.match(css, /#settings-modal \.modal-header\s*\{[^}]*border-bottom:\s*0/s);
+  assert.match(css, /#settings-modal \.modal-header\s*\{[^}]*padding-bottom:\s*0/s);
   assert.match(activeRule, /background:\s*var\(--surface-raised\)/);
   assert.match(activeRule, /box-shadow:\s*var\(--selected-shadow\)/);
   assert.doesNotMatch(activeRule, /var\(--accent-wash\)/);
@@ -675,13 +870,15 @@ test('visible checkbox controls use the Oriel toggle treatment', () => {
   assert.match(css, /\.oriel-toggle\s*\{/);
   assert.match(css, /\.oriel-toggle-input:checked \+ \.oriel-toggle-track\s*\{/);
 
-  for (const id of ['project-billable-toggle', 'settings-logo-dev-icons']) {
+  for (const id of ['settings-logo-dev-icons']) {
     assert.match(
       html,
       new RegExp(`<label class="[^"]*\\boriel-toggle\\b[^"]*"[^>]*>[\\s\\S]*?id="${id}"[\\s\\S]*?<span class="oriel-toggle-track`)
     );
   }
 
+  assert.doesNotMatch(html, /id="project-billable-toggle"/);
+  assert.doesNotMatch(html, /Default Billable/);
   assert.doesNotMatch(html, /id="settings-logo-dev-icons" class="shrink-0 mt-1"/);
 });
 
@@ -817,6 +1014,7 @@ test('project cards avoid full-card hover and click affordances', () => {
   assert.doesNotMatch(css, /\.project-card:hover\b/);
   assert.doesNotMatch(projectCardTag, /\bcursor-pointer\b/);
   assert.doesNotMatch(projectCardTag, /onclick=/);
+  assert.doesNotMatch(projects, /border-t my-0\.5/);
   assert.match(projects, /<button class="button-secondary"[\s\S]*onclick="openProjectDetails\('\$\{proj\.id\}'\)"/);
 });
 
@@ -862,6 +1060,9 @@ test('project details time history replaces historical entry rows with a shared 
   assert.match(html, /id="proj-details-time-history-month-label"/);
   assert.match(html, /id="proj-details-time-history-days"[^>]*class="[^"]*\bproject-time-history-days\b/);
   assert.match(css, /\.project-time-history-day\s*\{/);
+  assert.match(projects, /project-time-history-day__duration project-time-history-day__duration--empty/);
+  assert.match(css.match(/\.project-time-history-day__duration\s*\{[^}]*\}/)?.[0] || '', /min-height:\s*13px/);
+  assert.match(css.match(/\.project-time-history-day__duration--empty\s*\{[^}]*\}/)?.[0] || '', /visibility:\s*hidden/);
   assert.match(projects, /calendar-day--today/);
   assert.match(projects, /calendar-day--selected/);
   assert.match(projects, /calendar-day--outside/);
@@ -927,6 +1128,9 @@ test('web dropdowns use app-rendered menus instead of native select popups', () 
   }
 
   assert.match(main, /function setupCustomSelects\(\)/);
+  assert.match(main, /function positionCustomSelectMenu\(/);
+  assert.match(main, /positionCustomSelectMenu\(select\)/);
+  assert.match(main, /custom\.menu\.style\.position = 'fixed'/);
   assert.match(main, /className = 'custom-select-button'/);
   assert.match(css, /\.custom-select--native/);
   assert.match(css, /\.custom-select-menu/);
@@ -938,11 +1142,17 @@ test('web dropdowns use app-rendered menus instead of native select popups', () 
   assert.match(html, /class="[^"]*\bai-model-picker-menu\b[^"]*\bpopover\b[^"]*"[^>]*id="settings-ai-model-picker-menu"/);
 });
 
-test('time entry task selector uses the app-rendered dropdown treatment', () => {
+test('time entry category selector uses the app-rendered dropdown treatment', () => {
   const index = fs.readFileSync('index.html', 'utf8');
   const taskSelectorMatch = index.match(/<div class="([^"]*custom-select-wrapper[^"]*)"[^>]*>\s*<select class="([^"]*\bcustom-select\b[^"]*)" id="modal-task-select"/s);
+  const timeEntryModal = index.match(/id="time-entry-modal"[\s\S]*?<!-- MODAL: Add Project -->/)?.[0] || '';
 
   assert.ok(taskSelectorMatch, 'expected the task selector to be wrapped for custom select enhancement');
+  assert.match(timeEntryModal, />\s*Category\s*</);
+  assert.match(timeEntryModal, /aria-label="Category"/);
+  assert.match(timeEntryModal, />No category</);
+  assert.doesNotMatch(timeEntryModal, />\s*Task\s*</);
+  assert.doesNotMatch(timeEntryModal, />No task</);
 });
 
 test('theme preference initializes safely and persists explicit changes', () => {

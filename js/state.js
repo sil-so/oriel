@@ -374,8 +374,8 @@ const DOM = {
     // Project creation modal
     get elProjModal() { return document.getElementById('project-modal'); },
     get elProjName() { return document.getElementById('project-name-input'); },
+    get elProjDescription() { return document.getElementById('project-description-input'); },
     get elProjColor() { return document.getElementById('project-color-input'); },
-    get elProjBillable() { return document.getElementById('project-billable-toggle'); },
     get elProjBtnCancel() { return document.getElementById('project-btn-cancel'); },
     get getElProjBtnSave() { return document.getElementById('project-btn-save'); }
 };

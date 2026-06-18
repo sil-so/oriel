@@ -222,6 +222,7 @@ test('reporting all-time preset fetches unbounded historical data', async () => 
 
 test('reporting chart legends use semantic row classes without changing values', () => {
   const { context, elements } = loadReportingContext();
+  const css = fs.readFileSync('css/index.css', 'utf8');
 
   context.drawDonutChart(
     'canvas-programs',
@@ -242,6 +243,9 @@ test('reporting chart legends use semantic row classes without changing values',
   assert.match(legendMarkup, /\bduration-pill\b[^>]*>1h 30m/);
   assert.match(legendMarkup, /\breport-row-percent\b[^>]*>75%/);
   assert.doesNotMatch(legendMarkup, /text-\[(?:10|11)px\]|text-gray-|text-white|w-5 h-5/);
+  assert.doesNotMatch(css.match(/\.chart-card-header\s*\{[^}]*\}/)?.[0] || '', /border-bottom/);
+  assert.doesNotMatch(css.match(/\.report-row\s*\{[^}]*\}/)?.[0] || '', /border-bottom/);
+  assert.doesNotMatch(css, /\.report-row:last-child\s*\{/);
 });
 
 test('reporting metrics use the shared selected-period calculation', () => {

@@ -12,10 +12,11 @@ function loadAiSidebarContext() {
         {
           id: 'project-client',
           name: 'Client',
+          description: 'Client portal and billing workflow implementation.',
           billable: true,
           tasks: [{ id: 'task-build', name: 'Build', archived: false }]
         },
-        { id: 'project-admin', name: 'Admin', billable: false, tasks: [] }
+        { id: 'project-admin', name: 'Admin', description: '', billable: false, tasks: [] }
       ],
       timelineActivities: [
         {
@@ -181,10 +182,17 @@ function fakeElement(options = {}) {
       return null;
     },
     querySelectorAll(selector) {
-      if (selector !== '[data-ai-model]') return [];
-      return Array.from(element._innerHTML.matchAll(/data-ai-model="([^"]+)"/g), match => (
-        fakeElement({ dataset: { aiModel: match[1] } })
-      ));
+      if (selector === '[data-ai-model]') {
+        return Array.from(element._innerHTML.matchAll(/data-ai-model="([^"]+)"/g), match => (
+          fakeElement({ dataset: { aiModel: match[1] } })
+        ));
+      }
+      if (selector === '[data-suggestion-index]') {
+        return Array.from(element._innerHTML.matchAll(/data-suggestion-index="([^"]+)" data-message-id="([^"]+)"/g), match => (
+          fakeElement({ dataset: { suggestionIndex: match[1], messageId: match[2] } })
+        ));
+      }
+      return [];
     },
     closest() {
       return null;
@@ -474,6 +482,27 @@ test('Ask AI renders safe Markdown in assistant responses', async () => {
   assert.doesNotMatch(markup, /javascript:/);
 });
 
+test('Ask AI renders assistant response line breaks inside paragraphs', async () => {
+  const { context, elements } = createAiSettingsDom();
+  const originalRequest = context.OrielData.request.bind(context.OrielData);
+  context.OrielData.request = async (operation, payload) => {
+    if (operation === 'ai.chat') {
+      return {
+        text: 'First line\nSecond line\nThird line',
+        suggestions: []
+      };
+    }
+    return originalRequest(operation, payload);
+  };
+
+  await context.initAiSidebar();
+  elements['ai-chat-input'].value = 'Summarize this with lines';
+  await elements['ai-send-button'].click();
+
+  const markup = elements['ai-chat-messages'].innerHTML;
+  assert.match(markup, /First line<br>Second line<br>Third line/);
+});
+
 test('AI day context strips raw URLs, query strings, bundle IDs, and local paths', () => {
   const context = loadAiSidebarContext();
   const dayContext = context.buildAiDayContext('2026-05-25');
@@ -486,6 +515,28 @@ test('AI day context strips raw URLs, query strings, bundle IDs, and local paths
 
   const serialized = JSON.stringify(dayContext);
   assert.doesNotMatch(serialized, /token=abc123|\/projects\/secret|appPath|bundleId|Applications/);
+});
+
+test('AI day context includes project descriptions for explicit Ask AI requests', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+
+  assert.deepEqual(dayContext.projects.map(project => ({
+    id: project.id,
+    name: project.name,
+    description: project.description
+  })), [
+    {
+      id: 'project-client',
+      name: 'Client',
+      description: 'Client portal and billing workflow implementation.'
+    },
+    {
+      id: 'project-admin',
+      name: 'Admin',
+      description: ''
+    }
+  ]);
 });
 
 test('AI day context totals use the full day even when detail arrays are bounded', () => {
@@ -822,7 +873,7 @@ test('AI response validation drops draft suggestions unless intent explicitly al
   assert.equal(draft.suggestions[0].description, 'Client Portal');
 });
 
-test('AI response validation uses local activity set for generic entry suggestions', () => {
+test('AI response validation does not fall back to a single local activity set for generic entry suggestions', () => {
   const context = loadAiSidebarContext();
   const dayContext = context.buildAiDayContext('2026-05-25');
   const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
@@ -843,10 +894,90 @@ test('AI response validation uses local activity set for generic entry suggestio
     draftActivitySet
   });
 
+  assert.equal(response.suggestions.length, 0);
+});
+
+test('AI response validation accepts grouped draft activity suggestions by local candidate id', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'I grouped the unlogged activity by likely assignment.',
+    suggestions: [
+      {
+        type: 'draftActivityGroup',
+        title: 'Client portal work',
+        candidateIds: ['draft-candidate-1'],
+        projectId: 'project-client',
+        taskId: 'task-build',
+        confidence: 'high',
+        evidence: 'Client Portal browser activity'
+      },
+      {
+        type: 'draftActivityGroup',
+        title: 'Needs review',
+        candidateIds: ['draft-candidate-2'],
+        confidence: 'low',
+        evidence: 'Xcode activity without enough project evidence'
+      },
+      {
+        type: 'draftActivityGroup',
+        title: 'Duplicate client activity',
+        candidateIds: ['draft-candidate-1'],
+        projectId: 'project-admin'
+      },
+      {
+        type: 'draftActivityGroup',
+        title: 'Unknown activity',
+        candidateIds: ['draft-candidate-missing'],
+        projectId: 'project-admin'
+      }
+    ]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext,
+    draftActivitySet
+  });
+
   assert.equal(response.suggestions.length, 1);
-  assert.equal(response.suggestions[0].type, 'draftActivitySet');
-  assert.equal(response.suggestions[0].activityCount, 2);
+  assert.deepEqual(response.suggestions.map(suggestion => suggestion.type), ['draftActivityGroup']);
+  assert.equal(response.suggestions[0].title, 'Client portal work');
+  assert.equal(response.suggestions[0].projectId, 'project-client');
+  assert.equal(response.suggestions[0].taskId, 'task-build');
+  assert.equal(response.suggestions[0].activityCount, 1);
+  assert.equal(response.suggestions[0].durationMs, 30 * 60 * 1000);
+  assert.deepEqual(Array.from(response.suggestions[0].candidateIds), ['draft-candidate-1']);
   assert.equal(response.suggestions[0].activities[0].title, 'Client Portal - Brave Browser');
+});
+
+test('AI response validation does not fall back when grouped draft activities are invalid', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'Draft groups',
+    suggestions: [
+      {
+        type: 'draftActivityGroup',
+        title: 'Invented project',
+        candidateIds: ['draft-candidate-1'],
+        projectId: 'project-missing'
+      },
+      {
+        type: 'draftActivityGroup',
+        title: 'Wrong task',
+        candidateIds: ['draft-candidate-2'],
+        projectId: 'project-admin',
+        taskId: 'task-build'
+      }
+    ]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext,
+    draftActivitySet
+  });
+
+  assert.equal(response.suggestions.length, 0);
 });
 
 test('AI response validation rejects draft ranges outside selected unlogged time', () => {
@@ -918,6 +1049,18 @@ test('AI suggestion labels include draft purpose and fallback context', () => {
   });
   assert.equal(describedSet.title, 'Review 3 proposed activities');
   assert.equal(describedSet.detail, '12m captured activity');
+
+  const describedGroup = context.describeAiSuggestion({
+    type: 'draftActivityGroup',
+    title: 'Client portal work',
+    projectId: 'project-client',
+    taskId: 'task-build',
+    activityCount: 1,
+    duration: '30m',
+    evidence: 'Client Portal browser activity'
+  });
+  assert.equal(describedGroup.title, 'Review Client portal work');
+  assert.equal(describedGroup.detail, 'Client / Build · 30m captured activity · Client Portal browser activity');
 });
 
 test('AI draft activity set opens the bulk review modal with proposed activities', () => {
@@ -959,6 +1102,99 @@ test('AI draft activity set opens the bulk review modal with proposed activities
     ['Codex', activities[0].start, activities[0].end],
     ['Oriel', activities[1].start, activities[1].end]
   ]);
+});
+
+test('AI draft activity group opens the bulk modal scoped to the group defaults', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'Grouped',
+    suggestions: [{
+      type: 'draftActivityGroup',
+      title: 'Client portal work',
+      candidateIds: ['draft-candidate-1'],
+      projectId: 'project-client',
+      taskId: 'task-build',
+      confidence: 'high'
+    }]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext,
+    draftActivitySet
+  });
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  context.applyAiSuggestion(response.suggestions[0]);
+
+  assert.ok(modalArgs);
+  assert.equal(modalArgs[0], draftActivitySet.activities[0].start);
+  assert.equal(modalArgs[1], draftActivitySet.activities[0].end);
+  assert.equal(modalArgs[3], 'project-client');
+  assert.equal(modalArgs[5], true);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.title), ['Client Portal - Brave Browser']);
+  assert.equal(modalArgs[7], 'task-build');
+  assert.equal(context.window.pendingAiSuggestionCompletion.suggestionId, response.suggestions[0].id);
+});
+
+test('AI draft activity groups without confident project evidence are rejected', () => {
+  const context = loadAiSidebarContext();
+  const dayContext = context.buildAiDayContext('2026-05-25');
+  const draftActivitySet = context.buildAiDraftActivitySet('2026-05-25');
+  const response = context.normalizeAiResponse({
+    text: 'Grouped',
+    suggestions: [{
+      type: 'draftActivityGroup',
+      title: 'Needs review',
+      candidateIds: ['draft-candidate-2'],
+      projectId: 'project-client',
+      taskId: 'task-build',
+      confidence: 'low'
+    }]
+  }, {
+    intent: context.classifyAiPromptIntent('Suggest entries'),
+    dayContext,
+    draftActivitySet
+  });
+
+  assert.equal(response.suggestions.length, 0);
+});
+
+test('Ask AI marks grouped suggestion cards as assigned after modal save completion', async () => {
+  const { context, elements } = createAiSettingsDom();
+  const originalRequest = context.OrielData.request.bind(context.OrielData);
+  context.OrielData.request = async (operation, payload) => {
+    if (operation === 'ai.chat') {
+      return {
+        text: 'I grouped the unlogged activity.',
+        suggestions: [{
+          type: 'draftActivityGroup',
+          title: 'Client portal work',
+          candidateIds: ['draft-candidate-1'],
+          projectId: 'project-client',
+          taskId: 'task-build',
+          confidence: 'high'
+        }]
+      };
+    }
+    return originalRequest(operation, payload);
+  };
+
+  await context.initAiSidebar();
+  elements['ai-chat-input'].value = 'Suggest entries';
+  await elements['ai-send-button'].click();
+
+  assert.match(elements['ai-chat-messages'].innerHTML, /Review Client portal work/);
+  assert.doesNotMatch(elements['ai-chat-messages'].innerHTML, /ai-suggestion-card is-complete/);
+
+  assert.equal(context.completeAiSuggestionAssignment('draft-activity-group-1'), true);
+
+  assert.match(elements['ai-chat-messages'].innerHTML, /ai-suggestion-card is-complete/);
+  assert.match(elements['ai-chat-messages'].innerHTML, /Assigned · Client \/ Build · 30m captured activity/);
+  assert.match(elements['ai-chat-messages'].innerHTML, /disabled/);
 });
 
 test('Ask AI markup uses Preferences configuration and explicit loading affordance', () => {
@@ -1310,8 +1546,9 @@ test('AI key removal calls Keychain delete only after confirmation', async () =>
   await context.initAiSidebar();
   await elements['ai-key-delete-button'].click();
 
-  assert.match(confirmOptions.title, /Remove OpenAI API key/);
-  assert.match(confirmOptions.message, /Keychain/);
+  assert.equal(confirmOptions.title, 'Remove API Key');
+  assert.match(confirmOptions.message, /OpenAI will be removed from macOS Keychain/);
+  assert.equal(confirmOptions.actionText, 'Remove');
   assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(request => request.operation === 'ai.keys.delete').map(request => request.payload))), [
     { provider: 'openai' }
   ]);

@@ -100,6 +100,7 @@ final class SQLiteStoreTests: XCTestCase {
                     "rateType": "hourly",
                     "hourlyRate": 120,
                     "currency": "$",
+                    "description": "Client portal and billing workflow implementation.",
                     "tasks": [
                         ["id": "task-planning", "name": "Planning", "archived": false]
                     ]
@@ -127,8 +128,20 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(projects.count, 1)
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual((projects.first?["tasks"] as? [[String: Any]])?.first?["name"] as? String, "Planning")
+        XCTAssertEqual(projects.first?["description"] as? String, "Client portal and billing workflow implementation.")
         XCTAssertEqual(entries.first?["projectId"] as? String, projectID)
         XCTAssertEqual(entries.first?["taskId"] as? String, "task-planning")
+
+        let updatedProject = try XCTUnwrap(
+            try store.request(
+                operation: "projects.update",
+                payload: [
+                    "id": projectID,
+                    "description": "Updated project context"
+                ]
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(updatedProject["description"] as? String, "Updated project context")
     }
 
     func testTimeEntriesRejectNonPositiveRangesOnCreateAndUpdate() throws {
@@ -510,6 +523,7 @@ final class SQLiteStoreTests: XCTestCase {
         let projects = try XCTUnwrap(try store.request(operation: "projects.list", payload: [:]) as? [[String: Any]])
         let entries = try XCTUnwrap(try store.request(operation: "entries.list", payload: ["date": "all"]) as? [[String: Any]])
         XCTAssertEqual(projects.first?["color"] as? String, "#64748b")
+        XCTAssertEqual(projects.first?["description"] as? String, "")
         XCTAssertEqual(entries.first?["projectId"] as? String, "project-legacy")
         XCTAssertEqual(entries.first?["description"] as? String, "Old note")
 

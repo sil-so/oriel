@@ -9676,14 +9676,14 @@ test('time entry modal leaves descriptions empty for recorded activity ranges', 
   assert.equal(elements.get('modal-description-input').value, '');
 });
 
-test('time entry modal offers active tasks for the selected project', () => {
+test('time entry modal offers active categories for the selected project', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 9, 0).getTime();
 
   context.openTimeEntryModal(startMs, startMs + 15 * 60 * 1000, '', 'project-1', true, false, null, 'task-1');
 
   assert.equal(elements.get('modal-task-container').classList.contains('hidden'), false);
-  assert.match(elements.get('modal-task-select').innerHTML, /No task/);
+  assert.match(elements.get('modal-task-select').innerHTML, /No category/);
   assert.match(elements.get('modal-task-select').innerHTML, /Planning/);
   assert.doesNotMatch(elements.get('modal-task-select').innerHTML, /Archived Task/);
   assert.equal(elements.get('modal-task-select').value, 'task-1');
@@ -9934,6 +9934,48 @@ test('similar-scoped popup assign filters a selected parent row to matching chil
   const modalSources = popup.modalArgs[6].flatMap(activity => activity.modalSourceActivities || activity.sources || [activity]);
   assert.deepEqual(Array.from(modalSources, activity => activity.title), ['User Activity Analysis']);
   assert.equal(popup.modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
+});
+
+test('popup aggregate assignment uses active source duration instead of page envelope', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const firstStart = dateStart + (13 * 60 + 30) * 60 * 1000;
+  const secondEnd = firstStart + 20 * 60 * 1000;
+  const activeDurationMs = 68 * 1000;
+  const envelopeDurationMs = secondEnd - firstStart;
+
+  const assignmentActivities = context.buildPopupAssignmentActivities([
+    {
+      popupContextSummary: true,
+      app: 'Brave Browser',
+      title: 'action.com',
+      url: 'https://www.action.com/nl-nl/',
+      start: firstStart,
+      end: secondEnd,
+      duration: activeDurationMs,
+      sources: [
+        {
+          app: 'Brave Browser',
+          title: 'action.com',
+          url: 'https://www.action.com/nl-nl/',
+          start: firstStart,
+          end: secondEnd,
+          duration: activeDurationMs,
+          activityMix: { handsOnMs: activeDurationMs, handsOffMs: 0 }
+        }
+      ]
+    }
+  ], firstStart, secondEnd, {
+    assignmentDisplayStart: firstStart,
+    assignmentDisplayEnd: secondEnd
+  });
+
+  assert.equal(assignmentActivities.length, 1);
+  assert.equal(assignmentActivities[0].duration, activeDurationMs);
+  assert.equal(assignmentActivities[0].assignedDurationMs, activeDurationMs);
+  assert.notEqual(assignmentActivities[0].duration, envelopeDurationMs);
+  assert.equal(assignmentActivities[0].modalSourceActivities[0].duration, activeDurationMs);
+  assert.equal(assignmentActivities[0].modalSourceActivities[0].assignedDurationMs, activeDurationMs);
 });
 
 test('multiple activity popover aligns app names separately without dash separators', () => {

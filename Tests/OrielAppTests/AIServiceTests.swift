@@ -41,6 +41,54 @@ final class AIServiceTests: XCTestCase {
         XCTAssertEqual((response["suggestions"] as? [[String: Any]])?.count, 1)
     }
 
+    func testAIServicePromptsForGroupedDraftActivitySuggestions() async throws {
+        let keyStore = FakeAPIKeyStore(keys: ["openai": "test-key"])
+        var capturedRequest: URLRequest?
+        let service = AIService(keyStore: keyStore) { request in
+            capturedRequest = request
+            let data = #"{"output_text":"{\"text\":\"Grouped\",\"suggestions\":[]}"}"#.data(using: .utf8)!
+            return (data, httpResponse(for: request.url!, status: 200))
+        }
+
+        _ = try await service.chat(payload: [
+            "provider": "openai",
+            "model": "gpt-test",
+            "messages": [["role": "user", "content": "Suggest entries"]],
+            "dayContext": [
+                "date": "2026-05-25",
+                "draftCandidates": [
+                    [
+                        "id": "draft-candidate-1",
+                        "duration": "30m",
+                        "description": "Client Portal"
+                    ]
+                ],
+                "projects": [
+                    [
+                        "id": "project-client",
+                        "name": "Client",
+                        "tasks": [["id": "task-build", "name": "Build"]]
+                    ]
+                ]
+            ],
+            "intent": [
+                "kind": "entryDraft",
+                "draftMode": "activitySet",
+                "allowDraftSuggestions": true,
+                "allowUpdateAssignmentSuggestions": false
+            ]
+        ])
+
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
+        XCTAssertTrue(requestBody.contains("draftActivityGroup"))
+        XCTAssertTrue(requestBody.contains("candidateIds"))
+        XCTAssertTrue(requestBody.contains("\\\"draftMode\\\":\\\"activitySet\\\""))
+        XCTAssertTrue(requestBody.contains("Group generic entry suggestions by project and topic"))
+        XCTAssertFalse(requestBody.contains("Needs review"))
+        XCTAssertFalse(requestBody.contains("Unassigned activity"))
+        XCTAssertFalse(requestBody.contains("leave projectId and taskId empty"))
+    }
+
     func testAIServiceSendsGeminiRequestAndReportsMissingKey() async throws {
         let keyStore = FakeAPIKeyStore(keys: ["google": "gemini-key"])
         var capturedRequest: URLRequest?

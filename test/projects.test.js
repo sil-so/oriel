@@ -9,6 +9,8 @@ function loadProjectsContext(fetchImpl) {
   const context = {
     window: {},
     API_BASE: 'http://localhost:3000/api',
+    setTimeout,
+    clearTimeout,
     state: {
       projects: [{
         id: 'project-1',
@@ -34,9 +36,9 @@ function loadProjectsContext(fetchImpl) {
         return null;
       }
     },
-    fetch: async url => {
+    fetch: async (url, options = {}) => {
       fetchCalls.push(url);
-      return fetchImpl(url);
+      return fetchImpl(url, options);
     },
     console: { error() {} }
   };
@@ -45,6 +47,41 @@ function loadProjectsContext(fetchImpl) {
   vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
   return { context, grid, fetchCalls };
+}
+
+function projectTestElement({ value = '', className = '' } = {}) {
+  const classes = new Set(String(className).split(/\s+/).filter(Boolean));
+  return {
+    value,
+    textContent: '',
+    disabled: false,
+    dataset: {},
+    style: {},
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+      contains(name) { return classes.has(name); },
+      toggle(name, force) {
+        const shouldAdd = force === undefined ? !classes.has(name) : Boolean(force);
+        if (shouldAdd) classes.add(name);
+        else classes.delete(name);
+        return shouldAdd;
+      }
+    },
+    focus() {},
+    select() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    addEventListener(type, handler) {
+      this[`on${type}`] = handler;
+    },
+    setAttribute(name, value) {
+      this[name] = String(value);
+    },
+    removeAttribute(name) {
+      delete this[name];
+    }
+  };
 }
 
 test('project cards render all-time totals and earnings from historical entries', async () => {
@@ -72,9 +109,55 @@ test('project cards render all-time totals and earnings from historical entries'
   assert.doesNotMatch(cardOpen, /\bcursor-pointer\b/);
   assert.doesNotMatch(cardOpen, /onclick=/);
   assert.match(grid.innerHTML, /<button class="button-secondary"\s+onclick="openProjectDetails\('project-1'\)">[\s\S]*Details/);
-  assert.match(grid.innerHTML, /Billable/);
+  assert.match(grid.innerHTML, /<button class="button-danger"[\s\S]*Delete/);
+  assert.doesNotMatch(grid.innerHTML, />\s*Edit\s*</);
+  assert.doesNotMatch(grid.innerHTML, /Billable|Non-Billable/);
   assert.doesNotMatch(grid.innerHTML, /Logged Today|Earnings Today/);
   assert.doesNotMatch(grid.innerHTML, /text-\[(?:9|10|11|12|13)px\]|text-gray-|text-white|text-emerald-|text-blue-/);
+});
+
+test('project cards hide empty billing state instead of repeating no-rate copy', async () => {
+  const { context, grid } = loadProjectsContext(async () => ({
+    ok: true,
+    json: async () => [
+      { projectId: 'project-1', start: 0, end: 30 * 60 * 1000 }
+    ]
+  }));
+  context.state.projects[0] = {
+    ...context.state.projects[0],
+    billable: false,
+    rateType: 'none',
+    hourlyRate: 0,
+    fixedRate: 0
+  };
+
+  await context.renderProjectsPage();
+
+  assert.match(grid.innerHTML, /Total Logged/);
+  assert.match(grid.innerHTML, /0h 30m/);
+  assert.doesNotMatch(grid.innerHTML, /Billable|Non-Billable/);
+  assert.doesNotMatch(grid.innerHTML, /Financial Mode|No billing rate set|Total Earnings|Fixed Budget/);
+});
+
+test('project cards keep compact fixed-rate billing metrics when configured', async () => {
+  const { context, grid } = loadProjectsContext(async () => ({
+    ok: true,
+    json: async () => [
+      { projectId: 'project-1', start: 0, end: 30 * 60 * 1000 }
+    ]
+  }));
+  context.state.projects[0] = {
+    ...context.state.projects[0],
+    rateType: 'fixed',
+    fixedRate: 2500,
+    currency: '€'
+  };
+
+  await context.renderProjectsPage();
+
+  assert.match(grid.innerHTML, /Fixed Budget/);
+  assert.match(grid.innerHTML, /€2500/);
+  assert.doesNotMatch(grid.innerHTML, /Financial Mode|No billing rate set|Billable|Non-Billable/);
 });
 
 test('project cards show unavailable historical metrics when all-time loading fails', async () => {
@@ -323,6 +406,167 @@ test('project time history day navigation closes details and opens timeline day'
   assert.equal(opened[0].options.mode, 'day');
 });
 
+test('project details settings populate saved project context', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  context.state.projects[0].description = 'Client portal and billing workflow implementation.';
+  const elements = new Map([
+    ['proj-details-name', projectTestElement()],
+    ['proj-details-description', projectTestElement()],
+    ['proj-details-color-input', projectTestElement()],
+    ['proj-details-rate-type', projectTestElement()],
+    ['proj-details-hourly-rate', projectTestElement()],
+    ['proj-details-fixed-rate', projectTestElement()],
+    ['proj-details-currency', projectTestElement()]
+  ]);
+  context.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+  context.window.refreshCustomSelects = () => {};
+
+  context.populateProjectDetailsSettings(context.state.projects[0]);
+
+  assert.equal(elements.get('proj-details-name').value, 'Client Work');
+  assert.equal(elements.get('proj-details-description').value, 'Client portal and billing workflow implementation.');
+  assert.equal(elements.get('proj-details-color-input').value, '#3b82f6');
+  assert.equal(elements.get('proj-details-rate-type').value, 'hourly');
+  assert.equal(elements.get('proj-details-hourly-rate').value, 100);
+});
+
+test('project details settings save sends one explicit project update payload', async () => {
+  const requests = [];
+  const { context } = loadProjectsContext(async (url, options) => {
+    requests.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({
+        ...context.state.projects[0],
+        ...JSON.parse(options.body)
+      })
+    };
+  });
+  const elements = new Map([
+    ['proj-details-name', projectTestElement({ value: 'Updated Client' })],
+    ['proj-details-description', projectTestElement({ value: ' Updated context ' })],
+    ['proj-details-color-input', projectTestElement({ value: '#10b981' })],
+    ['proj-details-rate-type', projectTestElement({ value: 'fixed' })],
+    ['proj-details-hourly-rate', projectTestElement({ value: '150' })],
+    ['proj-details-fixed-rate', projectTestElement({ value: '2400' })],
+    ['proj-details-currency', projectTestElement({ value: '€' })],
+    ['project-details-modal', projectTestElement()],
+    ['proj-details-title', { innerText: '' }],
+    ['proj-details-color', { style: {} }]
+  ]);
+  context.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+  context.window.refreshCustomSelects = () => {};
+  context.renderProjectsPage = () => {};
+
+  const updated = await context.saveProjectDetailsSettings('project-1');
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'http://localhost:3000/api/projects/project-1');
+  assert.equal(requests[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    name: 'Updated Client',
+    description: 'Updated context',
+    color: '#10b981',
+    billable: true,
+    rateType: 'fixed',
+    hourlyRate: 150,
+    fixedRate: 2400,
+    currency: '€'
+  });
+  assert.equal(updated.name, 'Updated Client');
+  assert.equal(context.state.projects[0].description, 'Updated context');
+});
+
+test('project details settings cancel restores saved values without updating project', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  context.state.projects[0].description = 'Saved context';
+  const elements = new Map([
+    ['proj-details-name', projectTestElement({ value: 'Draft name' })],
+    ['proj-details-description', projectTestElement({ value: 'Draft context' })],
+    ['proj-details-color-input', projectTestElement({ value: '#10b981' })],
+    ['proj-details-rate-type', projectTestElement({ value: 'fixed' })],
+    ['proj-details-hourly-rate', projectTestElement({ value: '150' })],
+    ['proj-details-fixed-rate', projectTestElement({ value: '2400' })],
+    ['proj-details-currency', projectTestElement({ value: '€' })]
+  ]);
+  context.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+  context.window.refreshCustomSelects = () => {};
+
+  context.resetProjectDetailsSettings('project-1');
+
+  assert.equal(elements.get('proj-details-name').value, 'Client Work');
+  assert.equal(elements.get('proj-details-description').value, 'Saved context');
+  assert.equal(elements.get('proj-details-color-input').value, '#3b82f6');
+  assert.equal(elements.get('proj-details-rate-type').value, 'hourly');
+  assert.equal(elements.get('proj-details-hourly-rate').value, 100);
+});
+
+test('project details settings derive billable state from pricing mode', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  const elements = new Map([
+    ['proj-details-name', projectTestElement({ value: 'Internal Work' })],
+    ['proj-details-description', projectTestElement({ value: '' })],
+    ['proj-details-color-input', projectTestElement({ value: '#3b82f6' })],
+    ['proj-details-rate-type', projectTestElement({ value: 'none' })],
+    ['proj-details-hourly-rate', projectTestElement({ value: '' })],
+    ['proj-details-fixed-rate', projectTestElement({ value: '' })],
+    ['proj-details-currency', projectTestElement({ value: '$' })]
+  ]);
+  context.document = {
+    getElementById(id) {
+      return elements.get(id) || null;
+    }
+  };
+
+  assert.equal(context.readProjectDetailsSettingsPayload().billable, false);
+
+  elements.get('proj-details-rate-type').value = 'hourly';
+  assert.equal(context.readProjectDetailsSettingsPayload().billable, true);
+
+  elements.get('proj-details-rate-type').value = 'fixed';
+  assert.equal(context.readProjectDetailsSettingsPayload().billable, true);
+});
+
+test('project category create row toggles with add button visibility', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  const row = projectTestElement({ className: 'project-task-create-row hidden' });
+  const input = projectTestElement();
+  const toggle = projectTestElement();
+  let focused = false;
+  input.focus = () => { focused = true; };
+  context.document = {
+    getElementById(id) {
+      if (id === 'proj-details-task-create-row') return row;
+      if (id === 'proj-details-task-name') return input;
+      if (id === 'proj-details-task-add-toggle') return toggle;
+      return null;
+    }
+  };
+
+  context.setProjectTaskCreateVisible(true);
+  assert.equal(row.classList.contains('hidden'), false);
+  assert.equal(toggle.classList.contains('hidden'), true);
+  assert.equal(focused, true);
+
+  input.value = 'Draft bucket';
+  context.setProjectTaskCreateVisible(false);
+  assert.equal(row.classList.contains('hidden'), true);
+  assert.equal(toggle.classList.contains('hidden'), false);
+  assert.equal(input.value, '');
+});
+
 test('work times keeps legacy activity-stream totals on saved assigned duration', () => {
   const logged = { innerText: '' };
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -546,12 +790,27 @@ test('timeline UI omits recorded-active stats and idle preference totals', () =>
   assert.doesNotMatch(timelineSource, /hideIdle/);
 });
 
-test('project task editing uses inline controls instead of a browser prompt', () => {
+test('project category names are directly editable and delete is confirmation gated', () => {
   const source = fs.readFileSync('js/projects.js', 'utf8');
 
   assert.doesNotMatch(source, /prompt\(/);
-  assert.match(source, /function startProjectTaskRename/);
-  assert.match(source, /function saveProjectTaskRename/);
-  assert.match(source, /function cancelProjectTaskRename/);
-  assert.match(source, /data-project-task-edit/);
+  assert.match(source, /data-project-task-name/);
+  assert.match(source, /project-task-name-input/);
+  assert.match(source, /function saveProjectTaskNameOnBlur/);
+  assert.match(source, /function flushProjectTaskNameEdits/);
+  assert.match(source, /flushProjectTaskNameEdits\(currentProjectDetailsId\)/);
+  assert.match(source, /function deleteProjectTask/);
+  assert.match(source, /showCustomConfirm/);
+  assert.match(source, /onclick="deleteProjectTask\(event,/);
+  assert.match(source, /title:\s*'Remove Category'/);
+  assert.match(source, /actionText:\s*'Remove'/);
+  assert.doesNotMatch(source, /Delete Category/);
+  assert.doesNotMatch(source, /Delete category/);
+  assert.match(source, /title:\s*'Delete Project'/);
+  assert.match(source, /actionText:\s*'Delete'/);
+  assert.doesNotMatch(source, /actionText:\s*'Delete Project'/);
+  assert.doesNotMatch(source, /function startProjectTaskRename/);
+  assert.doesNotMatch(source, /function toggleProjectTaskMenu/);
+  assert.doesNotMatch(source, /project-task-overflow/);
+  assert.doesNotMatch(source, />Rename</);
 });

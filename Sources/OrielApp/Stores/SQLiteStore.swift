@@ -603,6 +603,7 @@ final class SQLiteStore {
                 hourly_rate REAL NOT NULL DEFAULT 0,
                 fixed_rate REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL DEFAULT '$',
+                description TEXT NOT NULL DEFAULT '',
                 tasks_json TEXT NOT NULL DEFAULT '[]'
             );
             CREATE TABLE IF NOT EXISTS time_entries (
@@ -706,6 +707,7 @@ final class SQLiteStore {
             CREATE INDEX IF NOT EXISTS ai_insight_rollups_status_idx ON ai_insight_rollups(status, updated_at);
             """
         )
+        try addColumnIfMissing(table: "projects", column: "description", definition: "TEXT NOT NULL DEFAULT ''")
         try addColumnIfMissing(table: "projects", column: "tasks_json", definition: "TEXT NOT NULL DEFAULT '[]'")
         try addColumnIfMissing(table: "time_entries", column: "task_id", definition: "TEXT NOT NULL DEFAULT ''")
         try addColumnIfMissing(table: "time_entries", column: "created_by", definition: "TEXT NOT NULL DEFAULT 'manual'")
@@ -759,7 +761,7 @@ final class SQLiteStore {
 
     private func repairLegacyProjectsTableIfNeeded() throws {
         guard try tableExists("projects") else { return }
-        let expected = ["id", "name", "color", "billable", "rate_type", "hourly_rate", "fixed_rate", "currency", "tasks_json"]
+        let expected = ["id", "name", "color", "billable", "rate_type", "hourly_rate", "fixed_rate", "currency", "description", "tasks_json"]
         let currentColumns = try columns(in: "projects")
         guard !Set(expected).isSubset(of: currentColumns) else { return }
 
@@ -779,6 +781,7 @@ final class SQLiteStore {
                 hourly_rate REAL NOT NULL DEFAULT 0,
                 fixed_rate REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL DEFAULT '$',
+                description TEXT NOT NULL DEFAULT '',
                 tasks_json TEXT NOT NULL DEFAULT '[]'
             );
             """
@@ -788,8 +791,8 @@ final class SQLiteStore {
             try execute(
                 """
                 INSERT OR IGNORE INTO projects_rebuilt
-                    (id, name, color, billable, rate_type, hourly_rate, fixed_rate, currency, tasks_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, name, color, billable, rate_type, hourly_rate, fixed_rate, currency, description, tasks_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values: [
                     id,
@@ -800,6 +803,7 @@ final class SQLiteStore {
                     doubleValue(row["hourly_rate"]) ?? 0,
                     doubleValue(row["fixed_rate"]) ?? 0,
                     stringValue(row["currency"]) ?? "$",
+                    stringValue(row["description"]) ?? "",
                     stringValue(row["tasks_json"]) ?? "[]"
                 ]
             )
@@ -888,7 +892,7 @@ final class SQLiteStore {
             """
             SELECT id, name, color, billable, rate_type AS rateType,
                    hourly_rate AS hourlyRate, fixed_rate AS fixedRate, currency,
-                   tasks_json AS tasksJson
+                   description, tasks_json AS tasksJson
             FROM projects ORDER BY name COLLATE NOCASE
             """
         ).map { projectOutput($0) }
@@ -906,7 +910,7 @@ final class SQLiteStore {
             """
             SELECT id, name, color, billable, rate_type AS rateType,
                    hourly_rate AS hourlyRate, fixed_rate AS fixedRate, currency,
-                   tasks_json AS tasksJson
+                   description, tasks_json AS tasksJson
             FROM projects WHERE id = ?
             """,
             values: [id]
@@ -921,11 +925,12 @@ final class SQLiteStore {
         try execute(
             """
             UPDATE projects SET name = ?, color = ?, billable = ?, rate_type = ?,
-                hourly_rate = ?, fixed_rate = ?, currency = ?, tasks_json = ? WHERE id = ?
+                hourly_rate = ?, fixed_rate = ?, currency = ?, description = ?, tasks_json = ? WHERE id = ?
             """,
             values: [
                 project["name"], project["color"], project["billable"], project["rateType"],
-                project["hourlyRate"], project["fixedRate"], project["currency"], project["tasksJson"], id
+                project["hourlyRate"], project["fixedRate"], project["currency"], project["description"],
+                project["tasksJson"], id
             ]
         )
         return projectOutput(project)
@@ -938,6 +943,11 @@ final class SQLiteStore {
         guard ["none", "hourly", "fixed"].contains(rateType) else {
             throw OrielStoreError.invalidRequest("Unsupported billing type.")
         }
+        let description = optionalString(payload, key: "description", defaultValue: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard description.count <= 1000 else {
+            throw OrielStoreError.invalidRequest("Project description is too long.")
+        }
         let tasks = try validatedTasks(payload["tasks"])
         return [
             "id": id,
@@ -948,6 +958,7 @@ final class SQLiteStore {
             "hourlyRate": number(payload["hourlyRate"]),
             "fixedRate": number(payload["fixedRate"]),
             "currency": optionalString(payload, key: "currency", defaultValue: "$"),
+            "description": description,
             "tasks": tasks,
             "tasksJson": try encodedTasks(tasks)
         ]
@@ -956,12 +967,13 @@ final class SQLiteStore {
     private func insertProject(_ project: [String: Any]) throws {
         try execute(
             """
-            INSERT INTO projects (id, name, color, billable, rate_type, hourly_rate, fixed_rate, currency, tasks_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO projects (id, name, color, billable, rate_type, hourly_rate, fixed_rate, currency, description, tasks_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values: [
                 project["id"], project["name"], project["color"], project["billable"], project["rateType"],
-                project["hourlyRate"], project["fixedRate"], project["currency"], project["tasksJson"]
+                project["hourlyRate"], project["fixedRate"], project["currency"], project["description"],
+                project["tasksJson"]
             ]
         )
     }
