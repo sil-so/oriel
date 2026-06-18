@@ -60,18 +60,24 @@ test('timeline controls use one visible scrollbar and compact stable controls', 
   assert.doesNotMatch(css, /\.bulk-options/);
 });
 
-test('timeline exposes Day and Week switch between zoom and workspace tabs', () => {
+test('timeline controls sit directly before the header date picker', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
 
+  const timelineControlsStart = html.indexOf('id="timeline-navigation-controls"');
   const zoomStart = html.indexOf('id="zoom-dropdown-container"');
   const modeStart = html.indexOf('id="timeline-mode-switch"');
   const tabsStart = html.indexOf('id="tab-timeline"');
+  const datePickerStart = html.indexOf('id="date-picker-trigger"');
   const workspaceTabs = html.match(/<div class="([^"]*)" role="tablist" aria-label="Workspaces">/);
 
+  assert.ok(timelineControlsStart > -1, 'expected timeline control wrapper');
   assert.ok(zoomStart > -1, 'expected zoom dropdown');
+  assert.ok(tabsStart > -1, 'expected workspace tabs');
+  assert.ok(tabsStart < timelineControlsStart, 'expected workspace tabs before timeline controls');
+  assert.ok(zoomStart > timelineControlsStart, 'expected zoom dropdown inside timeline controls');
   assert.ok(modeStart > zoomStart, 'expected timeline mode switch after zoom');
-  assert.ok(tabsStart > modeStart, 'expected workspace tabs after timeline mode switch');
+  assert.ok(datePickerStart > modeStart, 'expected date picker after timeline controls');
   assert.match(html, /id="timeline-mode-switch"[^>]*role="radiogroup"[^>]*aria-label="Timeline view"/);
   assert.match(html, /id="timeline-mode-switch" class="[^"]*\bapp-tab-group\b/);
   assert.match(html, /id="timeline-mode-day" class="[^"]*\bapp-tab\b[^"]*\bapp-tab--active\b/);
@@ -81,6 +87,8 @@ test('timeline exposes Day and Week switch between zoom and workspace tabs', () 
   assert.match(html, /id="timeline-mode-day"[^>]*data-timeline-mode="day"[^>]*aria-checked="true"[\s\S]*>\s*Day\s*</);
   assert.match(html, /id="timeline-mode-week"[^>]*data-timeline-mode="week"[^>]*aria-checked="false"[\s\S]*>\s*Week\s*</);
   assert.doesNotMatch(css, /\.timeline-mode-option--active\s*\{/);
+  assert.match(css, /\.timeline-navigation-controls\s*\{[\s\S]*display:\s*inline-flex/s);
+  assert.match(css, /\.timeline-mode-switch\s*\{[\s\S]*height:\s*32px/s);
   assert.match(html, /id="week-timeline-workspace" class="[^"]*\bhidden\b[^"]*"/);
   assert.match(html, /<script src="\/js\/week-view\.js"><\/script>[\s\S]*<script src="\/js\/main\.js"><\/script>/);
 });

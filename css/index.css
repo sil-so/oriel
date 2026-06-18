@@ -335,7 +335,14 @@ button {
 }
 
 #zoom-dropdown-container {
+    flex: 0 0 118px;
     width: 118px;
+}
+
+#zoom-dropdown-btn {
+    height: 32px;
+    min-height: 32px;
+    box-sizing: border-box;
 }
 
 .tracking-status-dot--starting,
@@ -662,6 +669,23 @@ button:focus-visible {
 .date-navigation-actions {
     display: inline-flex;
     align-items: center;
+}
+
+.timeline-navigation-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.timeline-mode-switch {
+    height: 32px;
+    padding: 2px;
+    border-radius: var(--radius-md);
+}
+
+.timeline-mode-option {
+    min-height: 26px;
+    padding: 0 11px;
 }
 
 .date-picker-with-actions {
