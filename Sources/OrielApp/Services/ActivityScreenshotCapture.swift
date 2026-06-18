@@ -10,16 +10,19 @@ struct CapturedActivityScreenshot {
 
 protocol ActivityScreenshotCapturing {
     func hasScreenRecordingPermission() -> Bool
-    func captureMainDisplay(maxPixelWidth: CGFloat, jpegQuality: CGFloat) throws -> CapturedActivityScreenshot
+    func captureDisplay(displayID: CGDirectDisplayID, maxPixelWidth: CGFloat, jpegQuality: CGFloat) throws -> CapturedActivityScreenshot
 }
 
 enum ActivityScreenshotCaptureError: Error, LocalizedError {
+    case activeDisplayUnavailable
     case screenRecordingPermissionMissing
     case captureFailed
     case encodingFailed
 
     var errorDescription: String? {
         switch self {
+        case .activeDisplayUnavailable:
+            return "Oriel could not identify which display contains the active app."
         case .screenRecordingPermissionMissing:
             return "Screen Recording permission is required for screenshot summaries."
         case .captureFailed:
@@ -35,11 +38,15 @@ final class ActivityScreenshotCapture: ActivityScreenshotCapturing {
         CGPreflightScreenCaptureAccess()
     }
 
-    func captureMainDisplay(maxPixelWidth: CGFloat = 1280, jpegQuality: CGFloat = 0.62) throws -> CapturedActivityScreenshot {
+    func captureDisplay(
+        displayID: CGDirectDisplayID,
+        maxPixelWidth: CGFloat = 1280,
+        jpegQuality: CGFloat = 0.62
+    ) throws -> CapturedActivityScreenshot {
         guard hasScreenRecordingPermission() else {
             throw ActivityScreenshotCaptureError.screenRecordingPermissionMissing
         }
-        guard let image = CGDisplayCreateImage(CGMainDisplayID()) else {
+        guard let image = CGDisplayCreateImage(displayID) else {
             throw ActivityScreenshotCaptureError.captureFailed
         }
 
@@ -72,7 +79,7 @@ final class ActivityScreenshotCapture: ActivityScreenshotCapturing {
             jpegData: data,
             width: width,
             height: height,
-            displayID: String(CGMainDisplayID())
+            displayID: String(displayID)
         )
     }
 }

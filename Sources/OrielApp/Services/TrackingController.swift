@@ -16,6 +16,7 @@ final class TrackingController {
         let bundleIdentifier: String?
         let appPath: String?
         let processIdentifier: pid_t?
+        let focusedDisplayID: CGDirectDisplayID?
         let interactionState: InteractionState
 
         func matches(_ other: ActiveSegment) -> Bool {
@@ -25,6 +26,7 @@ final class TrackingController {
         func sameActivity(as other: ActiveSegment) -> Bool {
             app == other.app && title == other.title && url == other.url
                 && bundleIdentifier == other.bundleIdentifier && appPath == other.appPath
+                && focusedDisplayID == other.focusedDisplayID
         }
 
         func withStart(_ start: Int64) -> ActiveSegment {
@@ -36,6 +38,7 @@ final class TrackingController {
                 bundleIdentifier: bundleIdentifier,
                 appPath: appPath,
                 processIdentifier: processIdentifier,
+                focusedDisplayID: focusedDisplayID,
                 interactionState: interactionState
             )
         }
@@ -49,6 +52,7 @@ final class TrackingController {
                 bundleIdentifier: bundleIdentifier,
                 appPath: appPath,
                 processIdentifier: processIdentifier,
+                focusedDisplayID: focusedDisplayID,
                 interactionState: interactionState
             )
         }
@@ -238,6 +242,10 @@ final class TrackingController {
             bundleIdentifier: application.bundleIdentifier,
             appPath: application.bundleURL?.path,
             processIdentifier: application.processIdentifier,
+            focusedDisplayID: ActiveDisplayResolver.resolveDisplayID(
+                for: application,
+                focusedWindow: focusedWindow(for: application)
+            ),
             interactionState: interactionState(now: now)
         ))
     }
@@ -271,6 +279,7 @@ final class TrackingController {
             "url": segment.url ?? "",
             "bundleId": segment.bundleIdentifier ?? "",
             "appPath": segment.appPath ?? "",
+            "displayId": segment.focusedDisplayID.map(String.init) ?? "",
             "interactionState": segment.interactionState.rawValue
         ]
     }
@@ -374,6 +383,7 @@ final class TrackingController {
             bundleIdentifier: incoming.bundleIdentifier ?? current.bundleIdentifier,
             appPath: incoming.appPath ?? current.appPath,
             processIdentifier: incoming.processIdentifier ?? current.processIdentifier,
+            focusedDisplayID: incoming.focusedDisplayID,
             interactionState: incoming.interactionState
         )
     }
@@ -401,10 +411,11 @@ final class TrackingController {
         let appName = application.localizedName ?? "Unknown Application"
         var title = appName
         var url: String?
+        var focusedWindowElement: AXUIElement?
         if AXIsProcessTrusted() {
             let appElement = AXUIElementCreateApplication(application.processIdentifier)
-            if let windowValue = attribute(kAXFocusedWindowAttribute as CFString, from: appElement) {
-                let window = windowValue as! AXUIElement
+            if let window = focusedWindow(from: appElement) {
+                focusedWindowElement = window
                 title = attribute(kAXTitleAttribute as CFString, from: window) as? String ?? appName
                 if let document = attribute(kAXDocumentAttribute as CFString, from: window) {
                     url = (document as? URL)?.absoluteString ?? document as? String
@@ -422,8 +433,28 @@ final class TrackingController {
             bundleIdentifier: application.bundleIdentifier,
             appPath: application.bundleURL?.path,
             processIdentifier: application.processIdentifier,
+            focusedDisplayID: ActiveDisplayResolver.resolveDisplayID(
+                for: application,
+                focusedWindow: focusedWindowElement
+            ),
             interactionState: interactionState
         )
+    }
+
+    private func focusedWindow(for application: NSRunningApplication) -> AXUIElement? {
+        guard AXIsProcessTrusted() else { return nil }
+        let appElement = AXUIElementCreateApplication(application.processIdentifier)
+        return focusedWindow(from: appElement)
+    }
+
+    private func focusedWindow(from appElement: AXUIElement) -> AXUIElement? {
+        var result: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &result) == .success,
+              let value = result,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return nil
+        }
+        return (value as! AXUIElement)
     }
 
     private func attribute(_ name: CFString, from element: AXUIElement) -> Any? {
@@ -476,7 +507,7 @@ final class TrackingController {
         maybeEnqueueActivitySummary(activityID: activityID, segment: segment, start: start, end: end)
     }
 
-    private func maybeEnqueueActivitySummary(activityID: String, segment: ActiveSegment, start: Int64, end: Int64) {
+    func maybeEnqueueActivitySummary(activityID: String, segment: ActiveSegment, start: Int64, end: Int64) {
         guard segment.interactionState == .handsOn else { return }
 
         let persistedSettings = (try? store.request(operation: "settings.get", payload: [:]) as? [String: Any]) ?? [:]
@@ -519,6 +550,16 @@ final class TrackingController {
                 model: model,
                 code: "screen_recording_permission_missing",
                 message: "Screen Recording permission is required for screenshot summaries."
+            )
+            return
+        }
+        guard segment.focusedDisplayID != nil else {
+            storeActivityAISummarySkipped(
+                activityID: activityID,
+                provider: provider.rawValue,
+                model: model,
+                code: "active_display_unavailable",
+                message: ActivityScreenshotCaptureError.activeDisplayUnavailable.localizedDescription
             )
             return
         }
@@ -567,7 +608,14 @@ final class TrackingController {
         contextKey: String
     ) async {
         do {
-            let screenshot = try screenshotCapture.captureMainDisplay(maxPixelWidth: 1280, jpegQuality: 0.62)
+            guard let displayID = segment.focusedDisplayID else {
+                throw ActivityScreenshotCaptureError.activeDisplayUnavailable
+            }
+            let screenshot = try screenshotCapture.captureDisplay(
+                displayID: displayID,
+                maxPixelWidth: 1280,
+                jpegQuality: 0.62
+            )
             let metadata = activitySummaryMetadata(
                 activityID: activityID,
                 segment: segment,
@@ -792,6 +840,8 @@ final class TrackingController {
             switch error {
             case .screenRecordingPermissionMissing:
                 return ("screen_recording_permission_missing", error.localizedDescription)
+            case .activeDisplayUnavailable:
+                return ("active_display_unavailable", error.localizedDescription)
             case .captureFailed:
                 return ("capture_failed", error.localizedDescription)
             case .encodingFailed:

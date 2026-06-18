@@ -51,9 +51,11 @@ Network access is limited to explicit user-enabled features:
   categories, and optional project context, to the chosen provider. API keys are
   stored in Keychain.
 - **AI screenshot summaries:** disabled by default. When enabled, Oriel may
-  capture a foreground activity screenshot, downscale and JPEG-compress it in
-  memory, and send it with activity metadata to the selected provider. Oriel
-  does not store the screenshot or raw provider response. It stores only the
+  capture a screenshot from the display containing the active app/window,
+  downscale and JPEG-compress it in memory, and send it with activity metadata
+  to the selected provider. If Oriel cannot resolve the active display, it
+  skips that screenshot summary instead of guessing another monitor. Oriel does
+  not store the screenshot or raw provider response. It stores only the
   validated summary JSON, provider/model name, status, sanitized error text,
   dimensions, compressed byte count, and request metadata needed for later
   local summaries.

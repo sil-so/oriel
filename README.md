@@ -75,10 +75,11 @@ Oriel's networked features are opt-in and provider-specific:
 - **Ask AI:** sends the prompt and selected-day context, including project
   names, categories, and optional project context, to the configured AI provider
   when the user submits a question.
-- **AI screenshot summaries:** captures, downscales, and JPEG-compresses a
-  screenshot in memory, then sends it with activity metadata to the selected
-  provider. Oriel stores only validated summary JSON and request metadata needed
-  for local summaries.
+- **AI screenshot summaries:** captures the display containing the active
+  app/window, downscales and JPEG-compresses the screenshot in memory, then
+  sends it with activity metadata to the selected provider. If the active
+  display cannot be resolved, Oriel skips that screenshot summary. Oriel stores
+  only validated summary JSON and request metadata needed for local summaries.
 - **AI daily insights:** sends clustered validated screenshot-summary text,
   sanitized activity context, recent summary opening sentences, and local
   aggregate timing statistics to the configured Ask AI provider when the user
