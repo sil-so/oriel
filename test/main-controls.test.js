@@ -511,6 +511,7 @@ test('opening Projects hides timeline date navigation and closes its open picker
   dom.elTabProjects.click();
 
   assert.equal(element('date-navigation').classList.contains('hidden'), true);
+  assert.equal(element('timeline-navigation-controls').classList.contains('hidden'), true);
   assert.equal(element('date-picker-popover').classList.contains('hidden'), true);
 });
 

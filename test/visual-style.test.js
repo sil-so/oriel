@@ -240,7 +240,11 @@ test('app-rendered menu options share primitive option classes', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('css/index.css', 'utf8');
   const main = fs.readFileSync('js/main.js', 'utf8');
-  const zoomMenu = html.match(/<div class="[^"]*" id="zoom-dropdown-menu">[\s\S]*?<\/div>\s*<\/div>\s*<div id="timeline-mode-switch"/)?.[0] || '';
+  const zoomMenuStart = html.indexOf('id="zoom-dropdown-menu"');
+  const zoomMenuEnd = html.indexOf('id="timeline-mode-switch"');
+  const zoomMenu = zoomMenuStart > -1 && zoomMenuEnd > zoomMenuStart
+    ? html.slice(zoomMenuStart, zoomMenuEnd)
+    : '';
 
   assert.match(css, /\.menu-option,\s*\n\.custom-select-option\s*\{/);
   assert.match(css, /\.menu-option\.is-selected,\s*\n\.custom-select-option\.is-selected\s*\{/);

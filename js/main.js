@@ -4082,10 +4082,25 @@ function setupMainEventListeners() {
     });
 }
 
+function setTimelineNavigationControlsVisible(isVisible) {
+    const timelineControls = document.getElementById('timeline-navigation-controls');
+    if (!timelineControls) return;
+
+    timelineControls.classList.toggle('hidden', !isVisible);
+    if (isVisible) return;
+
+    const zoomMenu = document.getElementById('zoom-dropdown-menu');
+    const zoomCaret = document.getElementById('zoom-dropdown-caret');
+    zoomMenu?.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto');
+    zoomMenu?.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+    zoomCaret?.classList.remove('rotate-180');
+}
+
 function setDateNavigationVisible(isVisible) {
     const dateNavigation = document.getElementById('date-navigation');
     if (!dateNavigation) return;
     if (!isVisible) closeDatePicker();
+    setTimelineNavigationControlsVisible(isVisible);
     dateNavigation.classList.toggle('hidden', !isVisible);
 }
 

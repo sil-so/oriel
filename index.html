@@ -40,47 +40,6 @@
                 </span>
             </div>
 
-            <div class="relative" id="zoom-dropdown-container">
-                <button class="app-control w-full flex items-center justify-between px-3" id="zoom-dropdown-btn">
-                    <span class="flex items-center gap-1.5">
-                        <i class="ph ph-magnifying-glass-plus text-accent"></i>
-                        <span id="zoom-dropdown-label">5 min</span>
-                    </span>
-                    <i class="ph ph-caret-down transition-transform duration-200" id="zoom-dropdown-caret"></i>
-                </button>
-                <div class="popover absolute top-[calc(100%+4px)] left-0 w-full p-1.5 transition-all duration-200 opacity-0 scale-95 pointer-events-none z-50 flex flex-col gap-0.5" id="zoom-dropdown-menu">
-                    <button class="menu-option" data-value="1">
-                        <span>1 min</span>
-                        <i class="ph ph-check menu-option-check"></i>
-                    </button>
-                    <button class="menu-option is-selected" data-value="5">
-                        <span>5 min</span>
-                        <i class="ph ph-check menu-option-check is-visible"></i>
-                    </button>
-                    <button class="menu-option" data-value="10">
-                        <span>10 min</span>
-                        <i class="ph ph-check menu-option-check"></i>
-                    </button>
-                    <button class="menu-option" data-value="15">
-                        <span>15 min</span>
-                        <i class="ph ph-check menu-option-check"></i>
-                    </button>
-                    <button class="menu-option" data-value="30">
-                        <span>30 min</span>
-                        <i class="ph ph-check menu-option-check"></i>
-                    </button>
-                    <button class="menu-option" data-value="60">
-                        <span>60 min</span>
-                        <i class="ph ph-check menu-option-check"></i>
-                    </button>
-                </div>
-            </div>
-
-            <div id="timeline-mode-switch" class="app-tab-group timeline-mode-switch flex items-center gap-1 shrink-0" role="radiogroup" aria-label="Timeline view">
-                <button id="timeline-mode-day" class="app-tab timeline-mode-option app-tab--active timeline-mode-option--active" type="button" data-timeline-mode="day" role="radio" aria-checked="true">Day</button>
-                <button id="timeline-mode-week" class="app-tab timeline-mode-option" type="button" data-timeline-mode="week" role="radio" aria-checked="false">Week</button>
-            </div>
-
             <div class="app-tab-group flex items-center gap-1 shrink-0" role="tablist" aria-label="Workspaces">
                 <button class="app-tab app-tab--active" id="tab-timeline" role="tab" aria-selected="true">
                     <i class="ph ph-calendar-blank text-[14px]"></i> Timeline
@@ -102,6 +61,48 @@
             <!-- Date navigation -->
             <div class="flex items-center gap-4" id="date-navigation">
                 <div class="date-picker-with-actions">
+                    <div class="timeline-navigation-controls" id="timeline-navigation-controls">
+                        <div class="relative" id="zoom-dropdown-container">
+                            <button class="app-control w-full flex items-center justify-between px-3" id="zoom-dropdown-btn">
+                                <span class="flex items-center gap-1.5">
+                                    <i class="ph ph-magnifying-glass-plus text-accent"></i>
+                                    <span id="zoom-dropdown-label">5 min</span>
+                                </span>
+                                <i class="ph ph-caret-down transition-transform duration-200" id="zoom-dropdown-caret"></i>
+                            </button>
+                            <div class="popover absolute top-[calc(100%+4px)] left-0 w-full p-1.5 transition-all duration-200 opacity-0 scale-95 pointer-events-none z-50 flex flex-col gap-0.5" id="zoom-dropdown-menu">
+                                <button class="menu-option" data-value="1">
+                                    <span>1 min</span>
+                                    <i class="ph ph-check menu-option-check"></i>
+                                </button>
+                                <button class="menu-option is-selected" data-value="5">
+                                    <span>5 min</span>
+                                    <i class="ph ph-check menu-option-check is-visible"></i>
+                                </button>
+                                <button class="menu-option" data-value="10">
+                                    <span>10 min</span>
+                                    <i class="ph ph-check menu-option-check"></i>
+                                </button>
+                                <button class="menu-option" data-value="15">
+                                    <span>15 min</span>
+                                    <i class="ph ph-check menu-option-check"></i>
+                                </button>
+                                <button class="menu-option" data-value="30">
+                                    <span>30 min</span>
+                                    <i class="ph ph-check menu-option-check"></i>
+                                </button>
+                                <button class="menu-option" data-value="60">
+                                    <span>60 min</span>
+                                    <i class="ph ph-check menu-option-check"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="timeline-mode-switch" class="app-tab-group timeline-mode-switch flex items-center gap-1 shrink-0" role="radiogroup" aria-label="Timeline view">
+                            <button id="timeline-mode-day" class="app-tab timeline-mode-option app-tab--active timeline-mode-option--active" type="button" data-timeline-mode="day" role="radio" aria-checked="true">Day</button>
+                            <button id="timeline-mode-week" class="app-tab timeline-mode-option" type="button" data-timeline-mode="week" role="radio" aria-checked="false">Week</button>
+                        </div>
+                    </div>
                     <div class="app-control px-4 flex items-center gap-2 cursor-pointer relative" id="date-picker-trigger">
                         <i class="ph ph-calendar-blank text-gray-400"></i>
                         <span id="date-display">Wednesday, 20th May 2026</span>
