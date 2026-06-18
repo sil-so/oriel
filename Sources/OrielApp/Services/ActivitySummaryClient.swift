@@ -106,9 +106,22 @@ final class ProviderActivitySummaryClient: ActivitySummaryClient {
     private func instruction(metadata: ActivitySummaryMetadata) throws -> String {
         """
         Analyze the screenshot using the metadata as source of truth for app identity.
-        Return only a JSON object with required fields: app, bundle_id, window_or_page,
-        project_or_context, activity, category, action, objects, confidence, evidence,
-        uncertainties, cloud_safe_summary, sensitivity, metadata_conflicts.
+        Return only a JSON object describing the observed activity.
+
+        Required fields:
+        - window_or_page: visible window, document, page, or surface name. Use metadata title only when the image supports it.
+        - project_or_context: best visible project, task, topic, website, or context. Use an empty string if unclear.
+        - activity: one concrete sentence fragment describing what the user appears to be doing.
+        - action: a short lowercase gerund or verb phrase such as reading, writing, reviewing, editing, testing, debugging, comparing, configuring, or viewing.
+        - objects: concrete visible objects, documents, products, files, topics, or tools. Return [] if none are clear.
+        - confidence: visual confidence score from 0 to 1 for the observed activity.
+        - evidence: brief visible cues supporting the activity. Return [] if none are useful.
+        - uncertainties: brief uncertainties. Return [] if none. Do not use strings like "None".
+        - cloud_safe_summary: one short privacy-conscious sentence describing the activity without secrets, raw URLs, or unnecessary personal data.
+        - sensitivity: one of low, medium, or high. Use high for personal, credential, payment, confidential, or proprietary code/content.
+        - metadata_conflicts: only real conflicts between metadata and image evidence. Return [] if none. Do not use strings like "None".
+
+        Do not return app, bundle_id, or category. Oriel derives those locally from metadata and normalized activity context.
         Metadata JSON:
         \(try metadataJSON(metadata))
         """

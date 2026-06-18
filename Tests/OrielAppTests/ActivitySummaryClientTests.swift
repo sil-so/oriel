@@ -18,8 +18,12 @@ final class ActivitySummaryClientTests: XCTestCase {
             let body = try XCTUnwrap(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
             XCTAssertEqual(response.summary["app"] as? String, "Safari")
             XCTAssertEqual(response.summary["bundle_id"] as? String, "com.apple.Safari")
+            XCTAssertEqual(response.summary["category"] as? String, "research")
+            XCTAssertEqual(response.summary["action"] as? String, "reading")
             XCTAssertTrue(body.contains("activity-test"))
             XCTAssertTrue(body.contains("9j"))
+            XCTAssertTrue(body.contains("Return only a JSON object describing the observed activity."))
+            try assertObservationSchema(in: body)
 
             switch provider {
             case "openai":
@@ -114,7 +118,7 @@ final class ActivitySummaryClientTests: XCTestCase {
 
     private func successResponseData(for provider: String) -> Data {
         let summary = """
-        {"app":"Safari","bundle_id":"com.apple.Safari","window_or_page":"Example","project_or_context":"Website","activity":"Reading documentation","category":"research","action":"reading","objects":["documentation"],"confidence":0.82,"evidence":["browser page"],"uncertainties":[],"cloud_safe_summary":"Reviewed documentation.","sensitivity":"low","metadata_conflicts":[]}
+        {"window_or_page":"Example","project_or_context":"Website","activity":"Reading documentation","action":"reading","objects":["documentation"],"confidence":0.82,"evidence":["browser page"],"uncertainties":[],"cloud_safe_summary":"Reviewed documentation.","sensitivity":"low","metadata_conflicts":[]}
         """
         switch provider {
         case "openai":
@@ -132,6 +136,45 @@ final class ActivitySummaryClientTests: XCTestCase {
         let data = try! JSONEncoder().encode(value)
         let encoded = String(data: data, encoding: .utf8)!
         return String(encoded.dropFirst().dropLast())
+    }
+
+    private func assertObservationSchema(in body: String) throws {
+        let data = try XCTUnwrap(body.data(using: .utf8))
+        let object = try JSONSerialization.jsonObject(with: data)
+        let schema = try XCTUnwrap(findActivitySummarySchema(in: object))
+        let required = try XCTUnwrap(schema["required"] as? [String])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+
+        XCTAssertFalse(required.contains("app"))
+        XCTAssertFalse(required.contains("bundle_id"))
+        XCTAssertFalse(required.contains("category"))
+        XCTAssertNil(properties["app"])
+        XCTAssertNil(properties["bundle_id"])
+        XCTAssertNil(properties["category"])
+        XCTAssertNotNil(properties["window_or_page"])
+        XCTAssertNotNil(properties["cloud_safe_summary"])
+    }
+
+    private func findActivitySummarySchema(in value: Any) -> [String: Any]? {
+        if let object = value as? [String: Any] {
+            if let properties = object["properties"] as? [String: Any],
+               properties.keys.contains("window_or_page"),
+               object["required"] is [String] {
+                return object
+            }
+            for child in object.values {
+                if let schema = findActivitySummarySchema(in: child) {
+                    return schema
+                }
+            }
+        } else if let array = value as? [Any] {
+            for child in array {
+                if let schema = findActivitySummarySchema(in: child) {
+                    return schema
+                }
+            }
+        }
+        return nil
     }
 }
 
