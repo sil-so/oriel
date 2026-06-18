@@ -390,14 +390,17 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
         return (formatter.string(from: startDate), formatter.string(from: endDate))
     }
 
-    private func testScreenshotSummary(payload: [String: Any]) async throws -> [String: Any] {
+    func testScreenshotSummary(payload: [String: Any]) async throws -> [String: Any] {
         guard let provider = AIProvider.normalize(stringValue(payload["provider"]) ?? "") else {
             throw ActivitySummaryClientError.unsupportedProvider
         }
         let model = stringValue(payload["model"]) ?? provider.defaultModel
         let timeoutSeconds = clampedInt(payload["timeoutSeconds"], defaultValue: 20, min: 5, max: 60)
-        let screenshot = try screenshotCapture.captureMainDisplay(maxPixelWidth: 1280, jpegQuality: 0.62)
         let activity = currentActivityProvider(["date": todayString()]) ?? [:]
+        guard let displayID = displayID(from: activity["displayId"]) else {
+            throw ActivityScreenshotCaptureError.activeDisplayUnavailable
+        }
+        let screenshot = try screenshotCapture.captureDisplay(displayID: displayID, maxPixelWidth: 1280, jpegQuality: 0.62)
         let app = stringValue(activity["app"]) ?? "Oriel"
         let title = stringValue(activity["title"]) ?? app
         let url = stringValue(activity["url"])
@@ -464,6 +467,25 @@ final class OrielBridge: NSObject, WKScriptMessageHandlerWithReply {
             return value.int64Value
         case let value as String:
             return Int64(value)
+        default:
+            return nil
+        }
+    }
+
+    private func displayID(from value: Any?) -> CGDirectDisplayID? {
+        switch value {
+        case let value as CGDirectDisplayID:
+            return value
+        case let value as Int:
+            return value >= 0 ? CGDirectDisplayID(value) : nil
+        case let value as Int64:
+            return value >= 0 && value <= Int64(UInt32.max) ? CGDirectDisplayID(value) : nil
+        case let value as NSNumber:
+            let rawValue = value.int64Value
+            return rawValue >= 0 && rawValue <= Int64(UInt32.max) ? CGDirectDisplayID(rawValue) : nil
+        case let value as String:
+            guard let rawValue = UInt32(value.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+            return CGDirectDisplayID(rawValue)
         default:
             return nil
         }
