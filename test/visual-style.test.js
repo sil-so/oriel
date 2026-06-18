@@ -100,7 +100,8 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
   assert.doesNotMatch(css, /\.modal-scroll-content\s*>\s*:last-child\s*\{/);
   assert.match(css, /\.settings-section-panel\s*\{[^}]*padding-bottom:\s*22px/s);
   assert.doesNotMatch(css, /\.settings-section-panel::after\s*\{/);
-  assert.match(css, /#proj-details-entries-list::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*0 0 22px/s);
+  assert.match(css, /\.project-time-history\s*\{[^}]*padding-bottom:\s*22px/s);
+  assert.doesNotMatch(css, /#proj-details-entries-list::after/);
   assert.doesNotMatch(html.match(/id="confirm-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
   assert.doesNotMatch(html.match(/id="time-entry-modal"[\s\S]*?<div class="([^"]*modal-panel[^"]*)"/)?.[1] || '', /\bmodal-panel--scroll\b/);
 });
@@ -624,7 +625,7 @@ test('projects statistics and AI insights use semantic design-system classes', (
     'project-breakdown-card',
     'project-detail-stat',
     'project-task-row',
-    'project-entry-row',
+    'project-time-history-day',
     'report-row-title',
     'report-row-percent',
     'ai-insights-card-metadata'
@@ -847,6 +848,26 @@ test('project details manual date uses the shared custom calendar popover patter
   assert.match(css, /\.project-manual-date-trigger\s*\{/);
   assert.match(main, /setupDatePicker\('projectManual'\)/);
   assert.match(main, /proj-details-manual-date-label/);
+});
+
+test('project details time history replaces historical entry rows with a shared calendar grid', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('css/index.css', 'utf8');
+  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const main = fs.readFileSync('js/main.js', 'utf8');
+
+  assert.doesNotMatch(html, /Historical Entries Log/);
+  assert.match(html, />\s*Time History\s*</);
+  assert.doesNotMatch(html, /id="proj-details-entries-list"/);
+  assert.match(html, /id="proj-details-time-history-month-label"/);
+  assert.match(html, /id="proj-details-time-history-days"[^>]*class="[^"]*\bproject-time-history-days\b/);
+  assert.match(css, /\.project-time-history-day\s*\{/);
+  assert.match(projects, /calendar-day--today/);
+  assert.match(projects, /calendar-day--selected/);
+  assert.match(projects, /calendar-day--outside/);
+  assert.doesNotMatch(projects, /project-entry-row/);
+  assert.doesNotMatch(projects, /deleteProjectDetailEntry/);
+  assert.match(main, /window\.openTimelineDate\s*=/);
 });
 
 test('activity popup child rows remove favicon gutters and expose alignment contracts', () => {
