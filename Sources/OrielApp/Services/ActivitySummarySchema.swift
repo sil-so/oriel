@@ -42,12 +42,9 @@ enum ActivitySummaryValidationError: Error, CustomStringConvertible {
 
 struct ActivitySummarySchemaValidator {
     private let stringFields = [
-        "app",
-        "bundle_id",
         "window_or_page",
         "project_or_context",
         "activity",
-        "category",
         "action",
         "cloud_safe_summary",
         "sensitivity"
@@ -62,16 +59,21 @@ struct ActivitySummarySchemaValidator {
     var jsonSchema: [String: Any] {
         var properties: [String: Any] = [:]
         for field in stringFields {
-            properties[field] = ["type": "string"]
+            properties[field] = [
+                "type": "string",
+                "description": description(for: field)
+            ]
         }
         for field in stringArrayFields {
             properties[field] = [
                 "type": "array",
+                "description": description(for: field),
                 "items": ["type": "string"]
             ]
         }
         properties["confidence"] = [
             "type": "number",
+            "description": "A visual confidence score from 0 to 1 for the observed activity.",
             "minimum": 0,
             "maximum": 1
         ]
@@ -86,11 +88,15 @@ struct ActivitySummarySchemaValidator {
     var geminiResponseSchema: [String: Any] {
         var properties: [String: Any] = [:]
         for field in stringFields {
-            properties[field] = ["type": "STRING"]
+            properties[field] = [
+                "type": "STRING",
+                "description": description(for: field)
+            ]
         }
         for field in stringArrayFields {
             properties[field] = [
                 "type": "ARRAY",
+                "description": description(for: field),
                 "items": ["type": "STRING"]
             ]
         }
@@ -125,18 +131,39 @@ struct ActivitySummarySchemaValidator {
             throw ActivitySummaryValidationError.invalidField("confidence")
         }
 
-        var conflicts = normalized["metadata_conflicts"] as? [String] ?? []
-        if (normalized["app"] as? String) != metadata.frontmostAppName {
-            conflicts.append("app provider value did not match captured metadata")
-        }
-        if (normalized["bundle_id"] as? String) != metadata.bundleID {
-            conflicts.append("bundle_id provider value did not match captured metadata")
-        }
-        normalized["app"] = metadata.frontmostAppName
-        normalized["bundle_id"] = metadata.bundleID
         normalized["confidence"] = min(1, max(0, confidence))
-        normalized["metadata_conflicts"] = Array(Set(conflicts)).sorted()
-        return ActivitySummaryResponse(summary: normalized)
+        return ActivitySummaryResponse(
+            summary: ActivitySummaryNormalizer.normalize(summary: normalized, metadata: metadata)
+        )
+    }
+
+    private func description(for field: String) -> String {
+        switch field {
+        case "window_or_page":
+            return "Visible window, document, page, or surface name. Use metadata title only when the image supports it."
+        case "project_or_context":
+            return "Best visible project, task, topic, website, or context. Use an empty string if unclear."
+        case "activity":
+            return "One concrete sentence fragment describing what the user appears to be doing."
+        case "action":
+            return "A short lowercase gerund or verb phrase such as reading, writing, reviewing, editing, testing, debugging, comparing, configuring, or viewing."
+        case "objects":
+            return "Concrete visible objects, documents, products, files, topics, or tools. Return [] if none are clear."
+        case "confidence":
+            return "A visual confidence score from 0 to 1 for the observed activity."
+        case "evidence":
+            return "Brief visible cues supporting the activity. Return [] if none are useful."
+        case "uncertainties":
+            return "Brief uncertainties. Return [] if none. Do not use strings like None."
+        case "cloud_safe_summary":
+            return "One short privacy-conscious sentence describing the activity without secrets, raw URLs, or unnecessary personal data."
+        case "sensitivity":
+            return "One of low, medium, or high. Use high for personal, credential, payment, confidential, or proprietary code/content."
+        case "metadata_conflicts":
+            return "Only real conflicts between metadata and image evidence. Return [] if none. Do not use strings like None."
+        default:
+            return ""
+        }
     }
 
     private func doubleValue(_ value: Any?) -> Double? {

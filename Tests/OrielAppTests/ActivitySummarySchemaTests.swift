@@ -6,20 +6,17 @@ final class ActivitySummarySchemaTests: XCTestCase {
         let validator = ActivitySummarySchemaValidator()
         let response = try validator.validate(
             object: [
-                "app": "Guessed App",
-                "bundle_id": "guessed.bundle",
                 "window_or_page": "Pull Request",
                 "project_or_context": "Oriel",
                 "activity": "Reviewing implementation plan",
-                "category": "engineering",
-                "action": "reviewing",
+                "action": "Reviewing code changes and test results",
                 "objects": ["plan", "code"],
                 "confidence": 1.2,
                 "evidence": ["visible code review"],
                 "uncertainties": ["exact repository private"],
                 "cloud_safe_summary": "Reviewed a software implementation plan.",
-                "sensitivity": "low",
-                "metadata_conflicts": []
+                "sensitivity": "Public",
+                "metadata_conflicts": ["None"]
             ],
             metadata: ActivitySummaryMetadata(
                 activityID: "activity-1",
@@ -41,9 +38,41 @@ final class ActivitySummarySchemaTests: XCTestCase {
 
         XCTAssertEqual(response.app, "Xcode")
         XCTAssertEqual(response.bundleID, "com.apple.dt.Xcode")
+        XCTAssertEqual(response.summary["category"] as? String, "software_development")
+        XCTAssertEqual(response.summary["action"] as? String, "reviewing")
+        XCTAssertEqual(response.summary["sensitivity"] as? String, "low")
         XCTAssertEqual(response.confidence, 1)
-        XCTAssertTrue(response.metadataConflicts.contains { $0.contains("app") })
-        XCTAssertTrue(response.metadataConflicts.contains { $0.contains("bundle_id") })
+        XCTAssertEqual(response.metadataConflicts, [])
+    }
+
+    func testLegacySummaryNormalizerCanonicalizesFreeformTaxonomy() {
+        let normalized = ActivitySummaryNormalizer.normalize(
+            summary: [
+                "app": "Guessed App",
+                "bundle_id": "guessed.bundle",
+                "window_or_page": "ChatGPT",
+                "project_or_context": "Oriel",
+                "activity": "Developing and debugging activity summary code",
+                "category": "Development",
+                "action": "Viewing code changes",
+                "objects": ["Swift", "tests"],
+                "confidence": 0.93,
+                "evidence": ["editor visible"],
+                "uncertainties": [],
+                "cloud_safe_summary": "The user is reviewing code changes in a development tool.",
+                "sensitivity": "proprietary code",
+                "metadata_conflicts": ["none"]
+            ],
+            fallbackApp: "Codex",
+            fallbackBundleID: "com.openai.chat"
+        )
+
+        XCTAssertEqual(normalized["app"] as? String, "Codex")
+        XCTAssertEqual(normalized["bundle_id"] as? String, "com.openai.chat")
+        XCTAssertEqual(normalized["category"] as? String, "software_development")
+        XCTAssertEqual(normalized["action"] as? String, "reviewing")
+        XCTAssertEqual(normalized["sensitivity"] as? String, "high")
+        XCTAssertEqual(normalized["metadata_conflicts"] as? [String], [])
     }
 
     func testValidatorRejectsMissingRequiredField() {
@@ -51,12 +80,9 @@ final class ActivitySummarySchemaTests: XCTestCase {
 
         XCTAssertThrowsError(try validator.validate(
             object: [
-                "app": "Xcode",
-                "bundle_id": "com.apple.dt.Xcode",
                 "window_or_page": "OrielApp.swift",
                 "project_or_context": "Oriel",
                 "activity": "Coding",
-                "category": "engineering",
                 "action": "editing",
                 "objects": ["Swift"],
                 "confidence": 0.8,

@@ -49,8 +49,13 @@ enum DailySummaryContextBuilder {
     private static func clusteredActivitySummaries(_ rows: [[String: Any]]) -> [[String: Any]] {
         var clusters: [String: SummaryCluster] = [:]
         for row in rows {
-            let summary = row["summary"] as? [String: Any] ?? [:]
-            let app = string(row["app"]) ?? string(summary["app"]) ?? ""
+            let rawSummary = row["summary"] as? [String: Any] ?? [:]
+            let summary = ActivitySummaryNormalizer.normalize(
+                summary: rawSummary,
+                fallbackApp: string(row["app"]) ?? "",
+                fallbackBundleID: string(row["bundleId"]) ?? string(row["bundle_id"]) ?? ""
+            )
+            let app = string(summary["app"]) ?? string(row["app"]) ?? ""
             let project = string(summary["project_or_context"]) ?? ""
             let category = string(summary["category"]) ?? ""
             let key = [

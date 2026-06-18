@@ -93,7 +93,7 @@ final class OrielBridgeDailySummaryTests: XCTestCase {
         XCTAssertEqual(longest["app"] as? String, "Xcode")
         XCTAssertEqual(longest["durationMs"] as? Int64, 2 * 60 * 60 * 1000)
         let categories = try XCTUnwrap(metrics["categoryBreakdown"] as? [[String: Any]])
-        XCTAssertEqual(categories.first?["name"] as? String, "engineering")
+        XCTAssertEqual(categories.first?["name"] as? String, "software_development")
         let requestBody = try XCTUnwrap(capturedRequest?.httpBody.flatMap { String(data: $0, encoding: .utf8) })
         XCTAssertTrue(requestBody.contains("activityStats"))
         XCTAssertTrue(requestBody.contains("recentSummaryOpeners"))

@@ -3,6 +3,71 @@ import XCTest
 @testable import OrielApp
 
 final class DailySummaryContextBuilderTests: XCTestCase {
+    func testBuildNormalizesLegacyScreenshotSummaryTaxonomyForClustering() throws {
+        let base = try millis(2026, 6, 18, hour: 9, minute: 0)
+        let output = DailySummaryContextBuilder.build(
+            date: "2026-06-18",
+            activitySummaries: [
+                [
+                    "activityId": "legacy-a",
+                    "start": base,
+                    "end": base + 30 * 60 * 1000,
+                    "app": "Codex",
+                    "title": "ActivitySummaryClient.swift",
+                    "bundleId": "com.openai.chat",
+                    "summary": [
+                        "app": "Guessed App",
+                        "bundle_id": "guessed.bundle",
+                        "window_or_page": "ActivitySummaryClient.swift",
+                        "project_or_context": "Oriel",
+                        "activity": "Developing screenshot summary prompt code",
+                        "category": "Development",
+                        "action": "Viewing code changes",
+                        "objects": ["Swift"],
+                        "cloud_safe_summary": "Reviewed screenshot summary code.",
+                        "sensitivity": "proprietary code",
+                        "metadata_conflicts": ["none"]
+                    ]
+                ],
+                [
+                    "activityId": "legacy-b",
+                    "start": base + 30 * 60 * 1000,
+                    "end": base + 45 * 60 * 1000,
+                    "app": "Codex",
+                    "title": "ActivitySummarySchemaTests.swift",
+                    "bundleId": "com.openai.chat",
+                    "summary": [
+                        "window_or_page": "ActivitySummarySchemaTests.swift",
+                        "project_or_context": "Oriel",
+                        "activity": "Reviewing screenshot summary tests",
+                        "category": "software development",
+                        "action": "Reviewing",
+                        "objects": ["Swift tests"],
+                        "cloud_safe_summary": "Reviewed screenshot summary tests.",
+                        "sensitivity": "Internal",
+                        "metadata_conflicts": []
+                    ]
+                ]
+            ],
+            activities: [],
+            timeEntries: [],
+            recentDailySummaries: []
+        )
+
+        XCTAssertEqual(output.activitySummaries.count, 1)
+        let cluster = try XCTUnwrap(output.activitySummaries.first)
+        XCTAssertEqual(cluster["app"] as? String, "Codex")
+        XCTAssertEqual(cluster["projectOrContext"] as? String, "Oriel")
+        XCTAssertEqual(cluster["category"] as? String, "software_development")
+        XCTAssertEqual(cluster["summaryCount"] as? Int, 2)
+        XCTAssertEqual(cluster["actions"] as? [String], ["reviewing"])
+
+        let stats = try XCTUnwrap(output.dayContext["activityStats"] as? [String: Any])
+        let categories = try XCTUnwrap(stats["summaryCategories"] as? [[String: Any]])
+        XCTAssertEqual(categories.first?["name"] as? String, "software_development")
+        XCTAssertEqual(categories.first?["summaryCount"] as? Int, 2)
+    }
+
     func testBuildClustersEvidenceAndComputesSanitizedStats() throws {
         let base = try millis(2026, 6, 7, hour: 9, minute: 0)
         let output = DailySummaryContextBuilder.build(
@@ -98,7 +163,7 @@ final class DailySummaryContextBuilderTests: XCTestCase {
         )
 
         XCTAssertEqual(output.activitySummaries.count, 2)
-        let engineeringCluster = try XCTUnwrap(output.activitySummaries.first { ($0["category"] as? String) == "engineering" })
+        let engineeringCluster = try XCTUnwrap(output.activitySummaries.first { ($0["category"] as? String) == "software_development" })
         XCTAssertEqual(engineeringCluster["summaryCount"] as? Int, 3)
         XCTAssertEqual(engineeringCluster["app"] as? String, "Xcode")
         XCTAssertEqual(engineeringCluster["projectOrContext"] as? String, "Oriel")
@@ -119,7 +184,7 @@ final class DailySummaryContextBuilderTests: XCTestCase {
         XCTAssertEqual(topApps.first?["percent"] as? Int, 80)
 
         let categories = try XCTUnwrap(stats["summaryCategories"] as? [[String: Any]])
-        XCTAssertEqual(categories.first?["name"] as? String, "engineering")
+        XCTAssertEqual(categories.first?["name"] as? String, "software_development")
         XCTAssertEqual(categories.first?["summaryCount"] as? Int, 3)
 
         let actions = try XCTUnwrap(stats["summaryActions"] as? [[String: Any]])
@@ -263,7 +328,7 @@ final class DailySummaryContextBuilderTests: XCTestCase {
 
         let categories = try XCTUnwrap(metrics["categoryBreakdown"] as? [[String: Any]])
         XCTAssertTrue(categories.contains { category in
-            (category["name"] as? String) == "engineering"
+            (category["name"] as? String) == "software_development"
                 && (category["summaryCount"] as? Int) == 1
         })
 
