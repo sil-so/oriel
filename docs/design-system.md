@@ -6,8 +6,8 @@ Oriel uses a dense, neutral dark macOS productivity interface. The system should
 feel calm, local, precise, and task-focused. Consistency matters more than visual
 novelty.
 
-The current implementation is a bundled static web UI in `index.html`, `css/`,
-and `js/`. Shared primitives should be CSS class contracts and small existing
+The current implementation is a bundled static web UI in `web/index.html`, `web/css/`,
+and `web/js/`. Shared primitives should be CSS class contracts and small existing
 template/helper cleanups, not a new UI framework.
 
 ## Theme And Tokens
@@ -20,7 +20,7 @@ while the neutral system is being normalized.
 
 Canonical token source:
 
-- Color, radius, shadow, focus, and state tokens live in `css/index.css`.
+- Color, radius, shadow, focus, and state tokens live in `web/css/index.css`.
 - Tailwind utility use in markup and JS-rendered templates should resolve toward
   shared app classes instead of one-off arbitrary values.
 - Hard-coded colors are allowed only for project identity swatches and chart
@@ -174,5 +174,5 @@ swift test
 ```
 
 Run `npm run build:assets` after Tailwind input, vendored assets, or dependency
-changes. Run `./script/build_and_run.sh` and visually inspect the local app for
+changes. Run `./tools/scripts/build_and_run.sh` and visually inspect the local app for
 meaningful UI changes.

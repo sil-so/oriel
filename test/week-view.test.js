@@ -155,7 +155,7 @@ function loadWeekViewContext() {
   context.window = { ...context.window, ...context };
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/week-view.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/week-view.js', 'utf8'), context);
 
   return {
     context,

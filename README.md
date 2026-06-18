@@ -117,9 +117,9 @@ flowchart TD
 | --- | --- |
 | `Sources/OrielApp` | App shell, WebKit host, bridge, capture, preferences, Keychain, AI, icons, SQLite persistence |
 | `Sources/OrielBrowserBridge` | Native Messaging helper for the optional browser extension |
-| `index.html`, `css/`, `js/` | Bundled frontend UI |
-| `assets/vendor/` | Vendored UI font/icon assets, so normal app use does not rely on CDNs |
-| `server.js` | Loopback-only development fallback, not a production service boundary |
+| `web/index.html`, `web/css/`, `web/js/` | Bundled frontend UI |
+| `web/assets/vendor/` | Vendored UI font/icon assets, so normal app use does not rely on CDNs |
+| `tools/dev-server/server.js` | Loopback-only development fallback, not a production service boundary |
 | `Tests/OrielAppTests/` | Swift tests for native services and persistence |
 | `test/` | Node test suite for frontend, bridge, safety, and compatibility behavior |
 
@@ -141,14 +141,14 @@ npm install
 npm run build:assets
 swift test
 npm test
-./script/build_and_run.sh
+./tools/scripts/build_and_run.sh
 ```
 
-`./script/build_and_run.sh` builds `OrielApp` and `OrielBrowserBridge`, stages a
+`./tools/scripts/build_and_run.sh` builds `OrielApp` and `OrielBrowserBridge`, stages a
 local `build/Oriel.app`, signs it for local execution, stops stale local
 app/helper processes, and opens the rebuilt app.
 
-Use `./script/build_and_run.sh --verify` to build and stage without launching.
+Use `./tools/scripts/build_and_run.sh --verify` to build and stage without launching.
 
 <details>
 <summary>Browser Companion developer setup</summary>
@@ -180,7 +180,7 @@ swift test
 Run `npm run build:assets` after changing Tailwind input, vendored frontend
 assets, or package dependencies.
 
-Run `./script/build_and_run.sh` after app changes when you need to verify the
+Run `./tools/scripts/build_and_run.sh` after app changes when you need to verify the
 running local app matches the source.
 
 ## Maintainer Surface

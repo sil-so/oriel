@@ -105,10 +105,10 @@ function loadAiSidebarContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
   context.cleanTitle = title => String(title || '').replace(/\s+-\s+Brave Browser$/, '');
-  vm.runInContext(fs.readFileSync('js/ai-settings.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/ai-sidebar.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/ai-settings.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/ai-sidebar.js', 'utf8'), context);
   return context;
 }
 
@@ -1198,9 +1198,9 @@ test('Ask AI marks grouped suggestion cards as assigned after modal save complet
 });
 
 test('Ask AI markup uses Preferences configuration and explicit loading affordance', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const styles = fs.readFileSync('css/index.css', 'utf8');
-  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const styles = fs.readFileSync('web/css/index.css', 'utf8');
+  const script = fs.readFileSync('web/js/ai-sidebar.js', 'utf8');
   const aiPanelBlock = styles.match(/\.sidebar-panel--ai\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
 
   assert.match(markup, /id="ai-settings-button"/);
@@ -1221,10 +1221,10 @@ test('Ask AI markup uses Preferences configuration and explicit loading affordan
 });
 
 test('Ask AI UI keeps provider status in settings and exposes prompt chips', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const styles = fs.readFileSync('css/index.css', 'utf8');
-  const script = fs.readFileSync('js/ai-sidebar.js', 'utf8');
-  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const styles = fs.readFileSync('web/css/index.css', 'utf8');
+  const script = fs.readFileSync('web/js/ai-sidebar.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('web/js/ai-settings.js', 'utf8');
   const promptChipMatches = markup.match(/class="ai-prompt-chip"/g) || [];
   const tabGroupBlock = styles.match(/\.sidebar-tab-group\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
   const composerBlock = styles.match(/\.ai-composer\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
@@ -1307,7 +1307,7 @@ test('Ask AI UI keeps provider status in settings and exposes prompt chips', () 
 });
 
 test('AI screenshot test feedback stays next to the test action', async () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
   const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
   const testButtonIndex = aiPanel.indexOf('id="settings-ai-screenshot-test-button"');
   const testFeedbackIndex = aiPanel.indexOf('id="settings-ai-screenshot-test-feedback"');
@@ -1360,8 +1360,8 @@ test('AI screenshot test handles missing key and native fallback in screenshot f
 });
 
 test('AI settings labels and screenshot frequency help copy are clear', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const styles = fs.readFileSync('web/css/index.css', 'utf8');
   const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
   const modalBody = markup.slice(markup.indexOf('id="settings-modal-body"'), markup.indexOf('</div>\n\n        </div>\n    </div>\n\n    <!-- MODAL: Create/Edit Time Entry -->'));
 
@@ -1385,7 +1385,7 @@ test('AI settings labels and screenshot frequency help copy are clear', () => {
   assert.match(styles, /\.settings-tooltip-term/);
   assert.match(styles, /\.settings-tooltip-detail/);
   assert.match(styles, /\.settings-tooltip-note/);
-  assert.match(fs.readFileSync('js/main.js', 'utf8'), /settingsTooltipList/);
+  assert.match(fs.readFileSync('web/js/main.js', 'utf8'), /settingsTooltipList/);
   assert.match(styles, /\.settings-modal-body\s*\{[\s\S]*overflow-x:\s*hidden/s);
   assert.match(styles, /\.settings-section-panel\s*\{[\s\S]*min-width:\s*0/s);
   assert.match(styles, /\.ai-screenshot-controls-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
@@ -1450,8 +1450,8 @@ test('Ask AI provider dropdown persists the chat provider', async () => {
 });
 
 test('AI model refresh is explicit and confirmation gated', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const script = fs.readFileSync('js/ai-settings.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const script = fs.readFileSync('web/js/ai-settings.js', 'utf8');
   const initBlock = script.match(/function initAiSettings\(\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
   const refreshBlock = script.match(/async function refreshAiModelsForPicker\(picker = 'ask'\) \{(?<body>[\s\S]*?)\n    \}/)?.groups.body || '';
 
@@ -1503,8 +1503,8 @@ test('AI key controls lock saved keys and require explicit edit or confirmed rem
 });
 
 test('AI provider key block relies on provider row key states without duplicate status pill', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const styles = fs.readFileSync('css/index.css', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const styles = fs.readFileSync('web/css/index.css', 'utf8');
   const keyActionsBlock = styles.match(/\.ai-key-actions\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
   const keyActionButtonBlock = styles.match(/\.ai-key-actions \.button-primary,\n\.ai-key-actions \.button-secondary\s*\{(?<body>[\s\S]*?)\n\}/)?.groups.body || '';
   const aiPanel = markup.slice(markup.indexOf('data-settings-section-panel="ai"'), markup.indexOf('data-settings-section-panel="data"'));
@@ -1661,7 +1661,7 @@ test('AI model refresh missing-key error stays inside the open picker and clears
 });
 
 test('AI screenshot provider is concrete and can be configured separately from Ask AI provider', async () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
   const { context, elements, requests } = createAiSettingsDom();
 
   assert.doesNotMatch(markup, /<option value="">Use Ask AI provider<\/option>/);
@@ -1679,7 +1679,7 @@ test('AI screenshot provider is concrete and can be configured separately from A
 });
 
 test('AI screenshot sensitive exclusions render and persist as screenshot-only settings', async () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
   const { context, elements, requests } = createAiSettingsDom();
 
   assert.match(markup, /Sensitive Screenshot Exclusions/);

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { resolveAppBundlePath } from '../app-icon-resolver.js';
+import { resolveAppBundlePath } from '../tools/dev-server/app-icon-resolver.js';
 
 function writeAppBundle(root, folderName, plist) {
   const appPath = path.join(root, `${folderName}.app`);

@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-debug}"
 APP_DIR="$ROOT_DIR/build/Oriel.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -117,10 +117,10 @@ cp -X "$BIN_DIR/OrielBrowserBridge" "$STAGED_CONTENTS_DIR/MacOS/OrielBrowserBrid
 cp -X "$ROOT_DIR/Sources/OrielApp/Support/Info.plist" "$STAGED_CONTENTS_DIR/Info.plist"
 cp -X "$ROOT_DIR/Sources/OrielApp/Support/Oriel.icns" "$STAGED_CONTENTS_DIR/Resources/Oriel.icns"
 cp -X "$ROOT_DIR/Sources/OrielApp/Support/OrielStatusIcon.png" "$STAGED_CONTENTS_DIR/Resources/OrielStatusIcon.png"
-cp -X "$ROOT_DIR/index.html" "$STAGED_WEB_DIR/index.html"
-cp -R -X "$ROOT_DIR/js" "$STAGED_WEB_DIR/js"
-cp -R -X "$ROOT_DIR/css" "$STAGED_WEB_DIR/css"
-cp -R -X "$ROOT_DIR/assets" "$STAGED_WEB_DIR/assets"
+cp -X "$ROOT_DIR/web/index.html" "$STAGED_WEB_DIR/index.html"
+cp -R -X "$ROOT_DIR/web/js" "$STAGED_WEB_DIR/js"
+cp -R -X "$ROOT_DIR/web/css" "$STAGED_WEB_DIR/css"
+cp -R -X "$ROOT_DIR/web/assets" "$STAGED_WEB_DIR/assets"
 signOrielBundle "$STAGED_APP_DIR" strict
 
 stopRunningOrielBundleProcesses

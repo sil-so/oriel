@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 
 test('multi-select toolbar overlays both timeline panes without entering Work Times', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const overlayStart = html.indexOf('id="timeline-selection-overlay"');
   const toolbarStart = html.indexOf('id="multi-select-bar"');
   const workTimesStart = html.indexOf('Work Summary Statistics');
@@ -32,8 +32,8 @@ test('multi-select toolbar overlays both timeline panes without entering Work Ti
 });
 
 test('timeline controls use one visible scrollbar and compact stable controls', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(
     html,
@@ -61,8 +61,8 @@ test('timeline controls use one visible scrollbar and compact stable controls', 
 });
 
 test('timeline controls sit directly before the header date picker', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const timelineControlsStart = html.indexOf('id="timeline-navigation-controls"');
   const zoomStart = html.indexOf('id="zoom-dropdown-container"');
@@ -94,7 +94,7 @@ test('timeline controls sit directly before the header date picker', () => {
 });
 
 test('week timeline keeps sticky headers above scrolling time entries', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const headerRule = css.match(/\.week-time-corner,\s*\.week-day-header\s*\{([\s\S]*?)\}/);
   const cornerRule = css.match(/\.week-time-corner\s*\{([\s\S]*?)\}/);
@@ -147,9 +147,9 @@ test('week timeline keeps sticky headers above scrolling time entries', () => {
 });
 
 test('week current-time button reuses the Day icon-button treatment', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const weekView = fs.readFileSync('js/week-view.js', 'utf8');
-  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const weekView = fs.readFileSync('web/js/week-view.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   const dayButton = html.match(/id="btn-jump-current"[\s\S]*?<i class="([^"]+)"/);
   const weekButton = weekView.match(/id="btn-week-jump-current"[\s\S]*?class="([^"]+)"[\s\S]*?<i class="([^"]+)"/);
@@ -162,8 +162,8 @@ test('week current-time button reuses the Day icon-button treatment', () => {
 });
 
 test('top chrome and zoom dropdown stack above Week sticky headers', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   const chromeRule = css.match(/\.app-chrome\s*\{([\s\S]*?)\}/);
   const headerRule = css.match(/\.week-time-corner,\s*\.week-day-header\s*\{([\s\S]*?)\}/);
@@ -177,7 +177,7 @@ test('top chrome and zoom dropdown stack above Week sticky headers', () => {
 });
 
 test('zoom dropdown rerenders Week mode instead of Day panes', () => {
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.match(
     main,
@@ -186,7 +186,7 @@ test('zoom dropdown rerenders Week mode instead of Day panes', () => {
 });
 
 test('Phosphor bold icons use valid family and icon classes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   assert.doesNotMatch(html, /ph-(?:plus|check)-bold/);
   assert.match(html, /class="ph-bold ph-plus"/);
@@ -194,7 +194,7 @@ test('Phosphor bold icons use valid family and icon classes', () => {
 });
 
 test('tracking exclusion status is hidden while empty', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   assert.match(
     html,
@@ -207,9 +207,9 @@ test('tracking exclusion status is hidden while empty', () => {
 });
 
 test('theme-aware scrollbars use app tokens and stable content gutters', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.match(css, /--scrollbar-size:\s*8px/);
   assert.match(css, /--scrollbar-track:/);
@@ -244,14 +244,14 @@ test('theme-aware scrollbars use app tokens and stable content gutters', () => {
 });
 
 test('timeline scroll panes suppress boundary overscroll bounce', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.timeline-container\s*\{[\s\S]*overscroll-behavior-y:\s*none/s);
   assert.match(css, /\.timeline-container\s*\{[\s\S]*scroll-behavior:\s*auto/s);
 });
 
 test('Activity Stream blocks fit inside timeline row borders', () => {
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
 
   assert.match(timeline, /top:\s*calc\(var\(--row-height\) \* \$\{displayStartRow\} \+ 2px\)/);
   assert.match(timeline, /height:\s*calc\(var\(--row-height\) \* \$\{displayRowSpan\} - 3px\)/);
@@ -259,7 +259,7 @@ test('Activity Stream blocks fit inside timeline row borders', () => {
 });
 
 test('Time Entries hover and drag hit area includes the time label gutter', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const itemsRule = css.match(/#time-entries-items\s*\{([\s\S]*?)\}/);
   const blockRule = css.match(/#time-entries-items \.time-entry-block\s*\{([\s\S]*?)\}/);
@@ -275,8 +275,8 @@ test('Time Entries hover and drag hit area includes the time label gutter', () =
 });
 
 test('Activity Stream header exposes a compact hide-empty-rows toggle', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const activityHeader = html.slice(
     html.indexOf('<h2>Activity Stream</h2>'),
@@ -292,9 +292,9 @@ test('Activity Stream header exposes a compact hide-empty-rows toggle', () => {
 });
 
 test('settings and Work Times panels keep controls aligned and collapsible', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
   const topHeader = html.slice(
     html.indexOf('id="date-navigation"'),
     html.indexOf('<!-- Main Content Workspace -->')
@@ -325,8 +325,8 @@ test('settings and Work Times panels keep controls aligned and collapsible', () 
 });
 
 test('time entry blocks keep pointer drag interactions out of text selection mode', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
 
   assert.match(css, /\.time-entry-block\s*\{[\s\S]*user-select:\s*none/s);
   assert.match(css, /\.time-entry-block \*\s*\{[\s\S]*cursor:\s*inherit/s);

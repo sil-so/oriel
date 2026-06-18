@@ -4,7 +4,7 @@ import {
   matchesTrackingExclusion,
   normalizeTrackingExclusion,
   pruneActivitiesByExclusion
-} from '../tracking-exclusions.js';
+} from '../tools/dev-server/tracking-exclusions.js';
 
 test('tracking exclusions match application, title, and URL values case-insensitively', () => {
   const activity = {

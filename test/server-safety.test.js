@@ -11,7 +11,7 @@ import {
   isRulePayload,
   isTimeEntryPayload,
   parseJsonBody
-} from '../server-safety.js';
+} from '../tools/dev-server/server-safety.js';
 
 function requestWithBody(body) {
   const request = new EventEmitter();
@@ -72,7 +72,7 @@ test('write payload checks reject malformed or unbounded values', () => {
 });
 
 test('server binds the transitional runtime to loopback and allows an isolated data directory', () => {
-  const source = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../tools/dev-server/server.js', import.meta.url), 'utf8');
 
   assert.match(source, /const HOST = process\.env\.ORIEL_HOST \|\| '127\.0\.0\.1'/);
   assert.match(source, /process\.env\.ORIEL_DATA_DIR/);
@@ -81,14 +81,15 @@ test('server binds the transitional runtime to loopback and allows an isolated d
 });
 
 test('transitional server stamps assignment rule responses with createdAt', () => {
-  const source = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../tools/dev-server/server.js', import.meta.url), 'utf8');
 
   assert.match(source, /createdAt:\s*Date\.now\(\)/);
 });
 
 test('static asset responses include an SVG image content type', () => {
-  const source = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../tools/dev-server/server.js', import.meta.url), 'utf8');
 
   assert.match(source, /ext === '\.svg'/);
   assert.match(source, /image\/svg\+xml/);
+  assert.match(source, /realSafePath === realWebRoot \|\| realSafePath\.startsWith/);
 });

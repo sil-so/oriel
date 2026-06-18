@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { resolveNativeTrackerCommand } from '../native-tracker.js';
+import { resolveNativeTrackerCommand } from '../tools/dev-server/native-tracker.js';
 
 function createFsStub({ sourceMtimeMs = 2000, binaryMtimeMs = 1000, binaryExists = true } = {}) {
   return {

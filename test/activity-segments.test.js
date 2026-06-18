@@ -10,7 +10,7 @@ import {
   isIdleSegment,
   normalizeActivitySegments,
   splitSegmentByLocalDay
-} from '../activity-segments.js';
+} from '../tools/dev-server/activity-segments.js';
 
 test('idle detection closes active capture at the grace-period cutoff after delayed polling', () => {
   const now = new Date(2026, 4, 26, 7, 33, 31).getTime();

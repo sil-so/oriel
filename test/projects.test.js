@@ -44,8 +44,8 @@ function loadProjectsContext(fetchImpl) {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
   return { context, grid, fetchCalls };
 }
 
@@ -204,8 +204,8 @@ test('work times displays all recorded activity including short timeline-owned s
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
@@ -248,8 +248,8 @@ test('work times uses assigned activity duration instead of visual assignment sp
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
@@ -300,8 +300,8 @@ test('work times includes short auto-rule entries', () => {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
@@ -634,9 +634,9 @@ test('work times keeps legacy activity-stream totals on saved assigned duration'
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
 
@@ -693,8 +693,8 @@ test('work times sidebar metrics use the shared selected-period calculation', ()
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
   const metrics = context.calculateSelectedPeriodMetrics({
@@ -767,8 +767,8 @@ test('work times fixed-rate earnings refresh from all-time entries like Statisti
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/projects.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
 
   context.recalculateStatistics();
   assert.equal(earnings.innerText, '$300.00');
@@ -780,9 +780,9 @@ test('work times fixed-rate earnings refresh from all-time entries like Statisti
 });
 
 test('timeline UI omits recorded-active stats and idle preference totals', () => {
-  const index = fs.readFileSync('index.html', 'utf8');
-  const stateSource = fs.readFileSync('js/state.js', 'utf8');
-  const timelineSource = fs.readFileSync('js/timeline.js', 'utf8');
+  const index = fs.readFileSync('web/index.html', 'utf8');
+  const stateSource = fs.readFileSync('web/js/state.js', 'utf8');
+  const timelineSource = fs.readFileSync('web/js/timeline.js', 'utf8');
 
   assert.doesNotMatch(index, /Recorded Active Time|Project Logged Time|stat-captured-active/);
   assert.doesNotMatch(index, /Hide Idle Activities|stat-idle|stat-attendance/);
@@ -791,7 +791,7 @@ test('timeline UI omits recorded-active stats and idle preference totals', () =>
 });
 
 test('project category names are directly editable and delete is confirmation gated', () => {
-  const source = fs.readFileSync('js/projects.js', 'utf8');
+  const source = fs.readFileSync('web/js/projects.js', 'utf8');
 
   assert.doesNotMatch(source, /prompt\(/);
   assert.match(source, /data-project-task-name/);

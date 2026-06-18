@@ -27,13 +27,13 @@ to the running native app without exposing a network service.
 ## Frontend
 
 The user interface is a bundled local web app loaded by the native shell. The
-frontend is split across `index.html`, `css/`, and `js/` modules. Runtime UI
-dependencies are vendored under `assets/vendor/` so normal app use does not rely
+frontend is split across `web/index.html`, `web/css/`, and `web/js/` modules. Runtime UI
+dependencies are vendored under `web/assets/vendor/` so normal app use does not rely
 on CDN assets.
 
-The data boundary is `js/data-client.js`: under `Oriel.app` it uses the native
+The data boundary is `web/js/data-client.js`: under `Oriel.app` it uses the native
 WebKit bridge; in the local development fallback it can use the loopback HTTP
-API exposed by `server.js`.
+API exposed by `tools/dev-server/server.js`.
 
 ## Persistence And Privacy
 
@@ -48,18 +48,18 @@ analytics or a hosted database.
 
 ## Development Fallback
 
-`server.js` remains as a local development fallback for the web UI and Node test
+`tools/dev-server/server.js` remains as a local development fallback for the web UI and Node test
 coverage. It binds to loopback by default, supports isolated runtime directories
 for tests, and should not be deployed as a public network service.
 
 ## Build
 
-`script/build_frontend_assets.mjs` regenerates vendored frontend CSS/font/icon
+`tools/scripts/build_frontend_assets.mjs` regenerates vendored frontend CSS/font/icon
 assets.
 
-`script/build_and_run.sh` builds the SwiftPM products, stages a local
+`tools/scripts/build_and_run.sh` builds the SwiftPM products, stages a local
 `build/Oriel.app`, signs it for local execution, stops stale Oriel processes,
 and launches the rebuilt app unless `--verify` is used.
 
-`script/extract_icon.swift` is compiled by the local development fallback when
+`tools/scripts/extract_icon.swift` is compiled by the local development fallback when
 native app icon extraction is needed.

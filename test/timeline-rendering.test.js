@@ -117,7 +117,7 @@ function loadTimelineContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
   return context;
 }
 
@@ -222,8 +222,8 @@ function loadTitleCleaningContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/state.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/state.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
   return context.window;
 }
 
@@ -297,7 +297,7 @@ function loadScrollContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/scroll.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/scroll.js', 'utf8'), context);
   return {
     context,
     memScroll,
@@ -384,7 +384,7 @@ function loadModalsContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/modals.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/modals.js', 'utf8'), context);
   return { context, elements };
 }
 
@@ -475,7 +475,7 @@ async function refreshActivities({ rawActivities, thresholdSeconds }) {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/api.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/api.js', 'utf8'), context);
 
   await context.refreshData();
   return context.state;
@@ -8208,8 +8208,8 @@ test('Activity Mix range calculation preserves non-zero hands-off source segment
 });
 
 test('Activity Mix pill styling uses Oriel tooltip and muted hands-off color', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(html, /id="activity-mix-tooltip"/);
   assert.match(html, /class="activity-mix-summary__heading"/);
@@ -9515,7 +9515,7 @@ test('time entry modal uses assigned activity duration for activity-stream edits
 test('time entry modal keeps assigned duration when using the integrated activity summarizer', () => {
   const { context, elements } = loadModalsContext();
   context.URL = URL;
-  vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
 
   const startMs = new Date(2026, 4, 21, 9, 0).getTime();
   const endMs = startMs + 20 * 60 * 1000;
@@ -9548,7 +9548,7 @@ test('time entry modal keeps assigned duration when using the integrated activit
 test('time entry modal derives legacy activity-stream envelope duration from recorded runs', () => {
   const { context, elements } = loadModalsContext();
   context.URL = URL;
-  vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
 
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const envelopeStart = dateStart + (13 * 60) * 60 * 1000;
