@@ -1414,6 +1414,95 @@ button:focus-visible {
     outline: none;
 }
 
+.project-time-history {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 22px;
+}
+
+.project-time-history-header {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.project-time-history-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.project-time-history-weekdays,
+.project-time-history-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.project-time-history-weekday {
+    min-width: 0;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.calendar-day.project-time-history-day {
+    width: 100%;
+    height: 58px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: 1px solid transparent;
+    line-height: 1;
+}
+
+.project-time-history-day:disabled {
+    cursor: default;
+}
+
+.project-time-history-day:disabled:hover {
+    color: var(--text-tertiary);
+    background: transparent;
+}
+
+.project-time-history-day--logged {
+    color: var(--text-primary);
+    border-color: var(--separator-soft);
+    background: var(--control-surface);
+}
+
+.project-time-history-day--logged:hover {
+    border-color: var(--selected-border);
+}
+
+.project-time-history-day--muted {
+    color: var(--text-tertiary);
+}
+
+.project-time-history-day__number {
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.project-time-history-day__duration {
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--accent-strong);
+    font-size: 10px;
+    line-height: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .section-label {
     color: var(--text-tertiary);
     font-size: 10px;
@@ -3614,43 +3703,6 @@ body.is-column-resizing * {
     font-weight: 500;
 }
 
-.project-entry-row {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 12px;
-}
-
-.project-entry-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.project-entry-meta {
-    color: var(--text-tertiary);
-    font-size: 10px;
-    line-height: 14px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.project-entry-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.project-entry-description {
-    color: var(--text-primary);
-    font-size: 12px;
-    line-height: 18px;
-    font-weight: 500;
-    overflow-wrap: anywhere;
-}
-
 .project-entry-empty-description {
     color: var(--text-tertiary);
     font-style: italic;
@@ -5050,11 +5102,6 @@ body.is-column-resizing * {
 
 .settings-section-panel.hidden {
     display: none;
-}
-
-#proj-details-entries-list::after {
-    content: "";
-    flex: 0 0 22px;
 }
 
 .toggle-track {

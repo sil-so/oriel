@@ -2349,17 +2349,6 @@ function setupMainEventListeners() {
         });
     }
 
-    function setActiveWorkspaceTab(activeTab) {
-        [DOM.elTabTimeline, DOM.elTabProjects, DOM.elTabStats, DOM.elTabAiInsights].forEach(tab => {
-            const active = tab === activeTab;
-            if (!tab) return;
-            tab.classList.toggle('app-tab--active', active);
-            if (typeof tab.setAttribute === 'function') {
-                tab.setAttribute('aria-selected', String(active));
-            }
-        });
-    }
-
     function parseAiInsightsDate(value) {
         const [year, month, day] = String(value || '').split('-').map(Number);
         if (!year || !month || !day) return null;
@@ -4104,6 +4093,38 @@ function setDateNavigationVisible(isVisible) {
     dateNavigation.classList.toggle('hidden', !isVisible);
 }
 
+function setActiveWorkspaceTab(activeTab) {
+    [DOM.elTabTimeline, DOM.elTabProjects, DOM.elTabStats, DOM.elTabAiInsights].forEach(tab => {
+        const active = tab === activeTab;
+        if (!tab) return;
+        tab.classList.toggle('app-tab--active', active);
+        if (typeof tab.setAttribute === 'function') {
+            tab.setAttribute('aria-selected', String(active));
+        }
+    });
+}
+
+async function openTimelineDate(date, { mode = 'day' } = {}) {
+    const targetDate = Number.isFinite(date?.getTime?.()) ? new Date(date) : parseLocalDateValue(date);
+    if (!targetDate) return;
+
+    state.currentView = 'timeline';
+    DOM.elSchedulerWorkspace.classList.remove('hidden');
+    DOM.elProjectsWorkspace.classList.add('hidden');
+    DOM.elStatsWorkspace.classList.add('hidden');
+    DOM.elAiInsightsWorkspace?.classList.add('hidden');
+    setDateNavigationVisible(true);
+    syncHeaderActionsForView();
+    setActiveWorkspaceTab(DOM.elTabTimeline);
+
+    if (mode === 'day') {
+        await setTimelineMode('day', { refresh: false });
+    }
+
+    state.currentDate = targetDate;
+    await refreshCurrentDateView();
+}
+
 function parseLocalDateValue(value) {
     if (!value || typeof value !== 'string') return null;
     const [year, month, day] = value.split('-').map(Number);
@@ -4378,6 +4399,7 @@ async function init() {
 window.goToToday = goToToday;
 window.setProjectManualDate = setProjectManualDate;
 window.setTimelineMode = setTimelineMode;
+window.openTimelineDate = openTimelineDate;
 window.syncTimelineModeControls = syncTimelineModeControls;
 window.init = init;
 

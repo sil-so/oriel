@@ -228,12 +228,8 @@ test('work times includes short auto-rule entries', () => {
   assert.doesNotMatch(projectsList.innerHTML, /No time entries logged/);
 });
 
-test('project historical entries render positive sub-minute durations and auto-rule description fallbacks', () => {
+test('project historical entry descriptions use auto-rule fallbacks', () => {
   const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
-
-  assert.equal(context.formatProjectEntryDuration(18 * 1000), '<1 min');
-  assert.equal(context.formatProjectEntryDuration(90 * 1000), '2 min');
-  assert.equal(context.formatProjectEntryDuration(0), '0 min');
 
   const fallback = context.getProjectEntryDescriptionHTML({
     description: ' ',
@@ -253,6 +249,78 @@ test('project historical entries render positive sub-minute durations and auto-r
     activities: []
   });
   assert.match(manualFallback, /No description provided/);
+});
+
+test('project time history groups many small entries into daily totals', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  const june18 = new Date(2026, 5, 18, 9, 0, 0).getTime();
+  const june19 = new Date(2026, 5, 19, 11, 0, 0).getTime();
+  const entries = [
+    { start: june18, end: june18 + 18 * 1000 },
+    { start: june18 + 60 * 1000, end: june18 + 102 * 1000 },
+    { start: june19, end: june19 + 65 * 60 * 1000 }
+  ];
+
+  const dayMap = context.buildProjectTimeHistoryDayMap(entries);
+
+  assert.equal(dayMap.get('2026-06-18').totalMs, 60 * 1000);
+  assert.equal(dayMap.get('2026-06-19').totalMs, 65 * 60 * 1000);
+  assert.equal(context.formatProjectTimeHistoryDuration(42 * 1000), '<1 min');
+  assert.equal(context.formatProjectTimeHistoryDuration(5 * 60 * 1000), '5 min');
+  assert.equal(context.formatProjectTimeHistoryDuration(60 * 60 * 1000), '1h');
+  assert.equal(context.formatProjectTimeHistoryDuration(80 * 60 * 1000), '1h 20m');
+});
+
+test('project time history initial month prefers timeline month with time otherwise latest logged month', () => {
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  const dayMap = context.buildProjectTimeHistoryDayMap([
+    {
+      start: new Date(2026, 4, 31, 9, 0, 0).getTime(),
+      end: new Date(2026, 4, 31, 10, 0, 0).getTime()
+    },
+    {
+      start: new Date(2026, 6, 4, 9, 0, 0).getTime(),
+      end: new Date(2026, 6, 4, 10, 0, 0).getTime()
+    }
+  ]);
+
+  assert.equal(
+    context.getFormattedDate(context.resolveProjectTimeHistoryInitialMonth(dayMap, new Date(2026, 4, 12))),
+    '2026-05-01'
+  );
+  assert.equal(
+    context.getFormattedDate(context.resolveProjectTimeHistoryInitialMonth(dayMap, new Date(2026, 5, 18))),
+    '2026-07-01'
+  );
+});
+
+test('project time history day navigation closes details and opens timeline day', async () => {
+  const closed = [];
+  const opened = [];
+  const { context } = loadProjectsContext(async () => ({ ok: true, json: async () => [] }));
+  context.document = {
+    getElementById(id) {
+      if (id !== 'project-details-modal') return null;
+      return {
+        classList: {
+          add(value) {
+            closed.push(value);
+          }
+        }
+      };
+    }
+  };
+  context.openTimelineDate = async (date, options) => {
+    opened.push({ date: context.getFormattedDate(date), options });
+  };
+  context.window.openTimelineDate = context.openTimelineDate;
+
+  await context.openProjectTimeHistoryDay('2026-06-18');
+
+  assert.deepEqual(closed, ['hidden']);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].date, '2026-06-18');
+  assert.equal(opened[0].options.mode, 'day');
 });
 
 test('work times keeps legacy activity-stream totals on saved assigned duration', () => {

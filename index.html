@@ -1383,10 +1383,21 @@
                     </div>
                 </div>
 
-                <div class="flex-1 flex flex-col gap-2.5 overflow-hidden">
-                    <h4 class="section-label shrink-0">Historical Entries Log</h4>
-
-                    <div class="flex-1 overflow-y-auto pr-1 flex flex-col gap-2.5 max-h-[300px] app-scrollbar-safe" id="proj-details-entries-list">
+                <div class="project-time-history">
+                    <div class="project-time-history-header">
+                        <h4 class="section-label shrink-0">Time History</h4>
+                        <div class="project-time-history-controls">
+                            <button id="proj-details-time-history-prev-month" type="button" class="icon-button" aria-label="Previous month">
+                                <i class="ph ph-caret-left"></i>
+                            </button>
+                            <div id="proj-details-time-history-month-label" class="calendar-month-label"></div>
+                            <button id="proj-details-time-history-next-month" type="button" class="icon-button" aria-label="Next month">
+                                <i class="ph ph-caret-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="proj-details-time-history-weekdays" class="calendar-weekdays project-time-history-weekdays"></div>
+                    <div id="proj-details-time-history-days" class="project-time-history-days">
                         <div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>
                     </div>
                 </div>

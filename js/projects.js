@@ -16,6 +16,12 @@ const PRESET_COLORS = [
 
 let editingProjectTaskId = null;
 let currentProjectDetailEntries = [];
+let projectTimeHistoryState = {
+    projectId: null,
+    entries: [],
+    dayMap: new Map(),
+    viewedMonth: null
+};
 let sidebarAllTimeEntries = null;
 let sidebarAllTimeEntriesPromise = null;
 
@@ -180,13 +186,6 @@ function getProjectTimeEntryDurationMs(entry) {
         : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
 }
 
-function formatProjectEntryDuration(ms) {
-    const duration = Number(ms) || 0;
-    if (duration <= 0) return '0 min';
-    if (duration < 60 * 1000) return '<1 min';
-    return `${Math.max(1, Math.round(duration / (60 * 1000)))} min`;
-}
-
 function getProjectEntryActivityFallback(activity) {
     if (!activity || typeof activity !== 'object') return '';
 
@@ -224,6 +223,181 @@ function getProjectEntryDescriptionHTML(entry) {
     }
 
     return '<span class="project-entry-empty-description">No description provided</span>';
+}
+
+function getProjectTimeHistoryDateKey(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    if (typeof getFormattedDate === 'function') return getFormattedDate(date);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function parseProjectTimeHistoryDate(value) {
+    const [year, month, day] = String(value || '').split('-').map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+    const date = new Date(year, month - 1, day);
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function getProjectTimeHistoryMonthKey(date) {
+    const key = getProjectTimeHistoryDateKey(date);
+    return key ? key.slice(0, 7) : '';
+}
+
+function getProjectTimeHistoryMonthStart(date) {
+    const source = Number.isFinite(date?.getTime?.()) ? date : new Date();
+    return new Date(source.getFullYear(), source.getMonth(), 1);
+}
+
+function buildProjectTimeHistoryDayMap(entries = []) {
+    const dayMap = new Map();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        const duration = getProjectTimeEntryDurationMs(entry);
+        if (duration <= 0) continue;
+        const dateKey = getProjectTimeHistoryDateKey(entry?.start);
+        if (!dateKey) continue;
+        const existing = dayMap.get(dateKey) || { dateKey, totalMs: 0, entries: [] };
+        existing.totalMs += duration;
+        existing.entries.push(entry);
+        dayMap.set(dateKey, existing);
+    }
+    return dayMap;
+}
+
+function formatProjectTimeHistoryDuration(ms) {
+    const duration = Math.max(0, Number(ms) || 0);
+    if (duration <= 0) return '0 min';
+    if (duration < 60 * 1000) return '<1 min';
+    const totalMins = Math.max(1, Math.round(duration / (60 * 1000)));
+    if (totalMins < 60) return `${totalMins} min`;
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+function projectTimeHistoryMonthHasTime(dayMap, monthDate) {
+    const monthKey = getProjectTimeHistoryMonthKey(monthDate);
+    if (!monthKey) return false;
+    return Array.from(dayMap.keys()).some(dateKey => dateKey.startsWith(`${monthKey}-`));
+}
+
+function resolveProjectTimeHistoryInitialMonth(dayMap, selectedDate = state.currentDate) {
+    const selectedMonth = getProjectTimeHistoryMonthStart(
+        Number.isFinite(selectedDate?.getTime?.()) ? selectedDate : new Date()
+    );
+    if (projectTimeHistoryMonthHasTime(dayMap, selectedMonth)) {
+        return selectedMonth;
+    }
+
+    const latestDateKey = Array.from(dayMap.keys()).sort().at(-1);
+    if (latestDateKey) {
+        return getProjectTimeHistoryMonthStart(parseProjectTimeHistoryDate(latestDateKey));
+    }
+
+    return selectedMonth;
+}
+
+function shiftProjectTimeHistoryMonth(delta) {
+    if (!projectTimeHistoryState.viewedMonth) {
+        projectTimeHistoryState.viewedMonth = resolveProjectTimeHistoryInitialMonth(
+            projectTimeHistoryState.dayMap,
+            state.currentDate
+        );
+    }
+    projectTimeHistoryState.viewedMonth.setMonth(projectTimeHistoryState.viewedMonth.getMonth() + delta);
+    renderProjectTimeHistoryCalendar(projectTimeHistoryState.projectId, projectTimeHistoryState.entries, {
+        preserveMonth: true
+    });
+}
+
+async function openProjectTimeHistoryDay(dateKey) {
+    const targetDate = parseProjectTimeHistoryDate(dateKey);
+    if (!targetDate) return;
+    const modal = document.getElementById('project-details-modal');
+    modal?.classList?.add('hidden');
+    if (typeof window.openTimelineDate === 'function') {
+        await window.openTimelineDate(targetDate, { mode: 'day' });
+    }
+}
+
+function renderProjectTimeHistoryCalendar(projectId, entries = [], options = {}) {
+    const monthLabel = document.getElementById('proj-details-time-history-month-label');
+    const weekdays = document.getElementById('proj-details-time-history-weekdays');
+    const days = document.getElementById('proj-details-time-history-days');
+    if (!monthLabel || !weekdays || !days) return;
+
+    const dayMap = buildProjectTimeHistoryDayMap(entries);
+    if (!options.preserveMonth || projectTimeHistoryState.projectId !== projectId) {
+        projectTimeHistoryState.viewedMonth = resolveProjectTimeHistoryInitialMonth(dayMap, state.currentDate);
+    }
+
+    projectTimeHistoryState = {
+        projectId,
+        entries: Array.isArray(entries) ? entries : [],
+        dayMap,
+        viewedMonth: projectTimeHistoryState.viewedMonth
+    };
+
+    const viewedMonth = projectTimeHistoryState.viewedMonth || getProjectTimeHistoryMonthStart(state.currentDate);
+    const monthFormatter = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
+    monthLabel.textContent = monthFormatter.format(viewedMonth);
+    weekdays.innerHTML = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+        .map(day => `<div class="project-time-history-weekday">${day}</div>`)
+        .join('');
+
+    const gridStart = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth(), 1);
+    const mondayOffset = (gridStart.getDay() + 6) % 7;
+    gridStart.setDate(gridStart.getDate() - mondayOffset);
+
+    const todayStr = getProjectTimeHistoryDateKey(new Date());
+    const selectedStr = getProjectTimeHistoryDateKey(state.currentDate || new Date());
+    const currentMonth = viewedMonth.getMonth();
+    const dayHtml = [];
+
+    for (let index = 0; index < 42; index++) {
+        const day = new Date(gridStart);
+        day.setDate(gridStart.getDate() + index);
+        const dateKey = getProjectTimeHistoryDateKey(day);
+        const daySummary = dayMap.get(dateKey);
+        const hasTime = Boolean(daySummary?.totalMs > 0);
+        const isSelected = dateKey === selectedStr;
+        const isToday = dateKey === todayStr;
+        const isOutsideMonth = day.getMonth() !== currentMonth;
+        const durationLabel = hasTime ? formatProjectTimeHistoryDuration(daySummary.totalMs) : '';
+        const dayClasses = [
+            'calendar-day',
+            'project-time-history-day',
+            hasTime ? 'project-time-history-day--logged' : 'project-time-history-day--muted',
+            isSelected ? 'calendar-day--selected' : '',
+            isOutsideMonth ? 'calendar-day--outside' : '',
+            isToday && !isSelected ? 'calendar-day--today' : ''
+        ].filter(Boolean).join(' ');
+        const labelDate = day.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        const ariaLabel = hasTime
+            ? `${labelDate}, ${durationLabel} logged`
+            : `${labelDate}, no project time logged`;
+
+        dayHtml.push(`
+            <button type="button"
+                    class="${dayClasses}"
+                    ${hasTime ? `data-date="${dateKey}"` : 'disabled'}
+                    aria-label="${ariaLabel}">
+                <span class="project-time-history-day__number">${day.getDate()}</span>
+                ${hasTime ? `<span class="project-time-history-day__duration">${durationLabel}</span>` : ''}
+            </button>
+        `);
+    }
+
+    days.innerHTML = dayHtml.join('');
+    days.querySelectorAll('button[data-date]').forEach(button => {
+        button.addEventListener('click', async event => {
+            event.stopPropagation();
+            await openProjectTimeHistoryDay(button.dataset.date);
+        });
+    });
 }
 
 function renderProjectTasks(project, projectEntries = []) {
@@ -900,6 +1074,21 @@ async function openProjectDetails(projectId) {
         };
     }
 
+    const historyPrev = document.getElementById('proj-details-time-history-prev-month');
+    const historyNext = document.getElementById('proj-details-time-history-next-month');
+    if (historyPrev) {
+        historyPrev.onclick = (event) => {
+            event.stopPropagation();
+            shiftProjectTimeHistoryMonth(-1);
+        };
+    }
+    if (historyNext) {
+        historyNext.onclick = (event) => {
+            event.stopPropagation();
+            shiftProjectTimeHistoryMonth(1);
+        };
+    }
+
     // Header color & Title
     const elColor = document.getElementById('proj-details-color');
     const elTitle = document.getElementById('proj-details-title');
@@ -924,6 +1113,7 @@ async function openProjectDetails(projectId) {
         .sort((a, b) => b.start - a.start); // Chronological desc (latest first)
     currentProjectDetailEntries = projEntries;
     renderProjectTasks(proj, projEntries);
+    renderProjectTimeHistoryCalendar(projectId, projEntries);
 
     // Calculate sum metrics
     const totalMs = projEntries.reduce((sum, e) => sum + getProjectTimeEntryDurationMs(e), 0);
@@ -965,51 +1155,6 @@ async function openProjectDetails(projectId) {
         }
     }
 
-    // Render list
-    const elList = document.getElementById('proj-details-entries-list');
-    if (elList) {
-        if (projEntries.length === 0) {
-            elList.innerHTML = `<div class="empty-state empty-state--spacious">No entries logged to this project yet.</div>`;
-        } else {
-            elList.innerHTML = projEntries.map(e => {
-                const dateObj = new Date(e.start);
-                const dateStr = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-                const entryDurationMs = getProjectTimeEntryDurationMs(e);
-                const durationLabel = formatProjectEntryDuration(entryDurationMs);
-                const task = getProjectTasks(proj).find(projectTask => projectTask.id === e.taskId);
-                const taskLabel = task
-                    ? `<span class="duration-pill shrink-0">${escapeProjectText(task.name)}</span>`
-                    : '';
-
-                let itemHrs = entryDurationMs / (60 * 60 * 1000);
-                let itemEarningsStr = '';
-                if (proj.rateType === 'hourly') {
-                    itemEarningsStr = `<span class="metric-value metric-value--success shrink-0">${currencySymbol}${(itemHrs * (proj.hourlyRate || 0)).toFixed(2)}</span>`;
-                } else if (proj.rateType === 'fixed') {
-                    itemEarningsStr = `<span class="metric-value text-accent shrink-0">Fixed</span>`;
-                }
-                const descriptionHTML = getProjectEntryDescriptionHTML(e);
-
-                return `
-                    <div class="surface-panel project-entry-row">
-                        <div class="project-entry-header">
-                            <span class="project-entry-meta">${dateStr}</span>
-                            <div class="project-entry-actions">
-                                ${taskLabel}
-                                <span class="duration-pill shrink-0">${durationLabel}</span>
-                                ${itemEarningsStr}
-                                <button class="icon-button icon-button--danger" title="Delete entry" aria-label="Delete entry" onclick="deleteProjectDetailEntry(event, '${e.id}', '${projectId}')">
-                                    <i class="ph ph-trash-simple text-sm"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <p class="project-entry-description">${descriptionHTML}</p>
-                    </div>
-                `;
-            }).join('');
-        }
-    }
-
     // Modal show
     const modal = document.getElementById('project-details-modal');
     if (modal) {
@@ -1021,37 +1166,6 @@ async function openProjectDetails(projectId) {
 
         if (btnClose) btnClose.onclick = hideModal;
     }
-}
-
-// Delete a specific time entry from the project details modal
-function deleteProjectDetailEntry(event, entryId, projectId) {
-    event.stopPropagation();
-    event.preventDefault();
-
-    showCustomConfirm({
-        title: 'Delete Time Entry?',
-        message: 'Are you sure you want to permanently delete this logged time entry?',
-        actionText: 'Delete Entry',
-        actionClass: 'button-danger',
-        onConfirm: async () => {
-            try {
-                const res = await fetch(`${API_BASE}/time-entries/${entryId}`, {
-                    method: 'DELETE'
-                });
-
-                if (res.ok) {
-                    await openProjectDetails(projectId);
-                    if (window.refreshData) {
-                        await window.refreshData();
-                    }
-                } else {
-                    alert('Failed to delete time entry');
-                }
-            } catch (err) {
-                console.error('Error deleting time entry:', err);
-            }
-        }
-    });
 }
 
 // Expose functions to window namespace
@@ -1069,7 +1183,10 @@ window.saveProjectTaskRename = saveProjectTaskRename;
 window.cancelProjectTaskRename = cancelProjectTaskRename;
 window.handleProjectTaskRenameKeydown = handleProjectTaskRenameKeydown;
 window.archiveProjectTask = archiveProjectTask;
-window.deleteProjectDetailEntry = deleteProjectDetailEntry;
-window.formatProjectEntryDuration = formatProjectEntryDuration;
 window.getProjectEntryDescriptionHTML = getProjectEntryDescriptionHTML;
+window.buildProjectTimeHistoryDayMap = buildProjectTimeHistoryDayMap;
+window.formatProjectTimeHistoryDuration = formatProjectTimeHistoryDuration;
+window.resolveProjectTimeHistoryInitialMonth = resolveProjectTimeHistoryInitialMonth;
+window.renderProjectTimeHistoryCalendar = renderProjectTimeHistoryCalendar;
+window.openProjectTimeHistoryDay = openProjectTimeHistoryDay;
 window.PRESET_COLORS = PRESET_COLORS;
