@@ -5,11 +5,32 @@
 Oriel is a local-first macOS time tracker. Keep changes simple,
 maintainable, and easy to review.
 
-## Linear
+## Issue Tracking
 
-- Always create or use a Linear issue for new and existing implementation
-  work, and keep that issue updated as the work moves through active
-  development, review, completion, or blockage.
+- Use GitHub Issues as the public source of truth for new implementation work,
+  bugs, feature requests, and contributor-facing triage.
+- Keep Linear only for private/internal planning when needed; do not treat it as
+  the default project tracker.
+- Keep the relevant GitHub issue or pull request updated as work moves through
+  active development, review, completion, or blockage.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues, and external contributor PRs are also a
+triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The default triage label vocabulary is used: `needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, and `wontfix`. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context domain doc layout. See
+`docs/agents/domain.md`.
 
 ## Build And Test
 
