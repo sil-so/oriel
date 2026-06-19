@@ -39,8 +39,7 @@ maintainable, and easy to review.
 
 ## Design System
 
-- Before making UI changes, read `DESIGN.md`, `PRODUCT.md`,
-  `docs/design-system.md`, and `docs/ui-consistency-audit.md`.
+- Before making UI changes, read `DESIGN.md` and `PRODUCT.md`.
 - Treat `DESIGN.md` as the agent-readable design contract for visual tokens,
   component rules, theme behavior, accessibility, and UI anti-patterns.
 - Do not invent new colors, spacing, typography, radii, shadows, z-index values,
@@ -98,8 +97,7 @@ maintainable, and easy to review.
 - Update `docs/timeline-decisions.md` whenever changing timeline rendering
   behavior, geometry, row visibility, zoom behavior, or Activity Stream and
   Time Entries alignment.
-- For UI design-system work, treat `PRODUCT.md`,
-  `docs/design-system.md`, and `docs/ui-consistency-audit.md` as the source of
-  truth. Preserve the neutral dark `graphite` direction, avoid new UI
+- For UI design-system work, treat `PRODUCT.md` and `DESIGN.md` as the source
+  of truth. Preserve the neutral dark `graphite` direction, avoid new UI
   frameworks, and keep screenshots/private activity artifacts out of commits.
 - Keep generated build products and scratch artifacts out of commits.
