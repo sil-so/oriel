@@ -897,11 +897,12 @@ test('settings expose editable activity title cleanup rules with regex guidance'
   );
 });
 
-test('project guidance requires Linear issue hygiene for implementation work', () => {
+test('project guidance uses GitHub issues for public implementation work', () => {
   const agents = fs.readFileSync('AGENTS.md', 'utf8');
 
-  assert.match(agents, /Always create or use a Linear issue for new and existing implementation\s+work/);
-  assert.match(agents, /keep that issue updated as the work moves through active\s+development, review, completion, or blockage/);
+  assert.match(agents, /Use GitHub Issues as the public source of truth for new implementation work,\s+bugs, feature requests, and contributor-facing triage/);
+  assert.match(agents, /Keep Linear only for private\/internal planning when needed; do not treat it as\s+the default project tracker/);
+  assert.match(agents, /Keep the relevant GitHub issue or pull request updated as work moves through\s+active development, review, completion, or blockage/);
 });
 
 test('time entry modal removes AI-coded snapshot icon and uses uniform section spacing', () => {
