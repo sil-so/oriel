@@ -1,10 +1,6 @@
 # Oriel
 
 <p align="center">
-  <img src="./web/assets/brand/oriel-logo.svg" alt="Oriel" width="168">
-</p>
-
-<p align="center">
   Local-first macOS time tracking for people who need accurate project time
   without sending activity history to a hosted service.
 </p>
