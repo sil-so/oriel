@@ -3383,6 +3383,7 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                 renderDisplayStart: displayBounds.start,
                 renderDisplayEnd: displayBounds.end,
                 renderDurationMs: duration,
+                renderSourceBackedAssignment: hasSourceBackedAssignment(activity),
                 renderExactGeometry: true,
                 activities: [renderActivity]
             });

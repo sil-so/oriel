@@ -1450,6 +1450,81 @@ test('logged time entries use row-aligned display geometry at every zoom level',
   }
 });
 
+test('source-backed popup row assignments do not lane-split within the same visible row across zooms', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const displayStart = at(12, 0);
+  const displayEnd = at(12, 15);
+  const source = (title, url, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url,
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: displayStart,
+    assignmentDisplayEnd: displayEnd,
+    assignmentDisplayZoom: 15
+  });
+  const sources = [
+    source('bol | Bestellen', 'https://www.bol.com/nl/nl/checkout/', at(12, 0), at(12, 10)),
+    source('Gaslang Vergelijking Amazon Buurs', 'https://www.buurs.nl/gaslang', at(12, 10), at(12, 12)),
+    source('amazon.nl', 'https://www.amazon.nl/', at(12, 12), at(12, 14))
+  ];
+  const timeEntry = {
+    id: 'entry-shopping',
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    taskId: 'shopping',
+    createdBy: 'manual',
+    description: '',
+    activities: sources.map((activity, index) => ({
+      ...activity,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayGroupKey: `shopping-row-source-${index + 1}`,
+      sources: [activity]
+    }))
+  };
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities: sources,
+      timeEntries: [timeEntry],
+      currentDate: new Date(dateStart)
+    });
+    const styles = extractEntryStyles(html);
+
+    assert.ok(styles.length > 0, `${zoom} min renders source-backed assignment`);
+    styles.forEach(style => {
+      assert.equal(style.left, null, `${zoom} min block should not be lane-split`);
+      assert.equal(style.width, null, `${zoom} min block should not be lane-split`);
+      assert.equal(style.right, null, `${zoom} min block should not be lane-split`);
+    });
+    assert.equal(
+      new Set(styles.map(style => `${style.top}:${style.height}`)).size,
+      styles.length,
+      `${zoom} min should not repeat block geometry for one display row`
+    );
+
+    if (zoom === 15) {
+      assert.equal(styles.length, 1, '15 min uses one visual block for one selected visible row');
+      assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
+    }
+  }
+});
+
 test('logged time entries render at least one full row high for short entries', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const html = renderLoggedTimeEntriesHtml({
