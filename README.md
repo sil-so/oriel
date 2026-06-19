@@ -1,17 +1,84 @@
 # Oriel
 
-Oriel is a local-first macOS time tracker for people who need accurate project
-time without sending their activity history to a hosted service.
+<p align="center">
+  <img src="./web/assets/brand/oriel-logo.svg" alt="Oriel" width="168">
+</p>
 
-It records foreground app and browser activity on the Mac, shows that activity
-in the Activity Stream Timeline and week view, and helps turn the raw record
-into project, category, billable, and reporting entries.
+<p align="center">
+  Local-first macOS time tracking for people who need accurate project time
+  without sending activity history to a hosted service.
+</p>
+
+<p align="center">
+  <a href="https://github.com/sil-so/oriel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sil-so/oriel/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-555">
+  <img alt="Local-first" src="https://img.shields.io/badge/storage-local--first-2f6f4e">
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
+
+![Oriel Timeline workspace](./docs/images/oriel-hero.png)
 
 > [!NOTE]
 > Oriel is source-build today. Signed and notarized public macOS releases are
 > planned, but not available yet.
 
-## Status
+## Why Oriel
+
+Oriel records local foreground app and browser activity, presents it as a
+reviewable timeline, and helps turn that raw history into project, category,
+billable, and reporting entries.
+
+- Review captured work in day and week views with the Activity Stream Timeline,
+  Time Entries, and Work Times sidebar aligned around the same local timeline.
+- See hands-on and hands-off time with Activity Mix, based on recent keyboard,
+  mouse, click, and scroll input.
+- Convert selected activity into project entries with categories, billable
+  defaults, hourly or fixed-rate project settings, and reporting.
+- Track project history with project totals, billing summaries, a Time History
+  calendar, and manual time/import flows.
+- Use assignment rules for app, title, and URL patterns so repeated work can be
+  categorized faster.
+- Exclude sensitive apps, titles, or URLs from capture, including optional
+  cleanup of matching historical activity.
+- Use optional BYOK AI workflows for selected-day chat, grouped entry
+  suggestions with project context, screenshot summaries, and daily, weekly, or
+  monthly insight recaps.
+
+## A Closer Look
+
+### Timeline Review
+
+![Oriel Timeline review](./docs/images/oriel-timeline.png)
+
+The Timeline workspace is the main review surface. It keeps captured activity,
+logged time, project breakdowns, date navigation, zoom controls, and Ask AI in
+one dense desktop workflow.
+
+### Projects And Time History
+
+![Oriel Projects and Time History](./docs/images/oriel-projects.png)
+
+Projects collect assigned time, billing defaults, categories, project context,
+and manual entries. The project detail view includes a Time History calendar so
+logged work can be reviewed by day without leaving the project.
+
+### AI Insights
+
+![Oriel AI Insights](./docs/images/oriel-ai-insights.png)
+
+AI Insights can generate daily, weekly, and monthly recaps from stored
+screenshot-summary text and local activity statistics. These workflows are
+manual and require a user-configured provider key.
+
+### Preferences And Privacy Controls
+
+![Oriel Preferences privacy controls](./docs/images/oriel-preferences.png)
+
+Preferences make capture state, exclusions, optional browser support, provider
+keys, Logo.dev icons, and AI screenshot-summary settings explicit. Networked
+features are opt-in.
+
+## Project Status
 
 | Area | Current state |
 | --- | --- |
@@ -23,26 +90,6 @@ into project, category, billable, and reporting entries.
 | CI | GitHub Actions for Node and Swift tests |
 | License | MIT |
 
-## What Oriel Does
-
-- Records foreground app, window title, document URL, browser tab, and activity
-  time.
-- Separates hands-on and hands-off activity using recent keyboard, mouse,
-  click, and scroll input.
-- Provides the Activity Stream Timeline, Activity Mix, and week view for
-  reviewing captured work.
-- Converts activity into project time entries with categories, billable defaults,
-  hourly/fixed-rate project settings, and reporting.
-- Supports auto-assignment rules for app, title, and URL patterns.
-- Supports capture exclusions for sensitive apps, titles, or URLs, including
-  one-time historical cleanup.
-- Exports and restores portable local archives.
-- Offers optional BYOK AI workflows for selected-day chat, entry suggestions,
-  screenshot summaries, and daily insights.
-- Groups Ask AI entry suggestions into reviewable project/topic batches so
-  captured activity can be assigned without forcing one project for the whole
-  day.
-
 ## Privacy Model
 
 > [!IMPORTANT]
@@ -53,10 +100,11 @@ into project, category, billable, and reporting entries.
 | Feature | Default | What can leave the Mac |
 | --- | --- | --- |
 | Core activity tracking | On after running the app | Nothing by design |
+| Browser Companion | Optional | Browser tab activity sent to the local Oriel app through Native Messaging |
 | Logo.dev icons | Off | Website domains, only when enabled |
-| Ask AI | Off until a provider key is configured | Prompt plus selected-day context, including project names, categories, and optional project context, when the user asks |
+| Ask AI and entry suggestions | Off until a provider key is configured | Prompt plus selected-day context, including project names, categories, and optional project context, when the user asks |
 | AI screenshot summaries | Off | Compressed screenshots and activity metadata when enabled |
-| AI daily insights | Manual | Clustered text summaries and local time statistics when generated |
+| AI daily, weekly, and monthly insights | Manual | Clustered summary text and local timing statistics when generated |
 | AI model refresh | Manual | Provider model-list request when requested |
 
 Oriel stores API keys in macOS Keychain. It does not store raw screenshots or
@@ -72,24 +120,68 @@ Oriel's networked features are opt-in and provider-specific:
 
 - **Logo.dev icons:** sends website domains to Logo.dev when branded website
   icons are enabled and a publishable key is saved.
-- **Ask AI:** sends the prompt and selected-day context, including project
-  names, categories, and optional project context, to the configured AI provider
-  when the user submits a question.
+- **Ask AI and entry suggestions:** sends the prompt and selected-day context,
+  including project names, categories, and optional project context, to the
+  configured AI provider when the user submits a question or asks for
+  suggestions.
 - **AI screenshot summaries:** captures the display containing the active
   app/window, downscales and JPEG-compresses the screenshot in memory, then
   sends it with activity metadata to the selected provider. If the active
   display cannot be resolved, Oriel skips that screenshot summary. Oriel stores
   only validated summary JSON and request metadata needed for local summaries.
-- **AI daily insights:** sends clustered validated screenshot-summary text,
-  sanitized activity context, recent summary opening sentences, and local
-  aggregate timing statistics to the configured Ask AI provider when the user
-  generates a daily recap. Raw screenshots, full URLs, app paths, and bundle
-  paths are not sent for daily recap generation.
+- **AI insights:** sends clustered validated screenshot-summary text, sanitized
+  activity context, recent summary opening sentences, and local aggregate
+  timing statistics to the configured Ask AI provider when the user generates a
+  daily, weekly, or monthly recap. Raw screenshots, full URLs, app paths, and
+  bundle paths are not sent for recap generation.
 - **AI model refresh:** contacts the selected provider only when the user asks
   Oriel to refresh available models.
 
 Review each provider's own privacy and data-use terms before enabling these
 features.
+
+</details>
+
+## Requirements
+
+- macOS 14 or newer
+- Xcode command line tools / Swift toolchain
+- Node.js 18 or newer for frontend asset generation and Node-based tests
+
+Oriel uses Accessibility permissions for detailed app/window capture. Grant
+permission to the exact `Oriel.app` build you run.
+
+## Quick Start
+
+```bash
+npm install
+npm run build:assets
+npm test
+swift test
+./tools/scripts/build_and_run.sh
+```
+
+`./tools/scripts/build_and_run.sh` builds `OrielApp` and `OrielBrowserBridge`,
+stages a local `build/Oriel.app`, signs it for local execution, stops stale
+local app/helper processes, and opens the rebuilt app.
+
+Use `./tools/scripts/build_and_run.sh --verify` to build and stage without
+launching.
+
+<details>
+<summary>Browser Companion developer setup</summary>
+
+The Browser Companion is currently a developer setup for unpacked Chrome/Brave
+extension testing.
+
+1. Open `chrome://extensions` in Chrome or Brave.
+2. Enable Developer mode.
+3. Load the `extension/` directory as an unpacked extension.
+4. Copy the extension identifier.
+5. In Oriel Preferences, open Developer Browser Companion and enable the
+   identifier.
+
+A Chrome Web Store extension with a finalized identifier is planned.
 
 </details>
 
@@ -125,48 +217,6 @@ flowchart TD
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for more detail.
 
-## Requirements
-
-- macOS 14 or newer
-- Xcode command line tools / Swift toolchain
-- Node.js 18 or newer for frontend asset generation and Node-based tests
-
-Oriel uses Accessibility permissions for detailed app/window capture. Grant
-permission to the exact `Oriel.app` build you run.
-
-## Quick Start
-
-```bash
-npm install
-npm run build:assets
-swift test
-npm test
-./tools/scripts/build_and_run.sh
-```
-
-`./tools/scripts/build_and_run.sh` builds `OrielApp` and `OrielBrowserBridge`, stages a
-local `build/Oriel.app`, signs it for local execution, stops stale local
-app/helper processes, and opens the rebuilt app.
-
-Use `./tools/scripts/build_and_run.sh --verify` to build and stage without launching.
-
-<details>
-<summary>Browser Companion developer setup</summary>
-
-The Browser Companion is currently a developer setup for unpacked Chrome/Brave
-extension testing.
-
-1. Open `chrome://extensions` in Chrome or Brave.
-2. Enable Developer mode.
-3. Load the `extension/` directory as an unpacked extension.
-4. Copy the extension identifier.
-5. In Oriel Preferences, open Developer Browser Companion and enable the
-   identifier.
-
-A Chrome Web Store extension with a finalized identifier is planned.
-
-</details>
-
 ## Verification
 
 For most changes, run:
@@ -180,8 +230,8 @@ swift test
 Run `npm run build:assets` after changing Tailwind input, vendored frontend
 assets, or package dependencies.
 
-Run `./tools/scripts/build_and_run.sh` after app changes when you need to verify the
-running local app matches the source.
+Run `./tools/scripts/build_and_run.sh` after app changes when you need to verify
+the running local app matches the source.
 
 ## Maintainer Surface
 
