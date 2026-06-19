@@ -3453,6 +3453,16 @@ function setupMainEventListeners() {
                     billable,
                     activities: normalizeModalActivitiesForTimeEntrySave(selectedModalActivities)
                 };
+                if (window.editingTimeEntryId && Array.isArray(window.editingTimeEntryPersistedActivities)) {
+                    const persistedRange = window.editingTimeEntryPersistedRange || {};
+                    if (Number.isFinite(persistedRange.start)
+                        && Number.isFinite(persistedRange.end)
+                        && persistedRange.end > persistedRange.start) {
+                        payload.start = persistedRange.start;
+                        payload.end = persistedRange.end;
+                    }
+                    payload.activities = window.editingTimeEntryPersistedActivities.map(normalizeActivityForTimeEntrySave);
+                }
                 if (window.editingTimeEntryId) {
                     payload.createdBy = 'manual';
                     payload.autoRuleId = '';
@@ -3816,6 +3826,8 @@ function setupMainEventListeners() {
                 if (blockActivities.length > 1) {
                     window.editingTimeEntryId = entry.id;
                     window.editingTimeEntryGroupIds = null;
+                    window.editingTimeEntryPersistedRange = null;
+                    window.editingTimeEntryPersistedActivities = null;
                     openTimeEntryModal(
                         startMs,
                         endMs,

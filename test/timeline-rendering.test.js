@@ -481,7 +481,7 @@ async function refreshActivities({ rawActivities, thresholdSeconds }) {
   return context.state;
 }
 
-function renderLoggedTimeEntriesHtml({
+function renderLoggedTimeEntriesWithContext({
   timeEntries,
   projects,
   zoom,
@@ -517,7 +517,11 @@ function renderLoggedTimeEntriesHtml({
   };
 
   context.renderLoggedTimeEntries();
-  return renderedHtml;
+  return { context, html: renderedHtml };
+}
+
+function renderLoggedTimeEntriesHtml(options) {
+  return renderLoggedTimeEntriesWithContext(options).html;
 }
 
 function codexActivity(start, end) {
@@ -726,6 +730,18 @@ function extractFirstTimeEntryBlockHtml(html) {
   assert.notEqual(blockStart, -1, 'Expected time entry block');
   const nextBlockStart = html.indexOf('<div class="time-entry-block', blockStart + 1);
   return html.slice(blockStart, nextBlockStart === -1 ? html.length : nextBlockStart);
+}
+
+function extractTimeEntryBlockDatasets(html) {
+  return [...html.matchAll(/<div class="[^"]*time-entry-block[^"]*"([\s\S]*?)>/g)]
+    .map(match => {
+      const dataset = {};
+      for (const attrMatch of match[1].matchAll(/\sdata-([a-z-]+)="([^"]*)"/g)) {
+        const key = attrMatch[1].replace(/-([a-z])/g, (_full, letter) => letter.toUpperCase());
+        dataset[key] = attrMatch[2];
+      }
+      return dataset;
+    });
 }
 
 function makeActivityStreamTimeEntry({
@@ -1448,6 +1464,229 @@ test('logged time entries use row-aligned display geometry at every zoom level',
     }), `second entry at zoom ${zoom}`);
     assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min', '15 min']);
   }
+});
+
+test('source-backed popup row assignments do not lane-split within the same visible row across zooms', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const displayStart = at(12, 0);
+  const displayEnd = at(12, 15);
+  const source = (title, url, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url,
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: displayStart,
+    assignmentDisplayEnd: displayEnd,
+    assignmentDisplayZoom: 15
+  });
+  const sources = [
+    source('bol | Bestellen', 'https://www.bol.com/nl/nl/checkout/', at(12, 0), at(12, 10)),
+    source('Gaslang Vergelijking Amazon Buurs', 'https://www.buurs.nl/gaslang', at(12, 10), at(12, 12)),
+    source('amazon.nl', 'https://www.amazon.nl/', at(12, 12), at(12, 14))
+  ];
+  const timeEntry = {
+    id: 'entry-shopping',
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    taskId: 'shopping',
+    createdBy: 'manual',
+    description: '',
+    activities: sources.map((activity, index) => ({
+      ...activity,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayGroupKey: `shopping-row-source-${index + 1}`,
+      sources: [activity]
+    }))
+  };
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities: sources,
+      timeEntries: [timeEntry],
+      currentDate: new Date(dateStart)
+    });
+    const styles = extractEntryStyles(html);
+
+    assert.ok(styles.length > 0, `${zoom} min renders source-backed assignment`);
+    styles.forEach(style => {
+      assert.equal(style.left, null, `${zoom} min block should not be lane-split`);
+      assert.equal(style.width, null, `${zoom} min block should not be lane-split`);
+      assert.equal(style.right, null, `${zoom} min block should not be lane-split`);
+    });
+    assert.equal(
+      new Set(styles.map(style => `${style.top}:${style.height}`)).size,
+      styles.length,
+      `${zoom} min should not repeat block geometry for one display row`
+    );
+
+    if (zoom === 1) {
+      assert.equal(styles.length, 3, '1 min keeps exact source sessions separate');
+      assert.deepEqual(extractTimeEntryDurationLabels(html), ['10 min', '2 min', '2 min']);
+    } else {
+      assert.equal(styles.length, 1, `${zoom} min uses one continuous visual block`);
+      const expectedEndByZoom = new Map([
+        [5, at(12, 15)],
+        [10, at(12, 20)],
+        [15, at(12, 15)],
+        [30, at(12, 30)],
+        [60, at(13, 0)]
+      ]);
+      assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+        dateStart,
+        start: displayStart,
+        end: expectedEndByZoom.get(zoom),
+        zoom
+      }), `${zoom} min popup assignment geometry`);
+      assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
+    }
+  }
+});
+
+test('source-backed popup row assignments keep saved duration and scoped exact edit payloads', () => {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = {
+    id: 'project-personal',
+    name: 'Personal',
+    color: '#ef4444',
+    tasks: [{ id: 'shopping', name: 'Shopping' }]
+  };
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const displayStart = at(12, 0);
+  const displayEnd = at(12, 15);
+  const source = (title, url, start, end, duration = end - start) => ({
+    app: 'Brave Browser',
+    title,
+    url,
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration,
+    assignedDurationMs: duration,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: displayStart,
+    assignmentDisplayEnd: displayEnd,
+    assignmentDisplayZoom: 15
+  });
+  const shopSources = [
+    source('Shop basket', 'https://shop.example/basket', at(12, 0), at(12, 3)),
+    source('Shop shipping', 'https://shop.example/shipping', at(12, 4), at(12, 6)),
+    source('Shop checkout', 'https://shop.example/checkout', at(12, 8), at(12, 12))
+  ];
+  const shopSavedSources = [
+    ...shopSources,
+    source('Shop basket', 'https://shop.example/basket', at(12, 1), at(12, 3), 2 * 60 * 1000),
+    source('Shop checkout', 'https://shop.example/checkout', at(12, 9), at(12, 12), 3 * 60 * 1000)
+  ];
+  const supplierSource = source('Supplier comparison', 'https://supplier.example', at(12, 10), at(12, 12), 2 * 60 * 1000);
+  const marketplaceSource = source('Marketplace order', 'https://market.example', at(12, 13), at(12, 15), 2 * 60 * 1000);
+  const savedActivities = [
+    {
+      ...source('Shop checkout summary', 'https://shop.example', displayStart, at(12, 12), 10 * 60 * 1000),
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayGroupKey: 'shopping-row-shop',
+      sources: shopSavedSources
+    },
+    {
+      ...supplierSource,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayGroupKey: 'shopping-row-supplier',
+      sources: [supplierSource]
+    },
+    {
+      ...marketplaceSource,
+      assignmentStart: displayStart,
+      assignmentEnd: displayEnd,
+      assignmentDisplayGroupKey: 'shopping-row-marketplace',
+      sources: [marketplaceSource]
+    }
+  ];
+  const timeEntry = {
+    id: 'entry-shopping',
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    taskId: 'shopping',
+    createdBy: 'manual',
+    description: '',
+    activities: savedActivities
+  };
+  const currentVisibleActivities = [
+    ...shopSources,
+    source('Supplier comparison later', 'https://supplier.example', at(12, 15), at(12, 19), 4 * 60 * 1000),
+    source('Marketplace order later', 'https://market.example', at(12, 20), at(12, 24), 4 * 60 * 1000)
+  ];
+
+  const fiveMinuteHtml = renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: [project],
+    activities: currentVisibleActivities,
+    timeEntries: [timeEntry],
+    currentDate: new Date(dateStart)
+  });
+  const fiveMinuteStyles = extractEntryStyles(fiveMinuteHtml);
+
+  assert.equal(fiveMinuteStyles.length, 1, '5 min keeps one visual block');
+  assert.deepEqual(extractTimeEntryDurationLabels(fiveMinuteHtml), ['14 min']);
+
+  const { context, html: oneMinuteHtml } = renderLoggedTimeEntriesWithContext({
+    zoom: 1,
+    projects: [project],
+    activities: currentVisibleActivities,
+    timeEntries: [timeEntry],
+    currentDate: new Date(dateStart)
+  });
+  const oneMinuteLabels = extractTimeEntryDurationLabels(oneMinuteHtml);
+  const oneMinuteStyles = extractEntryStyles(oneMinuteHtml);
+  assert.ok(oneMinuteLabels.length > 1, '1 min keeps exact source projections');
+  assert.equal(sumDurationLabelMinutes(oneMinuteLabels), 14);
+  oneMinuteStyles.forEach(style => {
+    assert.equal(style.left, null, '1 min exact source projections should not lane-split');
+    assert.equal(style.width, null, '1 min exact source projections should not lane-split');
+    assert.equal(style.right, null, '1 min exact source projections should not lane-split');
+  });
+  assert.equal(
+    new Set(oneMinuteStyles.map(style => `${style.top}:${style.height}`)).size,
+    oneMinuteStyles.length,
+    '1 min should not repeat geometry for overlapping saved source children'
+  );
+
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+  const [firstBlockDataset] = extractTimeEntryBlockDatasets(oneMinuteHtml);
+  assert.ok(firstBlockDataset, 'Expected a clickable 1 min time entry projection');
+
+  assert.equal(context.openTimeEntryBlockEditor({ dataset: firstBlockDataset }), true);
+  assert.equal(context.window.editingTimeEntryId, 'entry-shopping');
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].title, 'Shop basket');
+  assert.notDeepEqual(
+    modalArgs[6].map(activity => activity.title),
+    savedActivities.map(activity => activity.title)
+  );
 });
 
 test('logged time entries render at least one full row high for short entries', () => {
