@@ -252,6 +252,8 @@ let resizeState = {
 window.editingProjectId = null;
 window.isBulkAllocation = false;
 window.editingTimeEntryId = null;
+window.editingTimeEntryPersistedRange = null;
+window.editingTimeEntryPersistedActivities = null;
 
 const browserPatterns = [
     /^Brave Browser\s*-\s*/i,

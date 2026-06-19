@@ -236,6 +236,7 @@ function getDayTimelineRenderModel({
 
     incrementTimelineDiagnostic('dayRenderModelBuilds');
     const activityBlockDetails = new Map();
+    const timeEntryBlockDetails = new Map();
     const useActivitySessions = shouldRenderExactActivityStreamSessions(renderZoom);
     const activitySessions = useActivitySessions
         ? buildActivityStreamSessions({
@@ -264,6 +265,7 @@ function getDayTimelineRenderModel({
     });
 
     rowLayout.activityBlockDetails = activityBlockDetails;
+    rowLayout.timeEntryBlockDetails = timeEntryBlockDetails;
     const model = {
         dateStartOfDay: dayStart,
         zoom: renderZoom,
@@ -273,7 +275,8 @@ function getDayTimelineRenderModel({
         activityCells,
         timeEntryRenderItems,
         rowLayout,
-        activityBlockDetails
+        activityBlockDetails,
+        timeEntryBlockDetails
     };
 
     dayTimelineRenderModelCache = {
@@ -1765,6 +1768,8 @@ function draftUnloggedRecordedWorkGroup(groupId) {
     const end = Math.max(...activities.map(activity => activity.end));
     window.editingTimeEntryId = null;
     window.editingTimeEntryGroupIds = null;
+    window.editingTimeEntryPersistedRange = null;
+    window.editingTimeEntryPersistedActivities = null;
     openTimeEntryModal(start, end, '', null, null, true, activities);
 }
 
@@ -3078,6 +3083,306 @@ function hasSourceBackedAssignment(activity) {
     return getAssignmentSourceActivities(activity).length > 0;
 }
 
+function getSourceBackedAssignmentUnitKey(entry, activity) {
+    const displayStart = Number(activity?.assignmentDisplayStart);
+    const displayEnd = Number(activity?.assignmentDisplayEnd);
+    if (Number.isFinite(displayStart) && Number.isFinite(displayEnd) && displayEnd > displayStart) {
+        const displayZoom = Number(activity?.assignmentDisplayZoom);
+        return [
+            entry?.id || '',
+            entry?.projectId || '',
+            entry?.taskId || '',
+            displayStart,
+            displayEnd,
+            Number.isFinite(displayZoom) ? displayZoom : ''
+        ].join('|||');
+    }
+
+    const range = getAssignmentActivityRange(entry, activity);
+    if (!range) return '';
+    return [
+        entry?.id || '',
+        entry?.projectId || '',
+        entry?.taskId || '',
+        range.start,
+        range.end
+    ].join('|||');
+}
+
+function getSourceBackedAssignmentSavedDurationMs(activity, range = null) {
+    const assignedDuration = Number(activity?.assignedDurationMs);
+    if (Number.isFinite(assignedDuration) && assignedDuration > 0) {
+        return assignedDuration;
+    }
+
+    const directDuration = Number(activity?.duration);
+    if (Number.isFinite(directDuration) && directDuration > 0) {
+        return directDuration;
+    }
+
+    return getActivitySourceDuration(activity, range?.start, range?.end);
+}
+
+function buildSourceBackedAssignmentUnitMetadata(entry, assignmentActivities) {
+    const units = new Map();
+
+    (Array.isArray(assignmentActivities) ? assignmentActivities : [])
+        .filter(hasSourceBackedAssignment)
+        .forEach(activity => {
+            const key = getSourceBackedAssignmentUnitKey(entry, activity);
+            if (!key) return;
+
+            const range = getAssignmentActivityRange(entry, activity);
+            const durationMs = getSourceBackedAssignmentSavedDurationMs(activity, range);
+            if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+
+            if (!units.has(key)) {
+                units.set(key, {
+                    key,
+                    durationMs: 0,
+                    activities: []
+                });
+            }
+
+            const unit = units.get(key);
+            unit.durationMs += durationMs;
+            unit.activities.push(activity);
+        });
+
+    return units;
+}
+
+function getSourceBackedRenderMetadata(unitMetadata) {
+    if (!unitMetadata?.key || !Number.isFinite(unitMetadata.durationMs) || unitMetadata.durationMs <= 0) {
+        return {};
+    }
+
+    return {
+        renderSourceBackedUnitKey: unitMetadata.key,
+        renderSourceBackedUnitDurationMs: unitMetadata.durationMs,
+        renderSourceBackedUnitActivities: Array.isArray(unitMetadata.activities)
+            ? unitMetadata.activities
+            : []
+    };
+}
+
+function allocateRoundedMinuteDurations(items, totalDurationMs, getWeight) {
+    const list = Array.isArray(items) ? items : [];
+    const targetMinutes = Math.max(1, Math.round(Number(totalDurationMs) / (60 * 1000)));
+    const weightedItems = list
+        .map((item, index) => ({
+            item,
+            index,
+            weight: Math.max(0, Number(getWeight?.(item)) || 0)
+        }))
+        .filter(weighted => weighted.weight > 0);
+    if (weightedItems.length === 0 || !Number.isFinite(targetMinutes) || targetMinutes <= 0) {
+        return new Map();
+    }
+
+    const allocations = new Map(weightedItems.map(weighted => [weighted.item, 0]));
+    const totalWeight = weightedItems.reduce((total, weighted) => total + weighted.weight, 0);
+
+    if (targetMinutes < weightedItems.length) {
+        weightedItems
+            .sort((left, right) => right.weight - left.weight || left.index - right.index)
+            .slice(0, targetMinutes)
+            .forEach(weighted => allocations.set(weighted.item, 60 * 1000));
+        return allocations;
+    }
+
+    weightedItems.forEach(weighted => allocations.set(weighted.item, 60 * 1000));
+    let remainingMinutes = targetMinutes - weightedItems.length;
+    if (remainingMinutes <= 0) return allocations;
+
+    let allocatedExtra = 0;
+    const fractional = weightedItems.map(weighted => {
+        const exact = totalWeight > 0 ? (weighted.weight / totalWeight) * remainingMinutes : 0;
+        const whole = Math.floor(exact);
+        allocations.set(weighted.item, allocations.get(weighted.item) + whole * 60 * 1000);
+        allocatedExtra += whole;
+        return {
+            item: weighted.item,
+            index: weighted.index,
+            remainder: exact - whole
+        };
+    });
+
+    fractional
+        .sort((left, right) => right.remainder - left.remainder || left.index - right.index)
+        .slice(0, Math.max(0, remainingMinutes - allocatedExtra))
+        .forEach(weighted => allocations.set(
+            weighted.item,
+            allocations.get(weighted.item) + 60 * 1000
+        ));
+
+    return allocations;
+}
+
+function setRenderEntryDuration(entry, durationMs) {
+    if (!entry || !Number.isFinite(durationMs) || durationMs < 0) return;
+
+    entry.renderDurationMs = durationMs;
+    if (Array.isArray(entry.activities)) {
+        entry.activities = entry.activities.map(activity => ({
+            ...activity,
+            duration: durationMs,
+            assignedDurationMs: durationMs,
+            modalSourceActivities: Array.isArray(activity?.modalSourceActivities)
+                ? assignModalActivityDurations(activity.modalSourceActivities, durationMs)
+                : activity?.modalSourceActivities
+        }));
+    }
+}
+
+function assignModalActivityDurations(activities, totalDurationMs) {
+    const list = Array.isArray(activities) ? activities : [];
+    if (list.length === 0) return [];
+    if (list.length === 1) {
+        return [{
+            ...list[0],
+            duration: totalDurationMs,
+            assignedDurationMs: totalDurationMs
+        }];
+    }
+
+    const allocations = allocateRoundedMinuteDurations(
+        list,
+        totalDurationMs,
+        activity => getActivitySourceDuration(activity)
+    );
+    return list.map(activity => {
+        const duration = allocations.get(activity) ?? getActivitySourceDuration(activity);
+        return {
+            ...activity,
+            duration,
+            assignedDurationMs: duration
+        };
+    });
+}
+
+function allocateSourceBackedExactRenderDurations(renderEntries, zoom) {
+    if (!shouldRenderExactActivityStreamSessions(zoom)) return renderEntries;
+
+    const groupsByUnitKey = new Map();
+    (Array.isArray(renderEntries) ? renderEntries : []).forEach(entry => {
+        if (entry?.renderSourceBackedAssignment !== true || entry?.renderExactGeometry !== true) return;
+
+        const unitKey = normalizeActivityText(entry.renderSourceBackedUnitKey).trim();
+        const repairKey = normalizeActivityText(entry.renderDisplayRepairKey).trim();
+        const unitDurationMs = Number(entry.renderSourceBackedUnitDurationMs);
+        if (!unitKey || !repairKey || !Number.isFinite(unitDurationMs) || unitDurationMs <= 0) return;
+
+        if (!groupsByUnitKey.has(unitKey)) {
+            groupsByUnitKey.set(unitKey, {
+                durationMs: unitDurationMs,
+                repairs: new Map()
+            });
+        }
+
+        const unit = groupsByUnitKey.get(unitKey);
+        unit.durationMs = Math.max(unit.durationMs, unitDurationMs);
+        if (!unit.repairs.has(repairKey)) {
+            unit.repairs.set(repairKey, {
+                key: repairKey,
+                entries: [],
+                weightMs: 0,
+                activityKey: '',
+                activityDurationMs: 0,
+                allocatedMs: null
+            });
+        }
+
+        const repair = unit.repairs.get(repairKey);
+        repair.entries.push(entry);
+        repair.weightMs = Math.max(repair.weightMs, Number(entry.renderDurationMs) || 0);
+        const activityKey = normalizeActivityText(entry.renderSourceBackedActivityKey).trim();
+        const activityDurationMs = Number(entry.renderSourceBackedActivityDurationMs);
+        if (activityKey) repair.activityKey = activityKey;
+        if (Number.isFinite(activityDurationMs) && activityDurationMs > 0) {
+            repair.activityDurationMs = Math.max(repair.activityDurationMs || 0, activityDurationMs);
+        }
+    });
+
+    for (const unit of groupsByUnitKey.values()) {
+        const repairs = Array.from(unit.repairs.values())
+            .filter(repair => repair.entries.length > 0 && repair.weightMs > 0);
+        const repairsByActivity = new Map();
+        repairs.forEach(repair => {
+            if (!repair.activityKey || !Number.isFinite(repair.activityDurationMs) || repair.activityDurationMs <= 0) {
+                return;
+            }
+            if (!repairsByActivity.has(repair.activityKey)) {
+                repairsByActivity.set(repair.activityKey, {
+                    durationMs: repair.activityDurationMs,
+                    repairs: []
+                });
+            }
+            const activity = repairsByActivity.get(repair.activityKey);
+            activity.durationMs = Math.max(activity.durationMs, repair.activityDurationMs);
+            activity.repairs.push(repair);
+        });
+
+        if (repairsByActivity.size > 0) {
+            for (const activity of repairsByActivity.values()) {
+                const allocations = allocateRoundedMinuteDurations(
+                    activity.repairs,
+                    activity.durationMs,
+                    repair => repair.weightMs
+                );
+                activity.repairs.forEach(repair => {
+                    repair.allocatedMs = allocations.get(repair) ?? 0;
+                });
+            }
+            normalizeRepairAllocationsToTarget(repairs, unit.durationMs);
+        } else {
+            const allocations = allocateRoundedMinuteDurations(
+                repairs,
+                unit.durationMs,
+                repair => repair.weightMs
+            );
+            repairs.forEach(repair => {
+                repair.allocatedMs = allocations.get(repair) ?? 0;
+            });
+        }
+
+        repairs.forEach(repair => {
+            const durationMs = repair.allocatedMs;
+            if (!Number.isFinite(durationMs)) return;
+            repair.entries.forEach(entry => setRenderEntryDuration(entry, durationMs));
+        });
+    }
+
+    return renderEntries;
+}
+
+function normalizeRepairAllocationsToTarget(repairs, totalDurationMs) {
+    const list = (Array.isArray(repairs) ? repairs : [])
+        .filter(repair => repair.weightMs > 0);
+    if (list.length === 0) return;
+
+    const targetMinutes = Math.max(1, Math.round(Number(totalDurationMs) / (60 * 1000)));
+    let currentMinutes = list.reduce((total, repair) => (
+        total + Math.max(0, Math.round((Number(repair.allocatedMs) || 0) / (60 * 1000)))
+    ), 0);
+    const byWeight = [...list].sort((left, right) => right.weightMs - left.weightMs || left.key.localeCompare(right.key));
+
+    let index = 0;
+    while (currentMinutes < targetMinutes && byWeight.length > 0) {
+        const repair = byWeight[index % byWeight.length];
+        repair.allocatedMs = (Number(repair.allocatedMs) || 0) + 60 * 1000;
+        currentMinutes += 1;
+        index += 1;
+    }
+
+    while (currentMinutes > targetMinutes) {
+        const repair = byWeight.find(candidate => (Number(candidate.allocatedMs) || 0) > 0);
+        if (!repair) break;
+        repair.allocatedMs = Math.max(0, (Number(repair.allocatedMs) || 0) - 60 * 1000);
+        currentMinutes -= 1;
+    }
+}
+
 function activityMatchesSimilarityScope(activity, scopeActivity) {
     const mode = normalizeActivityText(scopeActivity?.selectedSimilarityMode).trim();
     const matchKey = normalizeActivityText(scopeActivity?.selectedSimilarityMatchKey).trim();
@@ -3112,9 +3417,11 @@ function sourceIsVisibleInActivityBlock(source, block, assignmentActivity) {
     ));
 }
 
-function getSourceBackedAssignmentProjectionDuration(activity, block, range) {
+function getSourceBackedAssignmentProjectionMatch(activity, block, range) {
     const sources = getAssignmentSourceActivities(activity);
-    if (sources.length === 0) return 0;
+    if (sources.length === 0) {
+        return { durationMs: 0, modalActivities: [] };
+    }
 
     const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
         block?.overlaps,
@@ -3122,12 +3429,37 @@ function getSourceBackedAssignmentProjectionDuration(activity, block, range) {
         block?.end
     );
     const visibleSources = sources.filter(source => sourceIsVisibleInActivityBlock(source, block, activity));
+    const modalActivities = visibleOverlaps
+        .filter(overlap => sources.some(source => activityMatchesSourceProjectionIdentity(
+            overlap,
+            source,
+            activity
+        )))
+        .map(overlap => {
+            const start = Math.max(range.start, block.start, Number(overlap.start));
+            const end = Math.min(range.end, block.end, Number(overlap.end));
+            const duration = getActivitySourceDuration(overlap, start, end);
+            return {
+                ...overlap,
+                start,
+                end,
+                duration,
+                assignedDurationMs: duration,
+                assignmentStart: start,
+                assignmentEnd: end,
+                assignmentSource: 'activity-stream',
+                assignmentModel: ACTIVITY_STREAM_SUMMARY_ASSIGNMENT_MODEL
+            };
+        })
+        .filter(overlap => overlap.end > overlap.start && getActivitySourceDuration(overlap) > 0);
 
-    return visibleSources.reduce((total, source) => {
+    const durationMs = visibleSources.reduce((total, source) => {
         const start = Math.max(range.start, block.start);
         const end = Math.min(range.end, block.end);
         return total + getActivitySourceOverlapDuration(source, start, end);
     }, 0);
+
+    return { durationMs, modalActivities };
 }
 
 function getSourceBackedAssignmentProjectionKey(activity, summaryKey) {
@@ -3194,8 +3526,8 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
     for (const block of visibleBlocks) {
         if (block.end <= range.start || block.start >= range.end) continue;
 
-        const sourceBackedDuration = getSourceBackedAssignmentProjectionDuration(activity, block, range);
-        if (sourceBackedDuration > 0) {
+        const sourceBackedProjection = getSourceBackedAssignmentProjectionMatch(activity, block, range);
+        if (sourceBackedProjection.durationMs > 0) {
             const exactStart = Math.max(range.start, block.start);
             const exactEnd = Math.min(range.end, block.end);
             if (exactEnd <= exactStart) continue;
@@ -3205,8 +3537,9 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
                 displayEnd: block.end,
                 exactStart,
                 exactEnd,
-                durationMs: sourceBackedDuration,
+                durationMs: sourceBackedProjection.durationMs,
                 displayRepairKey: `${getSourceBackedAssignmentProjectionKey(activity, summaryKey)}|||sources|||${block.start}|||${block.end}`,
+                modalActivities: sourceBackedProjection.modalActivities,
                 sourceBacked: true,
                 renderExactGeometry: shouldRenderExactActivityStreamSessions(renderZoom)
             });
@@ -3283,6 +3616,9 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
         }];
     }
 
+    const sourceBackedMetadata = getSourceBackedRenderMetadata(options.sourceBackedUnitMetadata);
+    const sourceBackedActivityDurationMs = getSourceBackedAssignmentSavedDurationMs(activity, range);
+    const sourceBackedActivityKey = `${sourceBackedMetadata.renderSourceBackedUnitKey || ''}|||activity|||${getSourceBackedAssignmentProjectionKey(activity, summaryKey)}`;
     return projections.map(projection => {
         const repairKey = projection.displayRepairKey || (activity.assignmentDisplayRepairKey
             ? `${activity.assignmentDisplayRepairKey}|||${projection.displayStart}|||${projection.displayEnd}`
@@ -3294,7 +3630,10 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
             duration: projection.durationMs,
             assignmentStart: projection.exactStart,
             assignmentEnd: projection.exactEnd,
-            assignmentDisplayGroupKey: options.rowScopedDisplayGroups && repairKey ? repairKey : ''
+            assignmentDisplayGroupKey: options.rowScopedDisplayGroups && repairKey ? repairKey : '',
+            modalSourceActivities: Array.isArray(projection.modalActivities)
+                ? projection.modalActivities
+                : []
         };
 
         if (repairKey) {
@@ -3311,6 +3650,11 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
             renderDisplayRepairKey: repairKey,
             renderSourceBackedAssignment: projection.sourceBacked === true,
             renderExactGeometry: projection.renderExactGeometry === true,
+            ...(projection.sourceBacked === true ? sourceBackedMetadata : {}),
+            ...(projection.sourceBacked === true ? {
+                renderSourceBackedActivityKey: sourceBackedActivityKey,
+                renderSourceBackedActivityDurationMs: sourceBackedActivityDurationMs
+            } : {}),
             activities: [renderActivity]
         };
     });
@@ -3357,12 +3701,16 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
         return [{ ...entry, renderManualSavedRange: true }];
     }
 
+    const sourceBackedUnitMetadataByKey = buildSourceBackedAssignmentUnitMetadata(entry, assignmentActivities);
     const renderEntries = [];
     assignmentActivities.forEach(activity => {
         const range = getAssignmentActivityRange(entry, activity);
         if (!range) return;
 
         const displayBounds = getActivityStreamAssignmentDisplayBounds(activity);
+        const sourceBackedUnitMetadata = sourceBackedUnitMetadataByKey.get(
+            getSourceBackedAssignmentUnitKey(entry, activity)
+        );
         if (displayBounds && assignmentDisplayBoundsMatchCurrentZoom(activity, renderZoom)) {
             const duration = getActivitySourceDuration(activity, range.start, range.end);
             if (duration <= 0) return;
@@ -3385,6 +3733,7 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                 renderDurationMs: duration,
                 renderSourceBackedAssignment: hasSourceBackedAssignment(activity),
                 renderExactGeometry: true,
+                ...(hasSourceBackedAssignment(activity) ? getSourceBackedRenderMetadata(sourceBackedUnitMetadata) : {}),
                 activities: [renderActivity]
             });
             return;
@@ -3433,7 +3782,10 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                 getActivitySummaryKey(activity),
                 dateStartOfDay,
                 renderZoom,
-                { rowScopedDisplayGroups: Boolean(displayBounds) }
+                {
+                    rowScopedDisplayGroups: Boolean(displayBounds),
+                    sourceBackedUnitMetadata
+                }
             ));
             return;
         }
@@ -3467,7 +3819,7 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
         });
     });
 
-    return renderEntries;
+    return allocateSourceBackedExactRenderDurations(renderEntries, renderZoom);
 }
 
 const TIME_ENTRY_CONTENT_LEFT_PX = 64;
@@ -3641,15 +3993,29 @@ function canMergeLoggedTimeEntryVisualItems(current, item, displayStart, display
     return hasTouchingDisplay;
 }
 
-function getSingleDisplaySourceBackedDurationMs(entries) {
-    const allEntries = Array.isArray(entries) ? entries : [];
+function getSingleDisplaySourceBackedDurationMs(item) {
+    if (item?.renderExactGeometry === true) return null;
+
+    const allEntries = Array.isArray(item?.entries) ? item.entries : [];
     const sourceBackedEntries = allEntries
         .filter(entry => entry?.renderSourceBackedAssignment === true);
-    if (sourceBackedEntries.length < 2) return null;
+    if (sourceBackedEntries.length === 0) return null;
     if (sourceBackedEntries.length !== allEntries.length) return null;
 
     const entryKeys = new Set(sourceBackedEntries.map(entry => String(entry?.id || '')).filter(Boolean));
     if (entryKeys.size !== 1) return null;
+
+    const unitDurations = new Map();
+    sourceBackedEntries.forEach(entry => {
+        const unitKey = normalizeActivityText(entry?.renderSourceBackedUnitKey).trim();
+        const unitDurationMs = Number(entry?.renderSourceBackedUnitDurationMs);
+        if (unitKey && Number.isFinite(unitDurationMs) && unitDurationMs > 0) {
+            unitDurations.set(unitKey, Math.max(unitDurations.get(unitKey) || 0, unitDurationMs));
+        }
+    });
+    if (unitDurations.size === 1) {
+        return Array.from(unitDurations.values())[0];
+    }
 
     const displayBoundsKeys = new Set();
     const sourceDurations = new Map();
@@ -3698,6 +4064,14 @@ function getSingleDisplaySourceBackedDurationMs(entries) {
 
     return Array.from(sourceDurations.values())
         .reduce((total, duration) => total + duration, 0);
+}
+
+function getRenderedTimeEntryDedupeKey(entry) {
+    if (entry?.renderSourceBackedAssignment === true && entry?.renderDisplayRepairKey) {
+        return `${entry.id || ''}|||${entry.renderDisplayRepairKey}`;
+    }
+
+    return entry.id || `${entry.start}:${entry.end}:${entry.projectId}`;
 }
 
 function mergeLoggedTimeEntryVisualItems(renderItems) {
@@ -4197,8 +4571,8 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
     const renderItems = mergeLoggedTimeEntryVisualItems([...manualItems, ...assignmentItems])
         .map(item => ({
             ...item,
-            durationMs: getSingleDisplaySourceBackedDurationMs(item.entries) ?? item.durationMs,
-            entries: [...new Map((item.entries || []).map(entry => [entry.id || `${entry.start}:${entry.end}:${entry.projectId}`, entry])).values()]
+            durationMs: getSingleDisplaySourceBackedDurationMs(item) ?? item.durationMs,
+            entries: [...new Map((item.entries || []).map(entry => [getRenderedTimeEntryDedupeKey(entry), entry])).values()]
         }))
         .filter(item => item.entries.length > 0)
         .map(item => ({
@@ -4280,6 +4654,64 @@ function getActivityBlockDetailOverlaps(blockEl) {
     }
 
     return parseActivityBlockOverlapsDataset(blockEl);
+}
+
+function isSourceBackedTimeEntryRenderItem(item) {
+    return Array.isArray(item?.entries)
+        && item.entries.some(entry => entry?.renderSourceBackedAssignment === true);
+}
+
+function getTimeEntryBlockOriginalEntry(item) {
+    const entryId = item?.firstEntry?.id || item?.entries?.find(entry => entry?.id)?.id;
+    if (!entryId) return null;
+    return (Array.isArray(state.timeEntries) ? state.timeEntries : [])
+        .find(entry => entry.id === entryId) || null;
+}
+
+function getTimeEntryBlockRenderActivities(item) {
+    return (Array.isArray(item?.entries) ? item.entries : [])
+        .flatMap(entry => Array.isArray(entry?.activities) ? entry.activities : [])
+        .flatMap(activity => {
+            if (Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0) {
+                return activity.modalSourceActivities;
+            }
+            return [activity];
+        });
+}
+
+function registerTimeEntryBlockDetail(model, item) {
+    const detailMap = model?.timeEntryBlockDetails;
+    if (!detailMap || !isSourceBackedTimeEntryRenderItem(item)) return null;
+    if (item?.renderExactGeometry !== true) return null;
+
+    const renderActivities = getTimeEntryBlockRenderActivities(item);
+    if (renderActivities.length === 0) return null;
+
+    const originalEntry = getTimeEntryBlockOriginalEntry(item);
+    const firstEntry = item.firstEntry || item.entries?.[0] || originalEntry;
+    if (!firstEntry?.id) return null;
+
+    const key = `time-entry-detail-${detailMap.size + 1}`;
+    detailMap.set(key, {
+        entryId: firstEntry.id,
+        start: item.start,
+        end: item.end,
+        description: firstEntry.description || '',
+        projectId: firstEntry.projectId,
+        taskId: firstEntry.taskId || '',
+        billable: firstEntry.billable,
+        activities: renderActivities,
+        persistedStart: originalEntry?.start,
+        persistedEnd: originalEntry?.end,
+        persistedActivities: Array.isArray(originalEntry?.activities) ? originalEntry.activities : null
+    });
+    return key;
+}
+
+function getTimeEntryBlockDetail(blockEl) {
+    const detailKey = blockEl?.dataset?.detailKey;
+    if (!detailKey) return null;
+    return dayTimelineRenderModelCache?.model?.timeEntryBlockDetails?.get(detailKey) || null;
 }
 
 function summarizeActivityOverlaps(overlaps, rangeStart, rangeEnd) {
@@ -5860,6 +6292,7 @@ function renderLoggedTimeEntries() {
     });
     const renderItems = model.timeEntryRenderItems;
     const rowLayout = model.rowLayout;
+    model.timeEntryBlockDetails?.clear?.();
 
     for (const item of renderItems) {
         const entry = item.firstEntry;
@@ -5925,6 +6358,11 @@ function renderLoggedTimeEntries() {
                  data-group-start="${item.start}"
                  data-group-end="${item.end}"`
             : '';
+        const detailKey = registerTimeEntryBlockDetail(model, item);
+        const detailDataHtml = detailKey
+            ? `
+                 data-detail-key="${escapeAttribute(detailKey)}"`
+            : '';
         const laneStyle = getLoggedTimeEntryLaneStyle(item);
 
         const resizeTopHandleHtml = isCompressedDayTimelineDirectManipulationDisabled()
@@ -5937,7 +6375,7 @@ function renderLoggedTimeEntries() {
         html += `
             <div class="${className}"
                  style="top: ${topPx}px; height: ${heightPx}px; --entry-project-color: ${project.color};${laneStyle}"
-                 data-id="${entry.id}"${groupDataHtml}>
+                 data-id="${entry.id}"${groupDataHtml}${detailDataHtml}>
                 ${resizeTopHandleHtml}
                 ${timeEntryMainHtml(floatingLabelClass)}
                 ${projectRowHtml}
@@ -6023,6 +6461,31 @@ function getGroupedTimeEntryActivities(entries) {
 }
 
 function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
+    const detail = getTimeEntryBlockDetail(blockEl);
+    if (detail?.entryId) {
+        window.editingTimeEntryId = detail.entryId;
+        window.editingTimeEntryGroupIds = null;
+        window.editingTimeEntryPersistedRange = Number.isFinite(detail.persistedStart)
+            && Number.isFinite(detail.persistedEnd)
+            && detail.persistedEnd > detail.persistedStart
+            ? { start: detail.persistedStart, end: detail.persistedEnd }
+            : null;
+        window.editingTimeEntryPersistedActivities = Array.isArray(detail.persistedActivities)
+            ? detail.persistedActivities
+            : null;
+        openTimeEntryModal(
+            detail.start,
+            detail.end,
+            detail.description || '',
+            detail.projectId,
+            detail.billable,
+            false,
+            Array.isArray(detail.activities) ? detail.activities : [],
+            detail.taskId || ''
+        );
+        return true;
+    }
+
     const groupIds = getTimeEntryGroupIds(blockEl);
     const entries = Array.isArray(sourceEntries) ? sourceEntries : [];
     const groupEntries = groupIds
@@ -6034,6 +6497,8 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
         const groupEnd = Number(blockEl.dataset.groupEnd);
         window.editingTimeEntryId = firstEntry.id;
         window.editingTimeEntryGroupIds = groupEntries.map(entry => entry.id);
+        window.editingTimeEntryPersistedRange = null;
+        window.editingTimeEntryPersistedActivities = null;
         openTimeEntryModal(
             Number.isFinite(groupStart) ? groupStart : Math.min(...groupEntries.map(entry => entry.start)),
             Number.isFinite(groupEnd) ? groupEnd : Math.max(...groupEntries.map(entry => entry.end)),
@@ -6053,6 +6518,8 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
 
     window.editingTimeEntryId = entry.id;
     window.editingTimeEntryGroupIds = null;
+    window.editingTimeEntryPersistedRange = null;
+    window.editingTimeEntryPersistedActivities = null;
     openTimeEntryModal(entry.start, entry.end, entry.description, entry.projectId, entry.billable, false, null, entry.taskId || '');
     return true;
 }

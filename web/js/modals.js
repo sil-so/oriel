@@ -561,6 +561,8 @@ function closeTimeEntryModal() {
     DOM.elModal.classList.add('hidden');
     window.editingTimeEntryId = null;
     window.editingTimeEntryGroupIds = null;
+    window.editingTimeEntryPersistedRange = null;
+    window.editingTimeEntryPersistedActivities = null;
     window.isBulkAllocation = false;
     window.pendingAiSuggestionCompletion = null;
     state.currentModalAllActivities = [];

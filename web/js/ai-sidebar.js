@@ -951,6 +951,8 @@
             const end = Math.max(...activities.map(activity => activity.end));
             global.window.editingTimeEntryId = null;
             global.window.editingTimeEntryGroupIds = null;
+            global.window.editingTimeEntryPersistedRange = null;
+            global.window.editingTimeEntryPersistedActivities = null;
             global.openTimeEntryModal(start, end, '', null, null, true, activities);
             return;
         }
@@ -974,6 +976,8 @@
             const defaultBillable = typeof suggestion.billable === 'boolean' ? suggestion.billable : null;
             global.window.editingTimeEntryId = null;
             global.window.editingTimeEntryGroupIds = null;
+            global.window.editingTimeEntryPersistedRange = null;
+            global.window.editingTimeEntryPersistedActivities = null;
             global.window.pendingAiSuggestionCompletion = suggestion.id ? { suggestionId: suggestion.id } : null;
             global.openTimeEntryModal(start, end, suggestion.title || '', defaultProjectId, defaultBillable, true, activities, defaultTaskId);
             const descriptionInput = byId('modal-description-input');
@@ -986,6 +990,8 @@
         if (suggestion.type === 'draftEntry' && typeof global.openTimeEntryModal === 'function') {
             global.window.editingTimeEntryId = null;
             global.window.editingTimeEntryGroupIds = null;
+            global.window.editingTimeEntryPersistedRange = null;
+            global.window.editingTimeEntryPersistedActivities = null;
             global.openTimeEntryModal(
                 suggestion.start,
                 suggestion.end,
@@ -1011,6 +1017,8 @@
             }
             global.window.editingTimeEntryId = entry.id;
             global.window.editingTimeEntryGroupIds = null;
+            global.window.editingTimeEntryPersistedRange = null;
+            global.window.editingTimeEntryPersistedActivities = null;
             global.openTimeEntryModal(
                 entry.start,
                 entry.end,
