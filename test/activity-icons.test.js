@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { test } from 'node:test';
 
 function loadUtils() {
-  const source = fs.readFileSync(new URL('../js/utils.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../web/js/utils.js', import.meta.url), 'utf8');
   const context = {
     window: {},
     URL,
@@ -18,7 +18,7 @@ function loadUtils() {
 }
 
 function loadNativeUtils() {
-  const source = fs.readFileSync(new URL('../js/utils.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../web/js/utils.js', import.meta.url), 'utf8');
   const context = {
     window: { OrielData: { isNative: true } },
     URL,
@@ -89,7 +89,7 @@ test('uses native Logo.dev icon scheme only after user enables brand icons', () 
 
 test('activity icons render inside a consistent fixed-size frame', () => {
   const utils = loadUtils();
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const nativeHtml = utils.getActivityIconHTML('Codex', '', 'Codex');
   const websiteHtml = utils.getActivityIconHTML('Brave Browser', 'https://www.youtube.com/watch?v=123', 'Video');

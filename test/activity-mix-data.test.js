@@ -20,7 +20,7 @@ function loadApiContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/api.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/api.js', 'utf8'), context);
   return context;
 }
 

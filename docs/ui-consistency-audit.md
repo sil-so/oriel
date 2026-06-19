@@ -29,26 +29,26 @@ The main problem is hierarchy and component vocabulary, not the neutral palette.
 
 | Surface | Primary files |
 | --- | --- |
-| App shell, top chrome, tabs, date navigation | `index.html`, `css/index.css`, `js/main.js` |
-| Timeline and Activity Stream | `index.html`, `css/index.css`, `js/timeline.js` |
-| Work Times, Unlogged Work, AI sidebar | `index.html`, `css/index.css`, `js/timeline.js`, `js/ai-sidebar.js` |
-| Modals and confirmation flows | `index.html`, `css/index.css`, `js/modals.js`, `js/main.js` |
-| Settings and provider sections | `index.html`, `css/index.css`, `js/main.js`, `js/ai-settings.js` |
-| Projects and project details | `index.html`, `css/index.css`, `js/projects.js` |
-| Statistics and charts | `index.html`, `css/index.css`, `js/reporting.js` |
-| AI Insights workspace | `index.html`, `css/index.css`, `js/main.js`, `js/ai-sidebar.js` |
-| Theme state | `index.html`, `css/index.css`, `js/state.js` |
+| App shell, top chrome, tabs, date navigation | `web/index.html`, `web/css/index.css`, `web/js/main.js` |
+| Timeline and Activity Stream | `web/index.html`, `web/css/index.css`, `web/js/timeline.js` |
+| Work Times, Unlogged Work, AI sidebar | `web/index.html`, `web/css/index.css`, `web/js/timeline.js`, `web/js/ai-sidebar.js` |
+| Modals and confirmation flows | `web/index.html`, `web/css/index.css`, `web/js/modals.js`, `web/js/main.js` |
+| Settings and provider sections | `web/index.html`, `web/css/index.css`, `web/js/main.js`, `web/js/ai-settings.js` |
+| Projects and project details | `web/index.html`, `web/css/index.css`, `web/js/projects.js` |
+| Statistics and charts | `web/index.html`, `web/css/index.css`, `web/js/reporting.js` |
+| AI Insights workspace | `web/index.html`, `web/css/index.css`, `web/js/main.js`, `web/js/ai-sidebar.js` |
+| Theme state | `web/index.html`, `web/css/index.css`, `web/js/state.js` |
 
 ## Findings
 
 Theme and tokens:
 
-- `css/index.css` defines a useful neutral token base, and still carries
+- `web/css/index.css` defines a useful neutral token base, and still carries
   `light` and `reference` variants for compatibility.
 - Theme compatibility cleanup keeps the selector while treating `light` and
   `reference` as compatibility themes. `graphite` remains the only design target
   for new UI work.
-- `index.html`, `js/state.js`, and native settings storage normalize legacy
+- `web/index.html`, `web/js/state.js`, and native settings storage normalize legacy
   theme values so `variant` maps to `reference` and unsupported values fall back
   to `graphite`.
 - Token roles need clearer meaning: accent, focus, selection, info, and project
@@ -56,11 +56,11 @@ Theme and tokens:
 
 Hard-coded styles:
 
-- `index.html` uses many arbitrary values such as `border-[#2d2f34]`,
+- `web/index.html` uses many arbitrary values such as `border-[#2d2f34]`,
   `bg-[#0d0e10]`, `text-[10px]`, `text-[11px]`, `rounded-xl`, `w-[650px]`,
   and `z-[100]`.
-- JS templates in `js/timeline.js`, `js/projects.js`, `js/main.js`, and
-  `js/reporting.js` repeat utility-heavy class strings for rows, cards, fields,
+- JS templates in `web/js/timeline.js`, `web/js/projects.js`, `web/js/main.js`, and
+  `web/js/reporting.js` repeat utility-heavy class strings for rows, cards, fields,
   and popover controls.
 - Some chart/project colors are legitimate data identity; they should be
   explicitly exempt rather than treated as generic hard-coded UI color.
@@ -158,9 +158,9 @@ Additional checks by change type:
 
 - Run `npm run build:assets` after Tailwind input, vendored frontend assets, or
   package dependency changes.
-- Run `./script/build_and_run.sh --verify` after native packaging or launch-path
+- Run `./tools/scripts/build_and_run.sh --verify` after native packaging or launch-path
   changes.
-- Run `./script/build_and_run.sh` and visually inspect the local app for
+- Run `./tools/scripts/build_and_run.sh` and visually inspect the local app for
   meaningful UI changes.
 
 ## Acceptance Criteria

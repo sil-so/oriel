@@ -39,12 +39,12 @@ function loadApiContext(statusResponse = { nativeStatus: 'active', nativeMessage
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/api.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/api.js', 'utf8'), context);
   return { context, indicator, tooltip, calls };
 }
 
 test('header contains one tracker status dot and removes obsolete status/count affordances', () => {
-  const index = fs.readFileSync('index.html', 'utf8');
+  const index = fs.readFileSync('web/index.html', 'utf8');
 
   assert.match(index, /id="tracking-status-indicator"/);
   assert.doesNotMatch(index, />Local<\/span>/);
@@ -53,7 +53,7 @@ test('header contains one tracker status dot and removes obsolete status/count a
 });
 
 test('header tracker status dot remains legible in light theme', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   const statusDotRule = css.match(/\.tracking-status-dot\s*\{([\s\S]*?)\n\}/);
   assert.ok(statusDotRule);
@@ -64,7 +64,7 @@ test('header tracker status dot remains legible in light theme', () => {
 });
 
 test('server exposes its existing tracker health as a read-only status endpoint', () => {
-  const server = fs.readFileSync('server.js', 'utf8');
+  const server = fs.readFileSync('tools/dev-server/server.js', 'utf8');
 
   assert.match(server, /pathname === '\/api\/status' && req\.method === 'GET'/);
   assert.match(server, /nativeStatus:\s*state\.tracker\.nativeStatus/);

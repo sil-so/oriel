@@ -24,7 +24,7 @@ const providers = {
 
 const config = providers[provider];
 if (!config) {
-  console.error('Usage: node script/verify_ai_screenshot_summary.mjs <openai|google|anthropic|openrouter> [model]');
+  console.error('Usage: node tools/scripts/verify_ai_screenshot_summary.mjs <openai|google|anthropic|openrouter> [model]');
   process.exit(1);
 }
 

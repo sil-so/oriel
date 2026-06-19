@@ -197,7 +197,7 @@ test('today navigation refreshes current date before jumping to current time', a
   context.window = context;
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/main.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
 
   await context.goToToday({ closePicker: true });
 
@@ -209,7 +209,7 @@ test('today navigation refreshes current date before jumping to current time', a
 });
 
 test('top workspace navigation includes AI Insights tab and workspace', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
   const aiInsightsMarkup = markup.slice(
     markup.indexOf('id="ai-insights-workspace"'),
     markup.indexOf('<!-- MODAL: Create/Edit Time Entry -->')
@@ -445,7 +445,7 @@ function loadMainControlsContext({
   context.window = { ...context.window, ...context };
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
   context.showTimeEntryHoverPreview = cellIndex => {
     hoverCalls.push(`show:${cellIndex}`);
   };
@@ -454,7 +454,7 @@ function loadMainControlsContext({
   };
   context.window.showTimeEntryHoverPreview = context.showTimeEntryHoverPreview;
   context.window.hideTimeEntryHoverPreview = context.hideTimeEntryHoverPreview;
-  vm.runInContext(fs.readFileSync('js/main.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
   context.setupMainEventListeners();
 
   return {
@@ -516,7 +516,7 @@ test('opening Projects hides timeline date navigation and closes its open picker
 });
 
 test('header settings control stays outside hidden date navigation', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
   const dateNavigation = markup.slice(
     markup.indexOf('id="date-navigation"'),
     markup.indexOf('id="header-actions"')
@@ -1324,9 +1324,9 @@ test('settings modal reopens with current theme and brand icon preference', asyn
 });
 
 test('settings modal exposes section tabs and can open directly to AI settings', async () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const script = fs.readFileSync('js/main.js', 'utf8');
-  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const script = fs.readFileSync('web/js/main.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('web/js/ai-settings.js', 'utf8');
 
   assert.match(markup, /id="settings-modal"[\s\S]*class="[^"]*(?:^|\s)modal-size--lg(?:\s|")[^"]*"/);
   assert.match(markup, /id="project-details-modal"[\s\S]*class="[^"]*(?:^|\s)modal-size--lg(?:\s|")[^"]*"/);
@@ -1348,10 +1348,10 @@ test('settings modal exposes section tabs and can open directly to AI settings',
 });
 
 test('AI settings section includes OpenRouter and screenshot summary controls', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const styles = fs.readFileSync('css/index.css', 'utf8');
-  const state = fs.readFileSync('js/state.js', 'utf8');
-  const aiSettingsScript = fs.readFileSync('js/ai-settings.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const styles = fs.readFileSync('web/css/index.css', 'utf8');
+  const state = fs.readFileSync('web/js/state.js', 'utf8');
+  const aiSettingsScript = fs.readFileSync('web/js/ai-settings.js', 'utf8');
 
   assert.match(markup, /Provider &amp; Key/);
   assert.match(markup, /Ask AI &amp; AI Insights/);
@@ -1666,8 +1666,8 @@ test('settings Logo.dev key removal requires confirmation', async () => {
 });
 
 test('settings Logo.dev key UI asks for the publishable key, not the secret key', () => {
-  const markup = fs.readFileSync('index.html', 'utf8');
-  const script = fs.readFileSync('js/main.js', 'utf8');
+  const markup = fs.readFileSync('web/index.html', 'utf8');
+  const script = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.match(markup, /Use your Logo\.dev <strong>publishable<\/strong> key \(`pk_/);
   assert.match(markup, /placeholder="Paste publishable key"/);
@@ -1737,10 +1737,10 @@ test('modal overlays close from Escape and outside click', () => {
 });
 
 test('actual activity capture removes passive review UI affordances', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const api = fs.readFileSync('js/api.js', 'utf8');
-  const modals = fs.readFileSync('js/modals.js', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const api = fs.readFileSync('web/js/api.js', 'utf8');
+  const modals = fs.readFileSync('web/js/modals.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.doesNotMatch(html, /passive-review/);
   assert.doesNotMatch(api, /updatePassiveReviewInbox|showPassiveReviewPrompt|pendingPassiveReviews/);

@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 
 test('the shipped-facing interface uses Oriel-owned activity terminology', () => {
-  const interfaceMarkup = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const timelineScript = fs.readFileSync(new URL('../js/timeline.js', import.meta.url), 'utf8');
+  const interfaceMarkup = fs.readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
+  const timelineScript = fs.readFileSync(new URL('../web/js/timeline.js', import.meta.url), 'utf8');
   const shippedInterface = `${interfaceMarkup}\n${timelineScript}`;
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 

@@ -170,8 +170,8 @@ function loadReportingContext() {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('js/reporting.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/reporting.js', 'utf8'), context);
 
   return { context, elements, fetchCalls };
 }
@@ -222,7 +222,7 @@ test('reporting all-time preset fetches unbounded historical data', async () => 
 
 test('reporting chart legends use semantic row classes without changing values', () => {
   const { context, elements } = loadReportingContext();
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   context.drawDonutChart(
     'canvas-programs',
@@ -300,7 +300,7 @@ test('app initialization initializes reporting controls', async () => {
   context.window = context;
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/main.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
 
   let reportingInitCalls = 0;
   context.setupMainEventListeners = () => {};
@@ -354,7 +354,7 @@ test('timeline date picker opens the custom Oriel popover instead of the native 
   context.window = context;
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/main.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
 
   context.openDatePicker();
 

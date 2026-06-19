@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 
 test('zoom control displays minute intervals without a Zoom prefix', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /#zoom-dropdown-container\s*\{[\s\S]*width:\s*118px;/);
   assert.match(css, /#zoom-dropdown-btn\s*\{[\s\S]*height:\s*32px;/);

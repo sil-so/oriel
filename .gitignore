@@ -46,9 +46,9 @@ docs/timeline-decisions.md
 scratch/
 
 # Local release experiments kept out of the lean public tree until supported.
-script/package_dmg.sh
-script/package_extension.sh
-script/sign_and_notarize.sh
+tools/scripts/package_dmg.sh
+tools/scripts/package_extension.sh
+tools/scripts/sign_and_notarize.sh
 
 # Browser verification artifacts.
 .playwright-mcp/

@@ -27,17 +27,19 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, '../..');
+const WEB_ROOT = path.join(ROOT_DIR, 'web');
 
 const PORT = Number.parseInt(process.env.ORIEL_PORT || '3000', 10);
 const HOST = process.env.ORIEL_HOST || '127.0.0.1';
-const DATA_DIR = process.env.ORIEL_DATA_DIR || path.join(__dirname, 'data');
+const DATA_DIR = process.env.ORIEL_DATA_DIR || path.join(ROOT_DIR, 'data');
 const ACTIVITIES_DIR = path.join(DATA_DIR, 'activities');
 const ICONS_DIR = path.join(DATA_DIR, 'icons');
 const PID_FILE = path.join(DATA_DIR, 'oriel-server.pid');
-const ICON_EXTRACTOR = path.join(__dirname, 'scratch', 'extract_icon');
-const ICON_EXTRACTOR_SOURCE = path.join(__dirname, 'script', 'extract_icon.swift');
+const ICON_EXTRACTOR = path.join(ROOT_DIR, 'scratch', 'extract_icon');
+const ICON_EXTRACTOR_SOURCE = path.join(ROOT_DIR, 'tools', 'scripts', 'extract_icon.swift');
 const TRACKER_SOURCE = path.join(__dirname, 'tracker.swift');
-const TRACKER_BINARY = path.join(__dirname, 'scratch', 'tracker');
+const TRACKER_BINARY = path.join(ROOT_DIR, 'scratch', 'tracker');
 
 // Ensure data directories exist
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -608,7 +610,7 @@ const server = http.createServer((req, res) => {
 
   // Serve Frontend index.html
   if (pathname === '/' || pathname === '/index.html') {
-    const indexPath = path.join(__dirname, 'index.html');
+    const indexPath = path.join(WEB_ROOT, 'index.html');
     fs.readFile(indexPath, 'utf8', (err, content) => {
       if (err) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -624,10 +626,10 @@ const server = http.createServer((req, res) => {
   // Serve modular static assets securely
   const ext = path.extname(pathname);
   if (ext && (pathname.startsWith('/js/') || pathname.startsWith('/css/') || pathname.startsWith('/assets/') || ext === '.png' || ext === '.jpg' || ext === '.ico' || ext === '.svg')) {
-    const safePath = path.normalize(path.join(__dirname, pathname));
+    const safePath = path.normalize(path.join(WEB_ROOT, pathname));
     const realSafePath = fs.existsSync(safePath) ? fs.realpathSync(safePath) : safePath;
-    const realDirname = fs.realpathSync(__dirname);
-    if (realSafePath.startsWith(realDirname)) {
+    const realWebRoot = fs.realpathSync(WEB_ROOT);
+    if (realSafePath === realWebRoot || realSafePath.startsWith(`${realWebRoot}${path.sep}`)) {
       if (fs.existsSync(safePath) && !fs.statSync(safePath).isDirectory()) {
         let contentType = 'text/plain';
         if (ext === '.css') contentType = 'text/css';

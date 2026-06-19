@@ -376,7 +376,7 @@ The theme selector is a live feature. `graphite`, `light`, and `reference` must 
 
 ## Colors
 
-Oriel uses semantic color roles, not page-specific color choices. Implementation tokens live in `css/index.css`; this file gives agents the design meaning and exact values to apply.
+Oriel uses semantic color roles, not page-specific color choices. Implementation tokens live in `web/css/index.css`; this file gives agents the design meaning and exact values to apply.
 
 The default unprefixed color tokens in the YAML frontmatter represent the `graphite` theme. `light-*` and `reference-*` tokens represent the two other live selectable themes.
 
@@ -802,7 +802,7 @@ Privacy-sensitive UI states need plain labels. For example, AI provider status, 
 ## Do's and Don'ts
 
 - Do read this file before UI work.
-- Do treat `css/index.css` as the implementation token source.
+- Do treat `web/css/index.css` as the implementation token source.
 - Do preserve `graphite`, `light`, and `reference` while the theme selector remains live.
 - Do use unprefixed YAML color tokens as the default graphite theme.
 - Do use `light-*` and `reference-*` tokens when documenting or implementing theme-specific overrides.

@@ -11,10 +11,10 @@ npm install
 npm run build:assets
 swift test
 npm test
-./script/build_and_run.sh
+./tools/scripts/build_and_run.sh
 ```
 
-Use `./script/build_and_run.sh --verify` when you need to build and stage the app without launching it.
+Use `./tools/scripts/build_and_run.sh --verify` when you need to build and stage the app without launching it.
 
 ## Development Rules
 
@@ -22,7 +22,7 @@ Use `./script/build_and_run.sh --verify` when you need to build and stage the ap
 - Do not commit API keys, Apple signing credentials, app-specific passwords, extension secrets, or private local paths.
 - Update documentation when setup, public behavior, APIs, architecture, or workflow changes.
 - Run the relevant tests before submitting changes. For most code changes, run both `npm test` and `swift test`.
-- Rebuild and relaunch `Oriel.app` with `./script/build_and_run.sh` after app changes so the running app matches the source.
+- Rebuild and relaunch `Oriel.app` with `./tools/scripts/build_and_run.sh` after app changes so the running app matches the source.
 
 ## Browser Companion
 

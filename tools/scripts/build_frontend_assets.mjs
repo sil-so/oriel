@@ -1,7 +1,7 @@
 import { cpSync, copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
-const vendorRoot = 'assets/vendor';
+const vendorRoot = 'web/assets/vendor';
 rmSync(vendorRoot, { force: true, recursive: true });
 mkdirSync(`${vendorRoot}/phosphor`, { recursive: true });
 mkdirSync(`${vendorRoot}/inter/files`, { recursive: true });
@@ -30,7 +30,7 @@ for (const filename of fontFiles) {
 
 const tailwind = spawnSync(
   'node_modules/.bin/tailwindcss',
-  ['-i', './css/tailwind-input.css', '-o', './css/vendor.css', '--minify'],
+  ['-i', './web/css/tailwind-input.css', '-o', './web/css/vendor.css', '--minify'],
   { stdio: 'inherit' }
 );
 if (tailwind.status !== 0) {

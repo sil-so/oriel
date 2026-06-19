@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseTrackerEvent } from '../tracker-events.js';
+import { parseTrackerEvent } from '../tools/dev-server/tracker-events.js';
 
 test('parses app-change events from the native tracker', () => {
   const event = parseTrackerEvent('EVENT:APP_CHANGE:1710000000000:Figma:1234');

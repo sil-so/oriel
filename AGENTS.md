@@ -17,9 +17,9 @@ maintainable, and easy to review.
 - Run `swift test` for native services and persistence tests.
 - Run `npm run build:assets` after changing Tailwind input, vendored
   frontend assets, or package dependencies.
-- Run `./script/build_and_run.sh --verify` after native app packaging or
+- Run `./tools/scripts/build_and_run.sh --verify` after native app packaging or
   launch-path changes.
-- Run `./script/build_and_run.sh` when a running app check is needed.
+- Run `./tools/scripts/build_and_run.sh` when a running app check is needed.
 
 ## Local Verification Notes
 

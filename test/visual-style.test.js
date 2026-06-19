@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 test('Oriel theme compatibility keeps graphite as the design target', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const designSystem = fs.readFileSync('docs/design-system.md', 'utf8');
   const audit = fs.readFileSync('docs/ui-consistency-audit.md', 'utf8');
 
@@ -48,7 +48,7 @@ test('Oriel theme compatibility keeps graphite as the design target', () => {
 });
 
 test('settings remove minimum summary duration control', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   assert.doesNotMatch(html, /id="settings-threshold-select"/);
   assert.doesNotMatch(html, /Min Summary Activity Duration/);
@@ -56,8 +56,8 @@ test('settings remove minimum summary duration control', () => {
 });
 
 test('settings keep context switching note without threshold copy', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.doesNotMatch(html, /id="settings-threshold-display"/);
   assert.match(html, /How Oriel handles short switches/);
@@ -71,9 +71,9 @@ test('settings keep context switching note without threshold copy', () => {
 });
 
 test('settings and project details modals rely on header close buttons instead of footer close buttons', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
 
   assert.match(html, /id="settings-modal-btn-close"/);
   assert.match(html, /id="proj-details-btn-close"/);
@@ -87,8 +87,8 @@ test('settings and project details modals rely on header close buttons instead o
 });
 
 test('scroll-heavy settings and project details modals put bottom spacing on their innermost content', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const scrollContentRule = css.match(/\.modal-scroll-content\s*\{[^}]*\}/)?.[0] || '';
   const projectDetailsPanelRule = css.match(/\.project-details-panel\s*\{[^}]*\}/)?.[0] || '';
   const projectDetailsSettingsPanelRule = css.match(/\.project-details-panel\[data-project-details-panel="settings"\]\s*\{[^}]*\}/)?.[0] || '';
@@ -115,7 +115,7 @@ test('scroll-heavy settings and project details modals put bottom spacing on the
 });
 
 test('modal overlays keep dialogs top aligned below the app header', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const overlayRule = css.match(/\.modal-overlay\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(overlayRule, /align-items:\s*flex-start/);
@@ -125,8 +125,8 @@ test('modal overlays keep dialogs top aligned below the app header', () => {
 });
 
 test('modal shells use shared headers, footers, and named size classes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const modals = html.match(/<!-- MODAL: AI Insights Daily Summary -->[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
 
   for (const selector of [
@@ -177,8 +177,8 @@ test('modal shells use shared headers, footers, and named size classes', () => {
 });
 
 test('confirmation modal keeps compact centered overlay treatment', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const centeredRule = css.match(/\.modal-overlay--centered\s*\{[^}]*\}/)?.[0] || '';
   const confirmOverlayRule = css.match(/\.confirm-modal-overlay\s*\{[^}]*\}/)?.[0] || '';
   const confirmPanelRule = css.match(/#confirm-modal \.modal-panel\s*\{[^}]*\}/)?.[0] || '';
@@ -204,10 +204,10 @@ test('confirmation modal keeps compact centered overlay treatment', () => {
 });
 
 test('project context textareas use settings-style helper placement and shared field focus', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const projectModal = html.match(/id="project-modal"[\s\S]*?<!-- MODAL: Auto-Assignment Rules Manager -->/)?.[0] || '';
   const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const contextRule = css.match(/\.project-context-textarea\s*\{[^}]*\}/)?.[0] || '';
   const contextFocusRule = css.match(/\.project-context-textarea:focus\s*\{[^}]*\}/)?.[0] || '';
   const detailsContextRule = css.match(/\.project-details-context\s*\{[^}]*\}/)?.[0] || '';
@@ -243,8 +243,8 @@ test('project context textareas use settings-style helper placement and shared f
 });
 
 test('project details modal consolidates overview and settings tabs', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
 
   assert.match(detailsModal, /app-tab-group project-details-tabs/);
@@ -280,9 +280,9 @@ test('project details modal consolidates overview and settings tabs', () => {
 });
 
 test('project details categories use compact categorization UI', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
   const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
   const taskRowRule = css.match(/\.project-task-row\s*\{[^}]*\}/)?.[0] || '';
   const taskCreateRowRule = css.match(/\.project-task-create-row\s*\{[^}]*\}/)?.[0] || '';
@@ -364,7 +364,7 @@ test('project details categories use compact categorization UI', () => {
 });
 
 test('project details manual import appears below time history', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const detailsModal = html.match(/id="project-details-modal"[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
 
   assert.ok(
@@ -374,8 +374,8 @@ test('project details manual import appears below time history', () => {
 });
 
 test('settings tabs reuse the app tab active treatment', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const activeRule = css.match(/\.app-tab--active,\s*\n\.range-pill--active\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(html, /<div class="[^"]*\bapp-tab-group\b[^"]*\bsettings-section-tabs\b[^"]*"[^>]*role="tablist" aria-label="Settings sections"/);
@@ -391,7 +391,7 @@ test('settings tabs reuse the app tab active treatment', () => {
 });
 
 test('control primitives expose complete tokenized states', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   for (const selector of [
     '.button-primary:active',
@@ -415,9 +415,9 @@ test('control primitives expose complete tokenized states', () => {
 
 test('fields and native selects avoid one-off visual utility classes', () => {
   const sources = [
-    fs.readFileSync('index.html', 'utf8'),
-    fs.readFileSync('js/main.js', 'utf8'),
-    fs.readFileSync('js/projects.js', 'utf8')
+    fs.readFileSync('web/index.html', 'utf8'),
+    fs.readFileSync('web/js/main.js', 'utf8'),
+    fs.readFileSync('web/js/projects.js', 'utf8')
   ].join('\n');
   const primitiveClassStrings = Array.from(sources.matchAll(/(?:class|className)\s*=\s*(["'`])([^"'`]*)(?:\1)/g))
     .map(match => match[2])
@@ -433,9 +433,9 @@ test('fields and native selects avoid one-off visual utility classes', () => {
 });
 
 test('app-rendered menu options share primitive option classes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
   const zoomMenuStart = html.indexOf('id="zoom-dropdown-menu"');
   const zoomMenuEnd = html.indexOf('id="timeline-mode-switch"');
   const zoomMenu = zoomMenuStart > -1 && zoomMenuEnd > zoomMenuStart
@@ -455,8 +455,8 @@ test('app-rendered menu options share primitive option classes', () => {
 });
 
 test('app context menu uses shared popover and menu option primitives', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.match(css, /\.app-context-menu\s*\{/);
   assert.match(css, /\.app-context-menu\s+\.menu-option\s*\{/);
@@ -465,8 +465,8 @@ test('app context menu uses shared popover and menu option primitives', () => {
 });
 
 test('settings callouts and danger actions use shared modal vocabulary', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const settingsMarkup = html.match(/id="settings-modal"[\s\S]*?<\/div>\s*<\/div>\s*<!-- Confirmation modal -->/)?.[0] || '';
 
   for (const selector of [
@@ -489,7 +489,7 @@ test('settings callouts and danger actions use shared modal vocabulary', () => {
 });
 
 test('modal and settings chrome avoids old hardcoded utility colors and panel widths', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const modals = html.match(/<!-- MODAL: AI Insights Daily Summary -->[\s\S]*?<!-- Modular Script Imports -->/)?.[0] || '';
   const modalPanelClasses = Array.from(modals.matchAll(/class="([^"]*\bmodal-panel\b[^"]*)"/g))
     .map(match => match[1]);
@@ -504,7 +504,7 @@ test('modal and settings chrome avoids old hardcoded utility colors and panel wi
 });
 
 test('time entry modal width switching uses named modal size classes', () => {
-  const modals = fs.readFileSync('js/modals.js', 'utf8');
+  const modals = fs.readFileSync('web/js/modals.js', 'utf8');
 
   assert.match(modals, /modal-size--split/);
   assert.match(modals, /modal-size--md/);
@@ -512,14 +512,14 @@ test('time entry modal width switching uses named modal size classes', () => {
 });
 
 test('modal field helpers preserve hidden state', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const hiddenFieldRule = css.match(/\.modal-field-group\.hidden\s*\{[^}]*\}/)?.[0] || '';
 
   assert.match(hiddenFieldRule, /display:\s*none/);
 });
 
 test('header and modal icon controls use the icon-button primitive', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   for (const id of [
     'date-picker-prev-month',
@@ -539,13 +539,13 @@ test('header and modal icon controls use the icon-button primitive', () => {
 });
 
 test('empty states use shared density variants instead of ad hoc utilities', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const sources = [
-    fs.readFileSync('index.html', 'utf8'),
-    fs.readFileSync('js/main.js', 'utf8'),
-    fs.readFileSync('js/projects.js', 'utf8'),
-    fs.readFileSync('js/reporting.js', 'utf8'),
-    fs.readFileSync('js/timeline.js', 'utf8')
+    fs.readFileSync('web/index.html', 'utf8'),
+    fs.readFileSync('web/js/main.js', 'utf8'),
+    fs.readFileSync('web/js/projects.js', 'utf8'),
+    fs.readFileSync('web/js/reporting.js', 'utf8'),
+    fs.readFileSync('web/js/timeline.js', 'utf8')
   ].join('\n');
 
   assert.match(css, /\.empty-state--compact\s*\{/);
@@ -554,7 +554,7 @@ test('empty states use shared density variants instead of ad hoc utilities', () 
 });
 
 test('AI Insights header omits archive controls and workspace separator', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const insightsHeader = html.match(/id="ai-insights-workspace"[\s\S]*?id="ai-insights-card-grid"/)?.[0] || '';
 
   assert.doesNotMatch(insightsHeader, /ai-insights-summary-date-trigger|ai-insights-range-filter|ai-insights-status-filter/);
@@ -565,8 +565,8 @@ test('AI Insights header omits archive controls and workspace separator', () => 
 });
 
 test('AI Insights detail modal puts bottom spacing inside the scroll content', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const modalPanelClass = html.match(/id="ai-insights-detail-modal"[\s\S]*?<div class="([^"]*\bmodal-panel\b[^"]*)"/)?.[1] || '';
 
   assert.match(modalPanelClass, /\bmodal-panel--scroll\b/);
@@ -579,7 +579,7 @@ test('AI Insights detail modal puts bottom spacing inside the scroll content', (
 });
 
 test('AI Insights generated card preview fade shows five visible content lines', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const cardRule = css.match(/\.ai-insights-card\s*\{[^}]*\}/)?.[0] || '';
   const previewRule = css.match(/\.ai-insights-card-preview--fade\s*\{[^}]*\}/)?.[0] || '';
   const fadeRule = css.match(/\.ai-insights-card-preview--fade::after\s*\{[^}]*\}/)?.[0] || '';
@@ -601,7 +601,7 @@ test('AI Insights generated card preview fade shows five visible content lines',
 });
 
 test('AI Insights card TLDR bullets are single-line while detail bullets wrap', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const cardRule = css.match(/\.ai-insights-card \.ai-insights-tldr-list li\s*\{[^}]*\}/)?.[0] || '';
   const cardListRule = css.match(/\.ai-insights-card \.ai-insights-tldr-list\s*\{[^}]*\}/)?.[0] || '';
   const detailRule = css.match(/\.ai-insights-detail-tldr \.ai-insights-tldr-list li\s*\{[^}]*\}/)?.[0] || '';
@@ -615,8 +615,8 @@ test('AI Insights card TLDR bullets are single-line while detail bullets wrap', 
 });
 
 test('AI Insights does not render structured metrics as a visible visual component', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const script = fs.readFileSync('js/main.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const script = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.doesNotMatch(css, /ai-insights-metrics/);
   assert.doesNotMatch(script, /renderAiInsightsMetrics/);
@@ -625,7 +625,7 @@ test('AI Insights does not render structured metrics as a visible visual compone
 });
 
 test('settings tooltip is not nested inside the hideable scheduler workspace', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const schedulerIndex = html.indexOf('id="scheduler-workspace"');
   const tooltipIndex = html.indexOf('id="settings-floating-tooltip"');
 
@@ -635,26 +635,26 @@ test('settings tooltip is not nested inside the hideable scheduler workspace', (
 });
 
 test('header sidebar toggle uses real hidden-state styling', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /#btn-toggle-work-times\[hidden\][\s\S]*display:\s*none\s*!important/);
 });
 
 test('Statistics workspace header does not draw a separator line', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const statsHeader = html.match(/id="stats-workspace"[\s\S]*?id="stats-presets-container"/)?.[0] || '';
 
   assert.doesNotMatch(statsHeader, /justify-between[^"]*border-b/);
 });
 
 test('native app chrome leaves only a compact gap after macOS traffic lights', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.is-native-shell \.app-chrome\s*\{\s*padding-left:\s*100px;/);
 });
 
 test('header Oriel mark uses the same theme text color as pane titles', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.pane-header h2,\s*\n\.pane-header-title\s*\{[\s\S]*color:\s*var\(--text-primary\)/);
   assert.match(css, /\.brand-mark\s*\{[\s\S]*background:\s*var\(--text-primary\)/);
@@ -662,9 +662,9 @@ test('header Oriel mark uses the same theme text color as pane titles', () => {
 });
 
 test('Oriel Dark removes decorative glass, glow, and side-stripe treatments', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
   const styles = `${html}\n${css}\n${timeline}`;
 
   assert.doesNotMatch(styles, /glow-effect/);
@@ -676,7 +676,7 @@ test('Oriel Dark removes decorative glass, glow, and side-stripe treatments', ()
 });
 
 test('Quiet Chrome keeps dense timeline states calm but explicit', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.workspace-panel\s*\{[\s\S]*border-color:\s*var\(--separator\)/);
   assert.match(css, /\.activity-block\s*\{[\s\S]*border:\s*1px solid color-mix\(in oklch, var\(--border\) 34%, transparent\)/);
@@ -688,8 +688,8 @@ test('Quiet Chrome keeps dense timeline states calm but explicit', () => {
 });
 
 test('timeline and sidebar chrome use semantic design-system classes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const timelineStart = html.indexOf('id="scheduler-workspace"');
   const projectsStart = html.indexOf('id="projects-workspace"');
   const timelineMarkup = html.slice(timelineStart, projectsStart);
@@ -726,7 +726,7 @@ test('timeline and sidebar chrome use semantic design-system classes', () => {
 });
 
 test('activity details popup reserves a fixed square close button column', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const headerRule = css.match(/\.activity-details-popup__header\s*\{[^}]*\}/)?.[0] || '';
   const closeRule = css.match(/#popup-close-btn\s*\{[^}]*\}/)?.[0] || '';
 
@@ -738,8 +738,8 @@ test('activity details popup reserves a fixed square close button column', () =>
 });
 
 test('timeline-rendered rows use semantic classes instead of one-off utilities', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
   const activityTemplate = timeline.match(/function createActivityBlockHTML[\s\S]*?function attachMemoryAidInteractions/)?.[0] || '';
   const timeEntryTemplate = timeline.match(/function renderLoggedTimeEntries[\s\S]*?function updateTimeEntryHoverPreview/)?.[0] || '';
   const popupTemplate = timeline.match(/function showActivityDetailsPopup[\s\S]*?function dismissActivityDetailsPopup/)?.[0] || '';
@@ -774,7 +774,7 @@ test('timeline-rendered rows use semantic classes instead of one-off utilities',
 });
 
 test('activity stream checkboxes use the shared circular hover affordance', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const checkboxRule = css.match(/\.activity-checkbox\s*\{[^}]*\}/)?.[0] || '';
   const blockCheckboxRule = css.match(/\.activity-block__checkbox\s*\{[^}]*\}/)?.[0] || '';
   const blockControlsRule = css.match(/\.activity-block \.activity-checkbox,\s*\.activity-block \.activity-quick-add\s*\{[^}]*\}/)?.[0] || '';
@@ -798,11 +798,11 @@ test('activity stream checkboxes use the shared circular hover affordance', () =
 });
 
 test('projects statistics and AI insights use semantic design-system classes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
-  const reporting = fs.readFileSync('js/reporting.js', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
+  const reporting = fs.readFileSync('web/js/reporting.js', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
   const sources = `${html}\n${projects}\n${reporting}\n${main}`;
 
   for (const className of [
@@ -844,8 +844,8 @@ test('projects statistics and AI insights use semantic design-system classes', (
 });
 
 test('project and chart identity colors remain explicit data exceptions', () => {
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
-  const reporting = fs.readFileSync('js/reporting.js', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
+  const reporting = fs.readFileSync('web/js/reporting.js', 'utf8');
 
   assert.match(projects, /style="background-color: \$\{proj\.color\}/);
   assert.match(projects, /style="background-color: \$\{proj\.color\}; width: \$\{pct\}%"/);
@@ -854,7 +854,7 @@ test('project and chart identity colors remain explicit data exceptions', () => 
 });
 
 test('modal controls use theme surfaces instead of hardcoded near-black fills', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.field,\s*\n\.custom-select\s*\{[\s\S]*background:\s*var\(--control-surface\)/);
   assert.match(css, /\.custom-select-button\s*\{[\s\S]*background:\s*var\(--control-surface\)/);
@@ -864,8 +864,8 @@ test('modal controls use theme surfaces instead of hardcoded near-black fills', 
 });
 
 test('visible checkbox controls use the Oriel toggle treatment', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.oriel-toggle\s*\{/);
   assert.match(css, /\.oriel-toggle-input:checked \+ \.oriel-toggle-track\s*\{/);
@@ -883,7 +883,7 @@ test('visible checkbox controls use the Oriel toggle treatment', () => {
 });
 
 test('settings expose editable activity title cleanup rules with regex guidance', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
 
   assert.match(html, /Activity Title Cleanup/);
   assert.match(html, /id="settings-title-cleanup-list"/);
@@ -906,8 +906,8 @@ test('project guidance requires Linear issue hygiene for implementation work', (
 });
 
 test('time entry modal removes AI-coded snapshot icon and uses uniform section spacing', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const modalMarkup = html.match(/id="time-entry-modal"[\s\S]*?<!-- MODAL: Create Project -->/)?.[0] || '';
   const projectGridClass = modalMarkup.match(/id="modal-project-grid"[^>]*class="([^"]*)"/)?.[1] || '';
 
@@ -919,9 +919,9 @@ test('time entry modal removes AI-coded snapshot icon and uses uniform section s
 });
 
 test('activity title cleanup saved rules use a quiet editable list layout', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
   const cleanupRenderer = main.match(/function renderTitleCleanupRules\(\)[\s\S]*?setTitleCleanupStatus\(''\);/)?.[0] || '';
 
   assert.match(html, /<div(?=[^>]*id="settings-title-cleanup-list")(?=[^>]*class="[^"]*\btitle-cleanup-list\b)[^>]*>/);
@@ -945,10 +945,10 @@ test('activity title cleanup saved rules use a quiet editable list layout', () =
 });
 
 test('similar activity selection uses a modal with explicit match modes', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
 
   assert.match(html, /id="similar-modal"/);
   assert.match(html, /id="similar-mode-host"/);
@@ -966,8 +966,8 @@ test('similar activity selection uses a modal with explicit match modes', () => 
 });
 
 test('AI Insights uses weekly four-column grids instead of the shared workspace grid', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const projectsMarkup = html.match(/id="projects-workspace"[\s\S]*?<!-- Reporting workspace -->/)?.[0] || '';
   const aiMarkup = html.match(/id="ai-insights-workspace"[\s\S]*?<!-- MODAL: AI Insights Daily Summary -->/)?.[0] || '';
   const sharedGridRule = css.match(/\.workspace-card-grid\s*\{[^}]*\}/)?.[0] || '';
@@ -1007,8 +1007,8 @@ test('AI Insights uses weekly four-column grids instead of the shared workspace 
 });
 
 test('project cards avoid full-card hover and click affordances', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
   const projectCardTag = projects.match(/<div class="project-card[^>]*>/)?.[0] || '';
 
   assert.doesNotMatch(css, /\.project-card:hover\b/);
@@ -1019,8 +1019,8 @@ test('project cards avoid full-card hover and click affordances', () => {
 });
 
 test('AI and data settings sections share heading treatment without extra danger divider', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
   const aiSettingsMarkup = html.match(/data-settings-section-panel="ai"[\s\S]*?data-settings-section-panel="data"/)?.[0] || '';
   const dangerZoneRule = css.match(/\.danger-zone\s*\{[^}]*\}/)?.[0] || '';
 
@@ -1033,9 +1033,9 @@ test('AI and data settings sections share heading treatment without extra danger
 });
 
 test('project details manual date uses the shared custom calendar popover pattern', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.doesNotMatch(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="date")[^>]*>/);
   assert.match(html, /<input(?=[^>]*id="proj-details-manual-date")(?=[^>]*type="hidden")[^>]*>/);
@@ -1049,10 +1049,10 @@ test('project details manual date uses the shared custom calendar popover patter
 });
 
 test('project details time history replaces historical entry rows with a shared calendar grid', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const projects = fs.readFileSync('js/projects.js', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const projects = fs.readFileSync('web/js/projects.js', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
 
   assert.doesNotMatch(html, /Historical Entries Log/);
   assert.match(html, />\s*Time History\s*</);
@@ -1072,8 +1072,8 @@ test('project details time history replaces historical entry rows with a shared 
 });
 
 test('activity popup child rows remove favicon gutters and expose alignment contracts', () => {
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const timeline = fs.readFileSync('js/timeline.js', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const timeline = fs.readFileSync('web/js/timeline.js', 'utf8');
   const childRenderer = timeline.match(/const renderPopupActivityChildRow[\s\S]*?const renderPopupActivityBreakdownRow/)?.[0] || '';
   const expandRule = css.match(/\.popup-activity-expand\s*\{[^}]*\}/)?.[0] || '';
   const multiChildrenRule = css.match(/\.popup-activity-children--multi\s*\{[^}]*\}/)?.[0] || '';
@@ -1093,8 +1093,8 @@ test('activity popup child rows remove favicon gutters and expose alignment cont
 });
 
 test('work times sidebar uses compact shared panel surfaces', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
 
   assert.match(css, /\.side-summary-content\s*\{[\s\S]*letter-spacing:\s*0/);
   assert.match(css, /\.sidebar-panel--work-times\s*\{[\s\S]*gap:\s*20px/);
@@ -1117,9 +1117,9 @@ test('work times sidebar uses compact shared panel surfaces', () => {
 });
 
 test('web dropdowns use app-rendered menus instead of native select popups', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('css/index.css', 'utf8');
-  const main = fs.readFileSync('js/main.js', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const css = fs.readFileSync('web/css/index.css', 'utf8');
+  const main = fs.readFileSync('web/js/main.js', 'utf8');
   const selectTags = [...html.matchAll(/<select\b([^>]*)>/g)];
 
   assert.ok(selectTags.length > 0, 'expected dropdowns in app markup');
@@ -1143,7 +1143,7 @@ test('web dropdowns use app-rendered menus instead of native select popups', () 
 });
 
 test('time entry category selector uses the app-rendered dropdown treatment', () => {
-  const index = fs.readFileSync('index.html', 'utf8');
+  const index = fs.readFileSync('web/index.html', 'utf8');
   const taskSelectorMatch = index.match(/<div class="([^"]*custom-select-wrapper[^"]*)"[^>]*>\s*<select class="([^"]*\bcustom-select\b[^"]*)" id="modal-task-select"/s);
   const timeEntryModal = index.match(/id="time-entry-modal"[\s\S]*?<!-- MODAL: Add Project -->/)?.[0] || '';
 
@@ -1173,7 +1173,7 @@ test('theme preference initializes safely and persists explicit changes', () => 
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/state.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/state.js', 'utf8'), context);
 
   assert.equal(context.state.settings.theme, 'reference');
   assert.equal(context.document.documentElement.dataset.theme, 'reference');
@@ -1192,7 +1192,7 @@ test('theme preference initializes safely and persists explicit changes', () => 
 });
 
 test('theme preload script normalizes before first paint', () => {
-  const html = fs.readFileSync('index.html', 'utf8');
+  const html = fs.readFileSync('web/index.html', 'utf8');
   const preloadScript = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1] || '';
 
   function preloadTheme(storedTheme, { throws = false } = {}) {
@@ -1238,7 +1238,7 @@ test('deprecated minActivityThreshold compatibility normalizes unsupported value
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/state.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/state.js', 'utf8'), context);
 
   assert.equal(context.state.settings.minActivityThreshold, 60);
   assert.equal(context.normalizeMinActivityThreshold('10'), 10);
@@ -1265,7 +1265,7 @@ test('legacy variant theme storage migrates to reference theme', () => {
   };
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync('js/state.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/state.js', 'utf8'), context);
 
   assert.equal(context.state.settings.theme, 'reference');
   assert.equal(context.document.documentElement.dataset.theme, 'reference');

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
 
-const css = fs.readFileSync('css/index.css', 'utf8');
+const css = fs.readFileSync('web/css/index.css', 'utf8');
 
 function declarationsFor(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

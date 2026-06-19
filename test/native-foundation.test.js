@@ -8,7 +8,7 @@ function read(path) {
 
 test('native app package targets macOS 14 and stages a standalone Oriel.app', () => {
   const packageManifest = read('Package.swift');
-  const buildScript = read('script/build_and_run.sh');
+  const buildScript = read('tools/scripts/build_and_run.sh');
 
   assert.match(packageManifest, /\.macOS\(\.v14\)/);
   assert.match(packageManifest, /name:\s*"OrielApp"/);
@@ -19,8 +19,8 @@ test('native app package targets macOS 14 and stages a standalone Oriel.app', ()
   assert.match(buildScript, /WEB_DIR=.*Resources\/Web/);
   assert.match(buildScript, /mkdir -p "\$\(dirname "\$APP_DIR"\)"/);
   assert.match(buildScript, /index\.html/);
-  assert.match(buildScript, /css/);
-  assert.match(buildScript, /js/);
+  assert.match(buildScript, /web\/css/);
+  assert.match(buildScript, /web\/js/);
   assert.match(buildScript, /assets/);
 });
 
