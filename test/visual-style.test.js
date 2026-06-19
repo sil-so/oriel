@@ -6,8 +6,7 @@ import vm from 'node:vm';
 test('Oriel theme compatibility keeps graphite as the design target', () => {
   const html = fs.readFileSync('web/index.html', 'utf8');
   const css = fs.readFileSync('web/css/index.css', 'utf8');
-  const designSystem = fs.readFileSync('docs/design-system.md', 'utf8');
-  const audit = fs.readFileSync('docs/ui-consistency-audit.md', 'utf8');
+  const designContract = fs.readFileSync('DESIGN.md', 'utf8');
 
   assert.match(html, /\/assets\/vendor\/inter\/400\.css/);
   assert.match(html, /\/assets\/vendor\/inter\/500\.css/);
@@ -38,9 +37,9 @@ test('Oriel theme compatibility keeps graphite as the design target', () => {
   assert.match(html, /value="graphite">Dark</);
   assert.match(html, /value="light">Light</);
   assert.match(html, /value="reference">Neutral</);
-  assert.match(designSystem, /`graphite` theme is the only design target/);
-  assert.match(designSystem, /`light` and `reference` remain selectable compatibility themes/);
-  assert.match(audit, /Theme compatibility cleanup keeps the selector while treating `light` and\s+`reference` as compatibility themes/);
+  assert.match(designContract, /canonical design-system contract/);
+  assert.match(designContract, /`graphite` is the primary design direction/);
+  assert.match(designContract, /`light` and `reference` are compatibility themes/);
   assert.doesNotMatch(html, />Variant Grey</);
   assert.doesNotMatch(html, />Graphite</);
   assert.doesNotMatch(html, />Soft Light</);

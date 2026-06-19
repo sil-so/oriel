@@ -366,6 +366,10 @@ components:
 
 Oriel is a local-first macOS time tracker for people who need accurate project time without sending activity history to a hosted service. The interface exposes private app names, browser URLs, document titles, screenshots, projects, billing data, and correction workflows. It must feel trustworthy, exact, and native enough for repeated daily review.
 
+This file is the canonical design-system contract for Oriel. Keep durable
+visual, interaction, accessibility, and privacy-sensitive UI guidance here
+instead of duplicating it in dated audit notes or secondary design-system docs.
+
 The product personality is calm, precise, and private. UI language should be direct and literal. Visual language should feel like a high-end local macOS tool: quiet graphite surfaces, compact controls, clear hierarchy, and no decorative branding layer.
 
 The target feel is closer to Linear, Raycast, and disciplined native macOS utilities than to a SaaS analytics dashboard. The UI should support scanning, comparison, correction, and assignment. Density is a feature. Dramatic presentation is not.
