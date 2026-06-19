@@ -1518,8 +1518,24 @@ test('source-backed popup row assignments do not lane-split within the same visi
       `${zoom} min should not repeat block geometry for one display row`
     );
 
-    if (zoom === 15) {
-      assert.equal(styles.length, 1, '15 min uses one visual block for one selected visible row');
+    if (zoom === 1) {
+      assert.equal(styles.length, 3, '1 min keeps exact source sessions separate');
+      assert.deepEqual(extractTimeEntryDurationLabels(html), ['10 min', '2 min', '2 min']);
+    } else {
+      assert.equal(styles.length, 1, `${zoom} min uses one continuous visual block`);
+      const expectedEndByZoom = new Map([
+        [5, at(12, 15)],
+        [10, at(12, 20)],
+        [15, at(12, 15)],
+        [30, at(12, 30)],
+        [60, at(13, 0)]
+      ]);
+      assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+        dateStart,
+        start: displayStart,
+        end: expectedEndByZoom.get(zoom),
+        zoom
+      }), `${zoom} min popup assignment geometry`);
       assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
     }
   }

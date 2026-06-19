@@ -3614,8 +3614,13 @@ function getLoggedTimeEntryVisualMergeKey(item) {
     if (sourceBackedProjection
         && Number.isFinite(displayStart)
         && Number.isFinite(displayEnd)
-        && displayEnd > displayStart) {
+        && displayEnd > displayStart
+        && item?.renderExactGeometry === true) {
         return `${projectId}\u0000${taskId}\u0000source-row\u0000${displayStart}\u0000${displayEnd}`;
+    }
+
+    if (sourceBackedProjection) {
+        return `${projectId}\u0000${taskId}\u0000source-row`;
     }
 
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
@@ -3634,6 +3639,65 @@ function canMergeLoggedTimeEntryVisualItems(current, item, displayStart, display
         && Number.isFinite(current.displayEnd)
         && displayStart <= current.displayEnd;
     return hasTouchingDisplay;
+}
+
+function getSingleDisplaySourceBackedDurationMs(entries) {
+    const allEntries = Array.isArray(entries) ? entries : [];
+    const sourceBackedEntries = allEntries
+        .filter(entry => entry?.renderSourceBackedAssignment === true);
+    if (sourceBackedEntries.length < 2) return null;
+    if (sourceBackedEntries.length !== allEntries.length) return null;
+
+    const entryKeys = new Set(sourceBackedEntries.map(entry => String(entry?.id || '')).filter(Boolean));
+    if (entryKeys.size !== 1) return null;
+
+    const displayBoundsKeys = new Set();
+    const sourceDurations = new Map();
+    let fallbackIndex = 0;
+
+    sourceBackedEntries.forEach(entry => {
+        getActivityStreamAssignmentActivities(entry).forEach(activity => {
+            const displayStart = Number(activity?.assignmentDisplayStart);
+            const displayEnd = Number(activity?.assignmentDisplayEnd);
+            const displayZoom = Number(activity?.assignmentDisplayZoom);
+            if (!Number.isFinite(displayStart) || !Number.isFinite(displayEnd) || displayEnd <= displayStart) {
+                return;
+            }
+            displayBoundsKeys.add(`${displayStart}:${displayEnd}:${Number.isFinite(displayZoom) ? displayZoom : ''}`);
+
+            const activityStart = Number(activity?.start);
+            const activityEnd = Number(activity?.end);
+            const sources = getAssignmentSourceActivities(activity);
+            if (sources.length === 0) {
+                const duration = getActivitySourceDuration(activity);
+                if (duration > 0) {
+                    const key = getActivitySourceKey(activity) || `activity:${fallbackIndex++}`;
+                    sourceDurations.set(key, Math.max(sourceDurations.get(key) || 0, duration));
+                }
+                return;
+            }
+
+            sources.forEach(source => {
+                if (Number.isFinite(activityStart)
+                    && Number.isFinite(activityEnd)
+                    && activityEnd > activityStart
+                    && getActivitySourceOverlapDuration(source, activityStart, activityEnd) <= 0) {
+                    return;
+                }
+
+                const duration = getActivitySourceDuration(source);
+                if (duration <= 0) return;
+
+                const key = getActivitySourceKey(source) || `source:${fallbackIndex++}`;
+                sourceDurations.set(key, Math.max(sourceDurations.get(key) || 0, duration));
+            });
+        });
+    });
+
+    if (displayBoundsKeys.size !== 1 || sourceDurations.size === 0) return null;
+
+    return Array.from(sourceDurations.values())
+        .reduce((total, duration) => total + duration, 0);
 }
 
 function mergeLoggedTimeEntryVisualItems(renderItems) {
@@ -4133,6 +4197,7 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
     const renderItems = mergeLoggedTimeEntryVisualItems([...manualItems, ...assignmentItems])
         .map(item => ({
             ...item,
+            durationMs: getSingleDisplaySourceBackedDurationMs(item.entries) ?? item.durationMs,
             entries: [...new Map((item.entries || []).map(entry => [entry.id || `${entry.start}:${entry.end}:${entry.projectId}`, entry])).values()]
         }))
         .filter(item => item.entries.length > 0)
