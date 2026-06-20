@@ -46,3 +46,48 @@ Create a GitHub issue.
 ## When a skill says "fetch the relevant ticket"
 
 Run `gh issue view <number> --comments`.
+
+## Issue types
+
+### Contributor reports
+
+Use the templates in `.github/ISSUE_TEMPLATE/` for public bug reports, feature
+requests, and privacy/security concerns. Keep reporter-facing templates short,
+specific, and safe for public activity-tracking context.
+
+### PRD parent issues
+
+Use a PRD parent issue when a product or architecture decision needs to be
+split into multiple implementation slices. The body should use these headings:
+
+- `## Problem Statement`
+- `## Solution`
+- `## User Stories`
+- `## Implementation Decisions`
+- `## Testing Decisions`
+- `## Out of Scope`
+- `## Further Notes`
+
+Do not put private tracker IDs, local-only artifacts, raw activity data,
+screenshots with private data, full browser URLs, credentials, or internal
+workflow notes in PRD issues.
+
+When a PRD parent will be split by `/to-issues`, keep the parent issue as the
+source of truth for the product decision and apply `ready-for-agent` to the
+implementation slice issues, not to the parent unless the parent is intended to
+be implemented directly.
+
+### Ready-for-agent implementation slices
+
+Use a ready-for-agent issue for a thin, independently grabbable vertical slice.
+The body should use these headings:
+
+- `## Parent`
+- `## What to build`
+- `## Acceptance criteria`
+- `## Blocked by`
+
+Apply the `ready-for-agent` label only when the issue is specific enough for an
+agent to implement without more product discovery. Each slice should be
+demoable or verifiable on its own, and should avoid stale file-path-heavy
+instructions unless a precise path is necessary.
