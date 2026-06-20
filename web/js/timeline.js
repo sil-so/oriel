@@ -2001,6 +2001,39 @@ function getActivityUrlHostname(url) {
     return normalizeHostname(fallbackHost || value);
 }
 
+function getActivityKnownHostname(activity) {
+    const candidates = [
+        activity?.domain,
+        activity?.hostname,
+        activity?.host,
+        activity?.site
+    ];
+
+    for (const candidate of candidates) {
+        const host = getActivityUrlHostname(normalizeActivityText(candidate));
+        if (host) return host;
+    }
+
+    return '';
+}
+
+function getActivitySimilarityHostname(activity) {
+    const host = getActivityUrlHostname(normalizeActivityText(activity?.url));
+    if (host) return host;
+
+    const knownHost = getActivityKnownHostname(activity);
+    if (knownHost) return knownHost;
+
+    const sources = Array.isArray(activity?.sources) ? activity.sources : [];
+    for (const source of sources) {
+        const sourceHost = getActivityUrlHostname(normalizeActivityText(source?.url))
+            || getActivityKnownHostname(source);
+        if (sourceHost) return sourceHost;
+    }
+
+    return '';
+}
+
 function getActivityDurationTotalMs(overlaps) {
     return (Array.isArray(overlaps) ? overlaps : []).reduce((total, overlap) => {
         const duration = Number(overlap?.duration);
@@ -2307,7 +2340,7 @@ function browserBundleMatches(value) {
 }
 
 function isBrowserLikeActivity(activity) {
-    if (normalizeActivityExactUrl(activity?.url)) return true;
+    if (normalizeActivityExactUrl(activity?.similarityUrl ?? activity?.url)) return true;
 
     return browserNameMatches(activity?.app)
         || browserNameMatches(activity?.appPath)
@@ -2315,13 +2348,14 @@ function isBrowserLikeActivity(activity) {
 }
 
 function getSimilarModeAvailability(activity) {
-    const canUseUrlModes = isBrowserLikeActivity(activity) && Boolean(normalizeActivityExactUrl(activity?.url));
+    const canUseHostMode = isBrowserLikeActivity(activity) && Boolean(getActivitySimilarityHostname(activity));
+    const canUseExactUrlMode = isBrowserLikeActivity(activity) && Boolean(normalizeActivityExactUrl(activity?.similarityUrl ?? activity?.url));
     return {
-        host: canUseUrlModes,
-        url: canUseUrlModes,
+        host: canUseHostMode,
+        url: canUseExactUrlMode,
         app: true,
         'app-title': true,
-        defaultMode: canUseUrlModes ? 'host' : 'app'
+        defaultMode: canUseHostMode ? 'host' : 'app'
     };
 }
 
@@ -2379,11 +2413,13 @@ function getActivitySimilarityKeyForMode(activity, mode = 'host') {
     }
 
     if (normalizedMode === 'url') {
-        const exactUrl = normalizeActivityExactUrl(activity?.url);
+        const exactUrl = normalizeActivityExactUrl(activity?.similarityUrl ?? activity?.url);
         return exactUrl ? `${app}|||${exactUrl}` : '';
     }
 
-    const host = getActivityUrlHostname(normalizeActivityText(activity?.url));
+    if (!isBrowserLikeActivity(activity)) return '';
+
+    const host = getActivitySimilarityHostname(activity);
     return host ? `${app}|||${host}` : '';
 }
 
@@ -2405,6 +2441,89 @@ function getActivityAssignmentKeys(activity) {
     return keys;
 }
 
+function getActivityCanonicalRowUnitKeys(activity) {
+    const getRowUnitKey = candidate => {
+        const key = normalizeActivityText(candidate?.assignmentDisplayGroupKey);
+        if (key) return `group|||${key}`;
+
+        const summaryKey = getActivitySummaryKey(candidate);
+        if (!summaryKey) return '';
+
+        const hasRowBounds = Number.isFinite(candidate?.start)
+            && Number.isFinite(candidate?.end)
+            && candidate.end > candidate.start;
+        if (hasRowBounds) return `row|||${summaryKey}|||${candidate.start}|||${candidate.end}`;
+        return candidate?.popupSourceChild || candidate?.popupSessionChild
+            ? `row|||${summaryKey}`
+            : `summary|||${summaryKey}`;
+    };
+
+    const sourceGroups = [
+        activity?.sources,
+        activity?.modalSourceActivities,
+        activity?.children
+    ];
+    const getMergedRowUnitKeys = candidates => {
+        const keys = new Set();
+        const intervalsByIdentity = new Map();
+        (Array.isArray(candidates) ? candidates : []).forEach(candidate => {
+            const explicitKey = normalizeActivityText(candidate?.assignmentDisplayGroupKey);
+            if (explicitKey) {
+                keys.add(`group|||${explicitKey}`);
+                return;
+            }
+
+            const summaryKey = getActivitySummaryKey(candidate);
+            const start = Number(candidate?.start);
+            const end = Number(candidate?.end);
+            if (summaryKey && Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                if (!intervalsByIdentity.has(summaryKey)) intervalsByIdentity.set(summaryKey, []);
+                intervalsByIdentity.get(summaryKey).push({ start, end });
+                return;
+            }
+
+            const key = getRowUnitKey(candidate);
+            if (key) keys.add(key);
+        });
+
+        intervalsByIdentity.forEach((intervals, summaryKey) => {
+            const sorted = intervals.sort((left, right) => left.start - right.start || left.end - right.end);
+            let currentStart = null;
+            let currentEnd = null;
+            sorted.forEach(interval => {
+                if (currentEnd !== null && interval.start <= currentEnd + ACTIVITY_STREAM_SESSION_MERGE_GAP_MS) {
+                    currentEnd = Math.max(currentEnd, interval.end);
+                    return;
+                }
+                if (currentStart !== null) {
+                    keys.add(`row|||${summaryKey}|||${currentStart}|||${currentEnd}`);
+                }
+                currentStart = interval.start;
+                currentEnd = interval.end;
+            });
+            if (currentStart !== null) {
+                keys.add(`row|||${summaryKey}|||${currentStart}|||${currentEnd}`);
+            }
+        });
+
+        return Array.from(keys);
+    };
+    const nestedRowUnitKeys = new Set();
+    sourceGroups.forEach(group => {
+        if (!Array.isArray(group)) return;
+        getMergedRowUnitKeys(group).forEach(key => nestedRowUnitKeys.add(key));
+    });
+
+    if (nestedRowUnitKeys.size > 0) return Array.from(nestedRowUnitKeys);
+
+    const key = getRowUnitKey(activity);
+    return key ? [key] : [];
+}
+
+function getActivityCanonicalRowUnitCount(activity) {
+    return getActivityCanonicalRowUnitKeys(activity).length || 1;
+}
+
 function getActivitySelectionIdentityKeys(activity) {
     return Array.from(new Set([
         ...getActivityAssignmentKeys(activity),
@@ -2424,6 +2543,8 @@ function getActivitySimilarityEntryForMode(activity, mode = 'host') {
     return {
         matchKey,
         assignmentKeys,
+        canonicalRowUnitKeys: getActivityCanonicalRowUnitKeys(activity),
+        canonicalCount: getActivityCanonicalRowUnitCount(activity),
         identityKeys: getActivitySelectionIdentityKeys(activity),
         activity
     };
@@ -2434,6 +2555,10 @@ function getActivityBlockData(blockEl) {
         app: blockEl.dataset.app || '',
         title: blockEl.dataset.title || '',
         url: blockEl.dataset.url || '',
+        similarityUrl: Object.prototype.hasOwnProperty.call(blockEl?.dataset || {}, 'similarityUrl')
+            ? blockEl.dataset.similarityUrl
+            : (blockEl.dataset.url || ''),
+        domain: blockEl.dataset.domain || '',
         appPath: blockEl.dataset.appPath || '',
         bundleId: blockEl.dataset.bundleId || ''
     };
@@ -2489,6 +2614,63 @@ function getActivityBlockSimilarityEntriesForMode(blockEl, mode = 'host', option
         entries.push(entry);
     });
     return entries;
+}
+
+function getActivityBlockMatchingRawCanonicalCount(blockEl, mode, selectedKeys) {
+    const overlaps = getActivityBlockDetailOverlaps(blockEl);
+    if (!Array.isArray(overlaps) || overlaps.length === 0 || !selectedKeys || selectedKeys.size === 0) return 0;
+
+    const intervalsByIdentity = new Map();
+    const unboundedKeys = new Set();
+    const addInterval = (key, start, end) => {
+        if (!intervalsByIdentity.has(key)) intervalsByIdentity.set(key, []);
+        intervalsByIdentity.get(key).push({ start, end });
+    };
+
+    overlaps.forEach(overlap => {
+        const sources = Array.isArray(overlap?.sources) && overlap.sources.length > 0
+            ? overlap.sources
+            : [overlap];
+        sources.forEach(source => {
+            const matchKey = getActivitySimilarityKeyForMode(source, mode);
+            if (!matchKey || !selectedKeys.has(matchKey)) return;
+
+            const explicitKey = normalizeActivityText(source?.assignmentDisplayGroupKey);
+            if (explicitKey) {
+                unboundedKeys.add(`group|||${explicitKey}`);
+                return;
+            }
+
+            const summaryKey = getActivitySummaryKey(source);
+            if (!summaryKey) return;
+
+            const start = Number(source?.start);
+            const end = Number(source?.end);
+            if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                addInterval(summaryKey, start, end);
+            } else {
+                unboundedKeys.add(`summary|||${summaryKey}`);
+            }
+        });
+    });
+
+    let intervalCount = 0;
+    intervalsByIdentity.forEach(intervals => {
+        const sorted = intervals
+            .filter(interval => Number.isFinite(interval.start) && Number.isFinite(interval.end) && interval.end > interval.start)
+            .sort((left, right) => left.start - right.start || left.end - right.end);
+        let currentEnd = null;
+        sorted.forEach(interval => {
+            if (currentEnd !== null && interval.start <= currentEnd + ACTIVITY_STREAM_SESSION_MERGE_GAP_MS) {
+                currentEnd = Math.max(currentEnd, interval.end);
+                return;
+            }
+            intervalCount++;
+            currentEnd = interval.end;
+        });
+    });
+
+    return intervalCount + unboundedKeys.size;
 }
 
 function activityMatchesSelectedSimilarityKeys(activity, selectedKeys) {
@@ -5070,6 +5252,9 @@ function promoteSinglePopupSessionChild(row, children) {
         app: child.app || row.app,
         title: getActivityDisplayTitle(child) || row.title,
         url: child.url || row.url,
+        similarityUrl: Object.prototype.hasOwnProperty.call(child, 'similarityUrl')
+            ? child.similarityUrl
+            : (child.url || row.similarityUrl || ''),
         appPath: child.appPath || row.appPath,
         bundleId: child.bundleId || row.bundleId
     };
@@ -5091,10 +5276,14 @@ function buildPopupSessionSummaryRow(rows, contextKey, rangeStart, rangeEnd) {
         return addTimelineActivityMix(mix, child.activityMix || emptyActivityMix());
     }, emptyActivityMix());
     const sources = pageChildren.flatMap(child => Array.isArray(child.sources) && child.sources.length > 0 ? child.sources : [child]);
+    const exactSourceUrls = new Set(sources
+        .map(source => normalizeActivityExactUrl(source?.similarityUrl ?? source?.url))
+        .filter(Boolean));
     const row = {
         app: first.app || '',
         title,
         url,
+        similarityUrl: exactSourceUrls.size === 1 ? Array.from(exactSourceUrls)[0] : '',
         appPath: first.appPath || '',
         bundleId: first.bundleId || '',
         start: start === Number.MAX_SAFE_INTEGER ? rangeStart : start,
@@ -5353,10 +5542,14 @@ function normalizeSelectedActivityScope(scope = {}, assignmentKeys = null) {
         : [];
     const normalizedMatchKeys = Array.isArray(scope.matchKeys) ? scope.matchKeys : [];
     const mode = scope.mode ? normalizeSimilarActivityMatchMode(scope.mode) : '';
+    const canonicalCount = Number(scope.canonicalCount);
     return {
         mode,
         matchKeys: Array.from(new Set(normalizedMatchKeys.filter(Boolean))),
-        assignmentKeys: Array.from(new Set(normalizedAssignmentKeys.filter(Boolean)))
+        assignmentKeys: Array.from(new Set(normalizedAssignmentKeys.filter(Boolean))),
+        canonicalCount: Number.isFinite(canonicalCount) && canonicalCount > 0
+            ? Math.floor(canonicalCount)
+            : 0
     };
 }
 
@@ -5377,6 +5570,9 @@ function selectedActivityScopeAttributes(scope) {
     if (scope.assignmentKeys.length > 0) {
         attributes.push(`data-selected-similarity-keys="${escapeAttribute(encodeURIComponent(JSON.stringify(scope.assignmentKeys)))}"`);
     }
+    if (scope.canonicalCount > 0) {
+        attributes.push(`data-selected-canonical-count="${escapeAttribute(scope.canonicalCount)}"`);
+    }
     if (scope.mode && scope.matchKeys.length > 0) {
         attributes.push(`data-selected-similarity-mode="${escapeAttribute(scope.mode)}"`);
         attributes.push(`data-selected-similarity-match-keys="${escapeAttribute(encodeURIComponent(JSON.stringify(scope.matchKeys)))}"`);
@@ -5389,6 +5585,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const app = normalizeActivityText(block.app);
     const title = normalizeActivityText(block.title);
     const url = normalizeActivityText(block.url);
+    const domain = normalizeActivityText(block.domain || block.hostname || block.host || block.site);
     const appPath = normalizeActivityText(block.appPath);
     const bundleId = normalizeActivityText(block.bundleId);
     const dateStartOfDay = new Date(state.currentDate).setHours(0,0,0,0);
@@ -5406,7 +5603,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const sourceRange = getTimelineDisplayRowRange(blockStart, blockEnd, dateStartOfDay, state.zoom);
     const startCell = isSessionBlock ? sourceRange.startRow : fallbackStartCell;
     const span = isSessionBlock ? Math.max(1, sourceRange.endRow - sourceRange.startRow) : fallbackSpan;
-    const rawPrimaryActivity = { app, title, url, appPath, bundleId };
+    const rawPrimaryActivity = { app, title, url, domain, similarityUrl: url, appPath, bundleId };
     const blockOverlaps = block.overlaps || [];
     const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
     const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
@@ -5423,6 +5620,22 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const displayApp = normalizeActivityText(displayActivity.app || app);
     const displayTitleSource = normalizeActivityText(displayActivity.title || displayLabels.primary || title);
     const displayUrl = normalizeActivityText(displayActivity.url || displayLabels.externalUrl || url);
+    let displaySimilarityUrl = Object.prototype.hasOwnProperty.call(displayActivity || {}, 'similarityUrl')
+        ? normalizeActivityText(displayActivity.similarityUrl)
+        : url;
+    const exactUrlUnavailableSummary = (popupDisplayModel?.visibleRows || []).find(row => {
+        if (!row?.popupSessionSummary) return false;
+        if (!Object.prototype.hasOwnProperty.call(row, 'similarityUrl')) return false;
+        if (normalizeActivityText(row.similarityUrl) !== '') return false;
+        if (getActivitySimilarityKey(row) !== getActivitySimilarityKey(displayActivity)) return false;
+
+        const rowLabels = getPopupActivityDisplayLabels(row);
+        const rowTitle = normalizeActivityText(getActivityDisplayTitle(row) || rowLabels.primary).trim();
+        return rowTitle && rowTitle === displayTitleSource;
+    });
+    if (exactUrlUnavailableSummary) {
+        displaySimilarityUrl = '';
+    }
     const displayAppPath = normalizeActivityText(displayActivity.appPath || appPath);
     const displayBundleId = normalizeActivityText(displayActivity.bundleId || bundleId);
     const displaySubtitle = normalizeActivityText(displayLabels.secondary || displayApp || app);
@@ -5452,6 +5665,8 @@ function createActivityBlockHTML(block, rowLayout = null) {
         app: displayApp,
         title: displayTitleSource,
         url: displayUrl,
+        domain: displayActivity.domain || domain,
+        similarityUrl: displaySimilarityUrl,
         appPath: displayAppPath,
         bundleId: displayBundleId
     };
@@ -5503,6 +5718,8 @@ function createActivityBlockHTML(block, rowLayout = null) {
              data-app="${escapeAttribute(displayApp)}"
              data-title="${escapeAttribute(displayTitleSource)}"
              data-url="${escapeAttribute(displayUrl)}"
+             data-similarity-url="${escapeAttribute(displaySimilarityUrl)}"
+             data-domain="${escapeAttribute(displayActivity.domain || domain)}"
              data-app-path="${escapeAttribute(displayAppPath)}"
              data-bundle-id="${escapeAttribute(displayBundleId)}"
              ${selectedScopeAttributes}
@@ -5628,12 +5845,14 @@ function getActivityBlockSelectedSimilarityScope(blockEl) {
     const datasetScope = {
         mode: getActivityBlockSelectedSimilarityMode(blockEl),
         matchKeys: getActivityBlockSelectedSimilarityMatchKeys(blockEl),
-        assignmentKeys: getActivityBlockSelectedSimilarityKeys(blockEl)
+        assignmentKeys: getActivityBlockSelectedSimilarityKeys(blockEl),
+        canonicalCount: getActivityBlockSelectedCanonicalCount(blockEl)
     };
     if (
         datasetScope.mode
         || datasetScope.matchKeys.length > 0
         || datasetScope.assignmentKeys.length > 0
+        || datasetScope.canonicalCount > 0
     ) {
         return datasetScope;
     }
@@ -5666,6 +5885,18 @@ function getActivityBlockSelectionId(blockEl) {
     return Number.isFinite(startCell) ? startCell : null;
 }
 
+function getActivityBlockSelectedCanonicalCount(blockEl) {
+    const storedScope = getStoredSelectedActivityScope(getActivityBlockSelectionId(blockEl));
+    if (storedScope?.canonicalCount > 0) return storedScope.canonicalCount;
+
+    const datasetCount = Number(blockEl?.dataset?.selectedCanonicalCount);
+    if (Number.isFinite(datasetCount) && datasetCount > 0) {
+        return Math.floor(datasetCount);
+    }
+
+    return 0;
+}
+
 function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = null, selectedSimilarityScope = null) {
     const selectionId = getActivityBlockSelectionId(blockEl);
     const checkbox = blockEl.querySelector('.activity-checkbox');
@@ -5690,6 +5921,11 @@ function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = nu
         } else {
             delete blockEl.dataset.selectedSimilarityKeys;
         }
+        if (normalizedScope.canonicalCount > 0) {
+            blockEl.dataset.selectedCanonicalCount = String(normalizedScope.canonicalCount);
+        } else {
+            delete blockEl.dataset.selectedCanonicalCount;
+        }
         const mode = normalizedScope.mode;
         const matchKeys = normalizedScope.matchKeys;
         if (mode && matchKeys.length > 0) {
@@ -5708,6 +5944,7 @@ function setActivityBlockSelected(blockEl, selected, selectedSimilarityKeys = nu
         delete blockEl.dataset.selectedSimilarityKeys;
         delete blockEl.dataset.selectedSimilarityMode;
         delete blockEl.dataset.selectedSimilarityMatchKeys;
+        delete blockEl.dataset.selectedCanonicalCount;
     }
 }
 
@@ -6161,8 +6398,40 @@ function selectSimilarActivities(options = {}) {
 
         if (matchingEntries.length > 0) {
             const assignmentKeys = matchingEntries.flatMap(entry => entry.assignmentKeys);
+            const canonicalRowUnitKeys = new Set();
+            const fallbackCanonicalRowUnitKeys = new Set();
+            matchingEntries.forEach(entry => {
+                const rowUnitKeys = Array.isArray(entry.canonicalRowUnitKeys)
+                    ? entry.canonicalRowUnitKeys.filter(Boolean)
+                    : [];
+                rowUnitKeys.forEach(key => {
+                    if (key.startsWith('summary|||')) {
+                        fallbackCanonicalRowUnitKeys.add(key);
+                    } else {
+                        canonicalRowUnitKeys.add(key);
+                    }
+                });
+            });
+            let canonicalCount = canonicalRowUnitKeys.size;
+            if (canonicalCount === 0) {
+                canonicalCount = fallbackCanonicalRowUnitKeys.size;
+            }
+            if (canonicalCount === 0) {
+                canonicalCount = matchingEntries.reduce((total, entry) => {
+                    const count = Number(entry.canonicalCount);
+                    return total + (Number.isFinite(count) && count > 0 ? Math.floor(count) : 1);
+                }, 0);
+            }
+            canonicalCount = Math.max(
+                canonicalCount,
+                getActivityBlockMatchingRawCanonicalCount(el, mode, selectedKeys)
+            );
             const matchKeys = matchingEntries.map(entry => entry.matchKey).filter(Boolean);
-            setActivityBlockSelected(el, true, assignmentKeys, { mode, matchKeys });
+            setActivityBlockSelected(el, true, assignmentKeys, {
+                mode,
+                matchKeys,
+                canonicalCount
+            });
             selectedCount++;
         } else {
             setActivityBlockSelected(el, false);
@@ -6178,9 +6447,15 @@ function updateMultiSelectBar() {
     const size = state.selectedActivities.size;
     const bar = DOM.elMultiSelectBar;
     const canSelectSimilar = size === 1;
+    const selectedEls = Array.from(DOM.elItemsMemoryAid?.querySelectorAll?.('.activity-block.selected') || []);
+    const canonicalCount = selectedEls.reduce((total, el) => {
+        const count = getActivityBlockSelectedCanonicalCount(el);
+        return total + (count > 0 ? count : 1);
+    }, 0);
+    const displayCount = canonicalCount > 0 ? canonicalCount : size;
     if (bar) {
         if (size > 0) {
-            DOM.elSelectedCount.innerText = size;
+            DOM.elSelectedCount.innerText = displayCount;
             bar.classList.remove('hidden');
         } else {
             bar.classList.add('hidden');
