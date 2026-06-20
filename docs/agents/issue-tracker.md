@@ -15,6 +15,10 @@ operations.
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` /
   `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
+- **Close from a PR**: when a PR fully completes an issue, include a GitHub
+  closing keyword in the PR body, such as `Closes #123`, `Fixes #123`, or
+  `Resolves #123`. Use `Refs #123`, `Part of #123`, or plain issue links only
+  for partial work that should leave the issue open.
 
 Infer the repo from `git remote -v` -- `gh` does this automatically when run
 inside a clone.
@@ -38,6 +42,18 @@ normal implementation work, not incoming request triage.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be
 either -- resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+
+## Closing implementation issues
+
+If a merged PR did not use a closing keyword, GitHub will leave the referenced
+issue open. Confirm the PR fully completed the issue, then close the issue
+manually with a short public comment:
+
+`gh issue close <number> --reason completed --comment "Completed by #<pr>."`
+
+Leave PRD parent issues open until their intended child implementation issues
+are complete, unless the parent issue is explicitly scoped as the implemented
+work itself.
 
 ## When a skill says "publish to the issue tracker"
 

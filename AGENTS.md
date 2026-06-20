@@ -88,6 +88,10 @@ This repo uses a single-context domain doc layout. See
   descriptive public branch names such as `codex/publish-docs-foundation`.
 - Use `.github/PULL_REQUEST_TEMPLATE.md` as the source of truth for every PR
   description.
+- When a PR fully completes a GitHub issue, include a closing keyword such as
+  `Closes #123`, `Fixes #123`, or `Resolves #123` in the PR body. Use
+  `Refs #123` or `Part of #123` for partial work that should leave the issue
+  open.
 - Keep the template's Markdown section headings exactly: `## Summary`,
   `## Why`, `## User-facing behavior`, `## Verification`, and
   `## Risk / privacy / security`.
