@@ -7789,6 +7789,111 @@ test('source-backed row units keep stable rounded labels when merged at 10 minut
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
 });
 
+test('coarse merged source-backed Time Entry opens edit with grouped canonical visits', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => (
+    dateStart + ((hour * 60 + minute) * 60 + second) * 1000
+  );
+  const page = (start, end, duration = end - start) => ({
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start,
+    end,
+    duration,
+    assignedDurationMs: duration,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary'
+  });
+  const rowUnitEntry = (id, start, end, sources) => ({
+    id,
+    start,
+    end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...page(start, end, sources.reduce((total, source) => total + source.duration, 0)),
+      assignmentDisplayStart: start,
+      assignmentDisplayEnd: end,
+      assignmentDisplayGroupKey: `${id}-display`,
+      assignmentDisplayZoom: 1,
+      sources
+    }]
+  });
+  const firstSources = [
+    page(at(11, 52), at(11, 52, 20)),
+    page(at(11, 52, 20), at(11, 53))
+  ].map(source => ({ ...source, assignmentDisplayGroupKey: 'entry-planning-first-display' }));
+  const secondSources = [
+    page(at(11, 54), at(11, 56))
+  ].map(source => ({ ...source, assignmentDisplayGroupKey: 'entry-planning-second-display' }));
+  const timeEntries = [
+    rowUnitEntry('entry-planning-first', at(11, 52), at(11, 53), firstSources),
+    rowUnitEntry('entry-planning-second', at(11, 54), at(11, 56), secondSources)
+  ];
+  const activities = [...firstSources, ...secondSources];
+  const { context, html } = renderLoggedTimeEntriesWithContext({
+    zoom: 5,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const [dataset] = extractTimeEntryBlockDatasets(html);
+  let modalArgs = null;
+
+  assert.equal(extractEntryStyles(html).length, 1);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
+  assert.ok(dataset.detailKey, 'expected merged source-backed block to register scoped edit detail');
+
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  assert.equal(context.openTimeEntryBlockEditor({ dataset }), true);
+
+  assert.deepEqual(Array.from(context.window.editingTimeEntryGroupIds), [
+    'entry-planning-first',
+    'entry-planning-second'
+  ]);
+  assert.equal(context.window.editingTimeEntryPersistedActivities, null);
+  assert.equal(modalArgs[0], at(11, 52));
+  assert.equal(modalArgs[1], at(11, 56));
+  assert.equal(modalArgs[5], false);
+  assert.equal(modalArgs[6].length, 2);
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.sources?.[0]?.assignmentDisplayGroupKey), [
+    'entry-planning-first-display',
+    'entry-planning-second-display'
+  ]);
+
+  const { context: modalContext, elements } = loadModalsContext();
+  modalContext.window.editingTimeEntryId = 'entry-planning-first';
+  modalContext.window.editingTimeEntryUsesSelectedActivityReview = true;
+  modalContext.openTimeEntryModal(
+    modalArgs[0],
+    modalArgs[1],
+    modalArgs[2],
+    modalArgs[3],
+    modalArgs[4],
+    modalArgs[5],
+    modalArgs[6],
+    modalArgs[7]
+  );
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 1);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
+  assert.match(listHtml, /2 visits/);
+  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 3);
+  assert.equal(modalContext.getSelectedModalActivities()[0].modalSourceActivities.length, 2);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '3 min');
+});
+
 test('source-backed row units saved at coarse zoom render exact visible rows at 1 minute zoom', () => {
   const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
   const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
