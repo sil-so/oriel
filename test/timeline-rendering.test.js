@@ -329,6 +329,7 @@ function loadModalsContext() {
     'modal-task-select',
     'modal-billable-toggle',
     'modal-btn-delete',
+    'modal-btn-save',
     'time-entry-modal-content',
     'modal-left-panel',
     'modal-memory-aid-list'
@@ -375,6 +376,7 @@ function loadModalsContext() {
       get elModalTaskSelect() { return elements.get('modal-task-select'); },
       get elModalBillable() { return elements.get('modal-billable-toggle'); },
       get elModalBtnDelete() { return elements.get('modal-btn-delete'); },
+      get elModalBtnSave() { return elements.get('modal-btn-save'); },
       get elModalContent() { return elements.get('time-entry-modal-content'); },
       get elModalLeftPanel() { return elements.get('modal-left-panel'); },
       get elModalMemoryAidList() { return elements.get('modal-memory-aid-list'); }
@@ -5071,6 +5073,82 @@ test('similar selection can match browser activities by base URL on the visible 
   assert.equal(blocks[1].classList.contains('selected'), true);
   assert.equal(blocks[2].classList.contains('selected'), false);
   assert.equal(blocks[3].classList.contains('selected'), false);
+});
+
+test('similar selection keeps logged matches and summarizes selected logged state', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const loggedStart = dateStart + 10 * 60 * 1000;
+  const unloggedStart = dateStart + 25 * 60 * 1000;
+  const loggedActivity = {
+    app: 'Google Chrome',
+    title: 'Issue Tracker',
+    url: 'https://github.com/example',
+    start: loggedStart,
+    end: loggedStart + 5 * 60 * 1000,
+    duration: 5 * 60 * 1000
+  };
+  const unloggedActivity = {
+    app: 'Google Chrome',
+    title: 'Issue Tracker',
+    url: 'https://github.com/other',
+    start: unloggedStart,
+    end: unloggedStart + 5 * 60 * 1000,
+    duration: 5 * 60 * 1000
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 10,
+      app: 'Google Chrome',
+      title: 'Issue Tracker',
+      url: loggedActivity.url,
+      selected: true,
+      overlaps: [loggedActivity]
+    }),
+    createSimilarActivityBlock({
+      startCell: 25,
+      app: 'Google Chrome',
+      title: 'Issue Tracker',
+      url: unloggedActivity.url,
+      overlaps: [unloggedActivity]
+    })
+  ];
+
+  context.state.currentDate = new Date(dateStart);
+  context.state.selectedActivities.add(10);
+  context.state.timeEntries = [{
+    id: 'entry-logged',
+    start: loggedActivity.start,
+    end: loggedActivity.end,
+    projectId: 'project-1',
+    activities: [{
+      ...loggedActivity,
+      assignedDurationMs: loggedActivity.duration,
+      assignmentStart: loggedActivity.start,
+      assignmentEnd: loggedActivity.end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary'
+    }]
+  }];
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elSelectedState = { innerText: '' };
+  context.DOM.elBtnAssignSelected = new FakeElement('btn-assign-selected');
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [10, 25]);
+  assert.equal(context.DOM.elSelectedCount.innerText, 2);
+  assert.equal(context.DOM.elSelectedState.innerText, ' · 1 unlogged · 1 already logged');
+  assert.equal(context.DOM.elBtnAssignSelected.disabled, false);
 });
 
 test('similar selection treats native activities with the same app name as similar even when metadata differs', () => {
@@ -10986,6 +11064,71 @@ test('selected activities use sessions and activities metadata for native and mi
   assert.match(listHtml, /2 activities/);
 });
 
+test('selected activities modal marks logged rows and defaults to unlogged save state', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 13, 55).getTime();
+
+  context.openTimeEntryModal(startMs, startMs + 10 * 60 * 1000, '', null, null, true, [
+    {
+      app: 'Brave Browser',
+      title: 'Already logged page',
+      url: 'https://example.com/logged',
+      start: startMs,
+      end: startMs + 5 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      assignedDurationMs: 5 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      alreadyLogged: true
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Unlogged page',
+      url: 'https://example.com/unlogged',
+      start: startMs + 5 * 60 * 1000,
+      end: startMs + 10 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      assignedDurationMs: 5 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      alreadyLogged: false
+    }
+  ]);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.match(listHtml, /Already logged/);
+  assert.match(listHtml, /1 unlogged · 1 already logged/);
+  assert.match(listHtml, /data-modal-include-logged/);
+  assert.equal(elements.get('modal-btn-save').disabled, false);
+  assert.equal(context.state.modalIncludeAlreadyLoggedActivities, false);
+
+  context.setModalIncludeAlreadyLoggedActivities(true);
+  assert.equal(context.state.modalIncludeAlreadyLoggedActivities, true);
+});
+
+test('selected activities modal disables default assign when all rows are logged', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 14, 5).getTime();
+
+  context.openTimeEntryModal(startMs, startMs + 5 * 60 * 1000, '', null, null, true, [
+    {
+      app: 'Brave Browser',
+      title: 'Already logged page',
+      url: 'https://example.com/logged',
+      start: startMs,
+      end: startMs + 5 * 60 * 1000,
+      duration: 5 * 60 * 1000,
+      assignedDurationMs: 5 * 60 * 1000,
+      assignmentSource: 'activity-stream',
+      alreadyLogged: true
+    }
+  ]);
+
+  assert.match(elements.get('modal-memory-aid-list').innerHTML, /1 already logged/);
+  assert.equal(elements.get('modal-btn-save').disabled, true);
+
+  context.setModalIncludeAlreadyLoggedActivities(true);
+  assert.equal(elements.get('modal-btn-save').disabled, false);
+});
+
 test('saving grouped selected activities preserves separate canonical row unit payloads', () => {
   const context = loadTimeEntrySaveContext();
   const startMs = new Date(2026, 4, 21, 14, 0).getTime();
@@ -11092,6 +11235,65 @@ test('saving grouped selected activities preserves separate canonical row unit p
   assert.equal(payloads[1].activities[0].sources.length, 1);
   assert.equal(payloads[0].activities[0].modalGroupedReviewRow, undefined);
   assert.equal(payloads[0].activities[0].modalSourceActivities, undefined);
+});
+
+test('saving selected activities defaults to unlogged canonical payloads', () => {
+  const context = loadTimeEntrySaveContext();
+  const startMs = new Date(2026, 4, 21, 14, 30).getTime();
+  const logged = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/logged',
+    start: startMs,
+    end: startMs + 5 * 60 * 1000,
+    duration: 5 * 60 * 1000,
+    assignedDurationMs: 5 * 60 * 1000,
+    assignmentStart: startMs,
+    assignmentEnd: startMs + 5 * 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    alreadyLogged: true
+  };
+  const unlogged = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/unlogged',
+    start: startMs + 10 * 60 * 1000,
+    end: startMs + 14 * 60 * 1000,
+    duration: 4 * 60 * 1000,
+    assignedDurationMs: 4 * 60 * 1000,
+    assignmentStart: startMs + 10 * 60 * 1000,
+    assignmentEnd: startMs + 14 * 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    alreadyLogged: false
+  };
+
+  const defaultPayloads = context.buildBulkTimeEntryPayloads({
+    start: startMs,
+    end: startMs + 14 * 60 * 1000,
+    description: '',
+    projectId: 'project-1',
+    taskId: '',
+    billable: true,
+    activities: [logged, unlogged]
+  });
+
+  assert.equal(defaultPayloads.length, 1);
+  assert.equal(defaultPayloads[0].activities[0].url, 'https://example.com/unlogged');
+
+  context.state.modalIncludeAlreadyLoggedActivities = true;
+  const explicitPayloads = context.buildBulkTimeEntryPayloads({
+    start: startMs,
+    end: startMs + 14 * 60 * 1000,
+    description: '',
+    projectId: 'project-1',
+    taskId: '',
+    billable: true,
+    activities: [logged, unlogged]
+  });
+
+  assert.equal(explicitPayloads.length, 2);
 });
 
 test('similar-scoped multiple activity popup assigns only matching popup-visible rows', () => {
