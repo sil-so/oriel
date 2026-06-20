@@ -4851,31 +4851,39 @@ function getTimeEntryBlockOriginalEntry(item) {
 }
 
 function getTimeEntryBlockRenderActivities(item) {
-    return (Array.isArray(item?.entries) ? item.entries : [])
-        .flatMap(entry => Array.isArray(entry?.activities) ? entry.activities : [])
-        .flatMap(activity => {
-            if (Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0) {
-                return activity.modalSourceActivities;
-            }
-            return [activity];
-        });
+    const activities = (Array.isArray(item?.entries) ? item.entries : [])
+        .flatMap(entry => Array.isArray(entry?.activities) ? entry.activities : []);
+
+    if (item?.renderExactGeometry !== true) {
+        return activities;
+    }
+
+    return activities.flatMap(activity => {
+        if (Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0) {
+            return activity.modalSourceActivities;
+        }
+        return [activity];
+    });
 }
 
 function registerTimeEntryBlockDetail(model, item) {
     const detailMap = model?.timeEntryBlockDetails;
     if (!detailMap || !isSourceBackedTimeEntryRenderItem(item)) return null;
-    if (item?.renderExactGeometry !== true) return null;
 
     const renderActivities = getTimeEntryBlockRenderActivities(item);
     if (renderActivities.length === 0) return null;
 
     const originalEntry = getTimeEntryBlockOriginalEntry(item);
     const firstEntry = item.firstEntry || item.entries?.[0] || originalEntry;
+    const entryIds = [...new Set((Array.isArray(item?.entries) ? item.entries : [])
+        .map(entry => entry?.id)
+        .filter(Boolean))];
     if (!firstEntry?.id) return null;
 
     const key = `time-entry-detail-${detailMap.size + 1}`;
     detailMap.set(key, {
         entryId: firstEntry.id,
+        entryIds,
         start: item.start,
         end: item.end,
         description: firstEntry.description || '',
@@ -4883,9 +4891,9 @@ function registerTimeEntryBlockDetail(model, item) {
         taskId: firstEntry.taskId || '',
         billable: firstEntry.billable,
         activities: renderActivities,
-        persistedStart: originalEntry?.start,
-        persistedEnd: originalEntry?.end,
-        persistedActivities: Array.isArray(originalEntry?.activities) ? originalEntry.activities : null
+        persistedStart: entryIds.length <= 1 ? originalEntry?.start : undefined,
+        persistedEnd: entryIds.length <= 1 ? originalEntry?.end : undefined,
+        persistedActivities: entryIds.length <= 1 && Array.isArray(originalEntry?.activities) ? originalEntry.activities : null
     });
     return key;
 }
@@ -6751,8 +6759,9 @@ function getGroupedTimeEntryActivities(entries) {
 function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
     const detail = getTimeEntryBlockDetail(blockEl);
     if (detail?.entryId) {
+        const detailEntryIds = Array.isArray(detail.entryIds) ? detail.entryIds.filter(Boolean) : [];
         window.editingTimeEntryId = detail.entryId;
-        window.editingTimeEntryGroupIds = null;
+        window.editingTimeEntryGroupIds = detailEntryIds.length > 1 ? detailEntryIds : null;
         window.editingTimeEntryPersistedRange = Number.isFinite(detail.persistedStart)
             && Number.isFinite(detail.persistedEnd)
             && detail.persistedEnd > detail.persistedStart
@@ -6761,6 +6770,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
         window.editingTimeEntryPersistedActivities = Array.isArray(detail.persistedActivities)
             ? detail.persistedActivities
             : null;
+        window.editingTimeEntryUsesSelectedActivityReview = true;
         openTimeEntryModal(
             detail.start,
             detail.end,
@@ -6787,6 +6797,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
         window.editingTimeEntryGroupIds = groupEntries.map(entry => entry.id);
         window.editingTimeEntryPersistedRange = null;
         window.editingTimeEntryPersistedActivities = null;
+        window.editingTimeEntryUsesSelectedActivityReview = false;
         openTimeEntryModal(
             Number.isFinite(groupStart) ? groupStart : Math.min(...groupEntries.map(entry => entry.start)),
             Number.isFinite(groupEnd) ? groupEnd : Math.max(...groupEntries.map(entry => entry.end)),
@@ -6808,6 +6819,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
     window.editingTimeEntryGroupIds = null;
     window.editingTimeEntryPersistedRange = null;
     window.editingTimeEntryPersistedActivities = null;
+    window.editingTimeEntryUsesSelectedActivityReview = false;
     openTimeEntryModal(entry.start, entry.end, entry.description, entry.projectId, entry.billable, false, null, entry.taskId || '');
     return true;
 }

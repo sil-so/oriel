@@ -679,7 +679,12 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         finalActivities = summarizeModalActivities(scanOverlaps);
     }
 
-    if (!isBulk) {
+    if (!isBulk
+        && window.editingTimeEntryId
+        && window.editingTimeEntryUsesSelectedActivityReview === true
+        && shouldBuildBulkModalDisplayActivities(finalActivities)) {
+        finalActivities = buildBulkModalDisplayActivities(finalActivities);
+    } else if (!isBulk) {
         finalActivities = summarizeModalActivities(finalActivities);
     } else if (shouldBuildBulkModalDisplayActivities(finalActivities)) {
         finalActivities = buildBulkModalDisplayActivities(finalActivities);
@@ -828,6 +833,7 @@ function closeTimeEntryModal() {
     window.editingTimeEntryGroupIds = null;
     window.editingTimeEntryPersistedRange = null;
     window.editingTimeEntryPersistedActivities = null;
+    window.editingTimeEntryUsesSelectedActivityReview = false;
     window.isBulkAllocation = false;
     window.pendingAiSuggestionCompletion = null;
     state.currentModalAllActivities = [];
