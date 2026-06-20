@@ -5,6 +5,8 @@ What changed.
 ## Why
 
 Why this change is needed.
+Link the relevant issue. Use `Closes #123` only when this PR fully completes
+that issue; use `Refs #123` or `Part of #123` for partial work.
 
 ## User-facing behavior
 
