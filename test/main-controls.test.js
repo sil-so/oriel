@@ -2252,6 +2252,90 @@ test('bulk Activity Stream assignment saves visible row units with nested source
   ]);
 });
 
+test('bulk Similar grouped modal rows save one payload per selected canonical row unit', async () => {
+  const { dom, context, fetchCalls } = loadMainControlsContext();
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const source = (title, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url: 'https://checkout.example.test/session/',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 5
+  });
+  const rowUnit = (id, start, end, sources) => {
+    const duration = sources.reduce((total, activity) => total + activity.assignedDurationMs, 0);
+    return {
+      app: 'Brave Browser',
+      title: 'Example Checkout',
+      url: 'https://checkout.example.test/session/',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start,
+      end,
+      duration,
+      assignedDurationMs: duration,
+      assignmentStart: start,
+      assignmentEnd: end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayStart: start,
+      assignmentDisplayEnd: end,
+      assignmentDisplayGroupKey: id,
+      assignmentDisplayZoom: 5,
+      sources,
+      modalSourceActivities: sources,
+      modalAggregateGroupKey: 'brave-browser-example-checkout'
+    };
+  };
+  const firstRow = rowUnit('example-row-1200', at(12, 0), at(12, 5), [
+    source('Example Checkout', at(12, 0, 10), at(12, 0, 35)),
+    source('Example Checkout', at(12, 1, 0), at(12, 1, 20))
+  ]);
+  const secondRow = rowUnit('example-row-1205', at(12, 5), at(12, 10), [
+    source('Example Checkout', at(12, 5, 5), at(12, 5, 55))
+  ]);
+
+  context.window.isBulkAllocation = true;
+  dom.elModalStart.value = '12:00';
+  dom.elModalEnd.value = '12:10';
+  dom.elModalDescription.value = '';
+  dom.elModalProjectSelect.value = 'project-personal';
+  dom.elModalTaskSelect.value = '';
+  dom.elModalBillable.checked = false;
+  context.state.currentModalActivities = [{
+    ...firstRow,
+    start: firstRow.start,
+    end: secondRow.end,
+    duration: firstRow.duration + secondRow.duration,
+    assignedDurationMs: firstRow.assignedDurationMs + secondRow.assignedDurationMs,
+    modalGroupedReviewRow: true,
+    modalSourceActivities: [firstRow, secondRow]
+  }];
+
+  await dom.elModalBtnSave.click();
+
+  assert.equal(fetchCalls.length, 2);
+  assert.deepEqual(fetchCalls.map(call => [call.body.start, call.body.end]), [
+    [at(12, 0), at(12, 5)],
+    [at(12, 5), at(12, 10)]
+  ]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities[0].assignmentDisplayGroupKey), [
+    'example-row-1200',
+    'example-row-1205'
+  ]);
+  assert.deepEqual(fetchCalls.map(call => call.body.activities[0].sources.length), [2, 1]);
+});
+
 test('saving an edited assigned activity group consolidates grouped entries into one row', async () => {
   const { dom, context, fetchCalls } = loadMainControlsContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -2917,7 +3001,7 @@ test('selected similar assignment resolves overlap-key backed exact activity row
   assert.equal(modalArgs[6][0].assignmentEnd, at(12, 14));
 });
 
-test('selected similar base-url assignment tags same-title fragments for modal aggregation', async () => {
+test('selected similar base-url assignment keeps selected row units out of broad host grouping', async () => {
   const { dom, context } = loadMainControlsContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const at = (hours, minutes, seconds = 0) => dateStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
@@ -2995,15 +3079,94 @@ test('selected similar base-url assignment tags same-title fragments for modal a
 
   assert.equal(modalArgs[5], true);
   assert.equal(modalArgs[6].length, 2);
-  assert.deepEqual(
-    new Set(modalArgs[6].map(activity => activity.modalAggregateGroupKey)),
-    new Set([
-      context.getActivitySimilarityKeyForMode(firstBol, 'app-title'),
-      context.getActivitySimilarityKeyForMode(secondBol, 'app-title')
-    ])
-  );
+  assert.deepEqual(Array.from(modalArgs[6], activity => activity.assignmentDisplayGroupKey), [
+    modalArgs[6][0].modalAggregateGroupKey,
+    modalArgs[6][1].modalAggregateGroupKey
+  ]);
   assert.equal(modalArgs[6].some(activity => activity.modalAggregateGroupKey === hostKey), false);
   assert.equal(modalArgs[6].reduce((total, activity) => total + activity.assignedDurationMs, 0), 75 * 1000);
+});
+
+test('selected similar base-url assignment opens Assign with one row unit for nested source evidence', async () => {
+  const { dom, context } = loadMainControlsContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hours, minutes, seconds = 0) => dateStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  const sourceKey = activity => [
+    activity.app || '',
+    activity.title || '',
+    activity.url || '',
+    activity.appPath || '',
+    activity.bundleId || '',
+    activity.start,
+    activity.end
+  ].join('|||');
+  const firstCheckout = {
+    app: 'Brave Browser',
+    title: 'Example Checkout',
+    url: 'https://checkout.example.test/session/start',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(12, 0, 5),
+    end: at(12, 0, 25),
+    duration: 20 * 1000
+  };
+  const secondCheckout = {
+    ...firstCheckout,
+    title: 'Example Cart',
+    url: 'https://checkout.example.test/session/cart',
+    start: at(12, 1, 0),
+    end: at(12, 1, 35),
+    duration: 35 * 1000
+  };
+  const thirdCheckout = {
+    ...firstCheckout,
+    title: 'Example Payment',
+    url: 'https://checkout.example.test/session/pay',
+    start: at(12, 2, 10),
+    end: at(12, 2, 50),
+    duration: 40 * 1000
+  };
+  const hostKey = 'brave browser|||checkout.example.test';
+  const selectedBlock = {
+    dataset: {
+      startCell: String(12 * 12),
+      span: '1',
+      app: 'Brave Browser',
+      title: 'Example Checkout',
+      url: 'https://checkout.example.test/session/start',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      selectedSimilarityKeys: encodeURIComponent(JSON.stringify([
+        sourceKey(firstCheckout),
+        sourceKey(secondCheckout),
+        sourceKey(thirdCheckout)
+      ])),
+      selectedSimilarityMode: 'host',
+      selectedSimilarityMatchKeys: encodeURIComponent(JSON.stringify([hostKey])),
+      overlaps: encodeURIComponent(JSON.stringify([firstCheckout, secondCheckout, thirdCheckout]))
+    }
+  };
+  let modalArgs = null;
+
+  context.state.zoom = 5;
+  context.getActivityAssignmentKeys = activity => [sourceKey(activity)];
+  context.window.getActivityAssignmentKeys = context.getActivityAssignmentKeys;
+  dom.elItemsMemoryAid.querySelectorAll = selector => (
+    selector === '.activity-block.selected' ? [selectedBlock] : []
+  );
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+
+  await dom.elBtnAssignSelected.click();
+
+  assert.equal(modalArgs[5], true);
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].assignmentModel, 'activity-stream-summary');
+  assert.equal(modalArgs[6][0].modalSourceActivities.length, 3);
+  assert.equal(modalArgs[6][0].assignedDurationMs, 95 * 1000);
+  assert.equal(modalArgs[6][0].assignmentStart, at(12, 0));
+  assert.equal(modalArgs[6][0].assignmentEnd, at(12, 5));
 });
 
 test('selected activity assignment excludes secondary summaries from the same similar app block', async () => {

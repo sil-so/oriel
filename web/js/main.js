@@ -266,7 +266,7 @@ function hasTimeRange(activity) {
 }
 
 function timeEntryActivitySnapshot(activity) {
-    const { sources, modalSourceActivities, modalAggregateGroupKey, ...snapshot } = activity || {};
+    const { sources, modalSourceActivities, modalAggregateGroupKey, modalGroupedReviewRow, ...snapshot } = activity || {};
     return snapshot;
 }
 
@@ -465,6 +465,10 @@ function buildManualTimeEntryUpdatePayload(entry, startMs, endMs, activities) {
 
 function getBulkTimeEntryActivities(activity) {
     if (isActivityStreamAssignment(activity)) {
+        if (activity?.modalGroupedReviewRow) {
+            const groupedSnapshots = buildSourceBackedBulkActivitySnapshots(activity);
+            if (groupedSnapshots.length > 0) return groupedSnapshots;
+        }
         const snapshot = normalizeActivityStreamAssignmentForSave(activity);
         return hasTimeRange(snapshot) ? [snapshot] : [];
     }
@@ -4081,7 +4085,7 @@ function setupMainEventListeners() {
                     return;
                 }
                 const shouldUseVisibleRowUnit = (
-                    (selectedSimilarityKeys.length > 0 && similarityScope.mode === 'app')
+                    (selectedSimilarityKeys.length > 0 && ['app', 'host'].includes(similarityScope.mode))
                     || (selectedSimilarityKeys.length === 0 && Boolean(blockSessionKey))
                 );
                 const rowUnitActivity = shouldUseVisibleRowUnit

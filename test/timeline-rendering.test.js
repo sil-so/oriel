@@ -9941,7 +9941,7 @@ test('selected activity assignment modal uses clear assignment copy', () => {
     }
   ]);
 
-  assert.equal(elements.get('modal-title').innerText, 'Assign Selected Activity');
+  assert.equal(elements.get('modal-title').innerText, 'Assign Selected Activities');
 });
 
 test('selected activity assignment modal renders positive sub-minute rows as seconds', () => {
