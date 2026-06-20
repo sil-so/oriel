@@ -10,7 +10,9 @@ test('the shipped-facing interface uses Oriel-owned activity terminology', () =>
 
   assert.match(interfaceMarkup, />Activity Stream</);
   assert.match(interfaceMarkup, />Recorded Activity</);
-  assert.match(shippedInterface, /Activity Mix|Hands-on|Hands-off/);
+  assert.doesNotMatch(interfaceMarkup, />Recorded Activity Breakdown</);
+  assert.doesNotMatch(interfaceMarkup, />Activity Mix</);
+  assert.doesNotMatch(interfaceMarkup, /Hands-on|Hands-off/);
   assert.doesNotMatch(interfaceMarkup, />Memory Aid</);
   assert.doesNotMatch(interfaceMarkup, />Captured Activities/);
   assert.doesNotMatch(shippedInterface, /Review Passive Time|Keep Time|Keep Audible|Discard Silent/);

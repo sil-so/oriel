@@ -2199,7 +2199,9 @@ function isWeakPopupActivityTitle(title, activity) {
 
     const comparableTitle = normalizedTitle.replace(/^www\./, '');
     const comparableHost = host.replace(/^www\./, '');
+    const firstHostLabel = comparableHost.split('.')[0] || '';
     return comparableTitle === comparableHost
+        || (firstHostLabel && comparableTitle === firstHostLabel)
         || comparableTitle.startsWith(`${comparableHost}/`)
         || comparableTitle.startsWith(`${comparableHost}?`)
         || comparableTitle.startsWith(`${comparableHost}#`)
@@ -2692,7 +2694,7 @@ function getActivityBlockCandidateSimilarityActivities(blockEl, options = {}) {
     });
 
     const primaryActivity = getActivityBlockData(blockEl);
-    if (!activities.some(activity => getActivitySummaryKey(activity) === getActivitySummaryKey(primaryActivity))) {
+    if (activities.length === 0) {
         addActivity(primaryActivity);
     }
 
@@ -5131,10 +5133,11 @@ function summarizeSimilarActivityOverlaps(overlaps, rangeStart, rangeEnd) {
 
 function getPopupActivityExactGroupingKey(activity) {
     const app = normalizeActivityText(activity?.app).trim().toLowerCase();
-    const title = getActivityDisplayTitle(activity).toLowerCase();
+    const rawTitle = getActivityDisplayTitle(activity);
+    const title = rawTitle.toLowerCase();
     const host = getActivitySummaryHostname(activity);
     if (host) {
-        return `${app}|||${title}|||${host}`;
+        return `${app}|||${isWeakPopupActivityTitle(rawTitle, activity) ? host : title}|||${host}`;
     }
 
     return `${app}|||${title || app}`;
@@ -5514,6 +5517,84 @@ function buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryA
     return sortPopupDisplayRows(rows);
 }
 
+function isInternalPopupSourceRow(activity, meaningfulContextKeys) {
+    const title = getActivityDisplayTitle(activity);
+    const contextKey = getActivityPopupContextKey(activity);
+    return meaningfulContextKeys.has(contextKey)
+        && isWeakPopupActivityTitle(title, activity);
+}
+
+function buildCanonicalPopupDisplayRows(overlaps, rangeStart, rangeEnd, primaryActivity = null) {
+    const sourceRows = (Array.isArray(overlaps) ? overlaps : [])
+        .map((source, sourceIndex) => ({
+            source,
+            sourceIndex,
+            start: Number.isFinite(source?.start) ? Math.max(source.start, rangeStart) : source?.start,
+            end: Number.isFinite(source?.end) ? Math.min(source.end, rangeEnd) : source?.end,
+            duration: getActivitySourceDuration(source, rangeStart, rangeEnd)
+        }))
+        .filter(row => Number.isFinite(row.duration) && row.duration > 0)
+        .sort((left, right) => {
+            const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
+            const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
+            if (startA !== startB) return startA - startB;
+            return left.sourceIndex - right.sourceIndex;
+        });
+    const meaningfulContextKeys = new Set(sourceRows
+        .filter(row => !isWeakPopupActivityTitle(getActivityDisplayTitle(row.source), row.source))
+        .map(row => getActivityPopupContextKey(row.source))
+        .filter(Boolean));
+    const primaryContextKey = getActivityPopupContextKey(primaryActivity || {});
+    const rows = [];
+
+    for (const row of sourceRows) {
+        const { source, start, end, duration } = row;
+        const title = getActivityDisplayTitle(source);
+        const includeShortPrimary = getActivityPopupContextKey(source) === primaryContextKey
+            && isGenericPopupPrimaryActivity(primaryActivity || {});
+        if (duration < POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS && !includeShortPrimary) continue;
+        if (isInternalPopupSourceRow(source, meaningfulContextKeys)) continue;
+
+        const key = getPopupActivityExactGroupingKey(source);
+        const clippedMix = getActivityMixInRange(source, rangeStart, rangeEnd);
+        const clippedSource = {
+            ...stripActivitySources(source),
+            title,
+            appPath: source?.appPath || '',
+            bundleId: source?.bundleId || '',
+            start,
+            end,
+            duration,
+            activityMix: clippedMix
+        };
+        const previous = rows[rows.length - 1];
+        const canMergeWithPrevious = previous
+            && previous.exactGroupingKey === key
+            && Number.isFinite(previous.end)
+            && Number.isFinite(start)
+            && start - previous.end < POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+
+        if (canMergeWithPrevious) {
+            previous.end = Number.isFinite(end) ? Math.max(previous.end, end) : previous.end;
+            previous.duration += duration;
+            previous.activityMix = addTimelineActivityMix(previous.activityMix || emptyActivityMix(), clippedMix);
+            previous.sources.push(clippedSource);
+            continue;
+        }
+
+        rows.push({
+            ...clippedSource,
+            exactGroupingKey: key,
+            sources: [clippedSource]
+        });
+    }
+
+    return rows.map(row => {
+        const { exactGroupingKey, ...displayRow } = row;
+        return displayRow;
+    });
+}
+
 function isGenericPopupPrimaryActivity(activity) {
     const title = getActivityDisplayTitle(activity).trim().toLowerCase();
     return title === 'multiple activities' || isWeakPopupActivityTitle(title, activity);
@@ -5573,7 +5654,10 @@ function buildActivityPopupDisplayModel({
     zoom = state.zoom
 } = {}) {
     const exactRows = summarizePopupActivityOverlaps(overlaps || [], rangeStart, rangeEnd);
-    const topLevelRows = buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity || {});
+    const canonicalRows = buildCanonicalPopupDisplayRows(overlaps || [], rangeStart, rangeEnd, primaryActivity || {});
+    const topLevelRows = canonicalRows.length > 0
+        ? canonicalRows
+        : buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity || {});
     const fallbackPrimaryRow = buildPrimaryPopupDisplayRow(
         primaryActivity || {},
         exactRows,
@@ -5585,12 +5669,14 @@ function buildActivityPopupDisplayModel({
     const primaryActivityExactKey = getPopupActivityExactGroupingKey(primaryActivity || {});
     const primaryActivityContextKey = getActivityPopupContextKey(primaryActivity || {});
     const isGenericPrimary = isGenericPopupPrimaryActivity(primaryActivity || {});
-    const primaryRow = (isGenericPrimary ? getBestMeaningfulPopupPrimaryRow(topLevelRows) : null)
+    const bestMeaningfulRow = getBestMeaningfulPopupPrimaryRow(topLevelRows);
+    const primaryRow = (isGenericPrimary ? bestMeaningfulRow : null)
         || (!isGenericPrimary
             ? topLevelRows.find(row => row.popupSessionSummary && row.popupContextKey === primaryActivityContextKey)
                 || topLevelRows.find(row => row.popupContextSummary && getActivityPopupContextKey(row) === primaryActivityContextKey)
                 || topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
             : null)
+        || (!isGenericPrimary ? bestMeaningfulRow : null)
         || (topLevelRows.length === 1 ? topLevelRows[0] : null)
         || (isGenericPrimary ? topLevelRows[0] : null)
         || fallbackPrimaryRow;
@@ -5601,7 +5687,7 @@ function buildActivityPopupDisplayModel({
             if (startA !== startB) return startA - startB;
             return right.duration - left.duration;
         });
-    const visibleRows = [primaryRow, ...secondaryRows];
+    const visibleRows = sortPopupDisplayRows([primaryRow, ...secondaryRows].filter(Boolean));
 
     return {
         exactRows,
@@ -5609,7 +5695,7 @@ function buildActivityPopupDisplayModel({
         secondaryRows,
         visibleRows,
         assignmentRows: visibleRows,
-        isMultiple: secondaryRows.length > 0
+        isMultiple: secondaryRows.length > 0 || (isGenericPrimary && visibleRows.length > 1)
     };
 }
 
@@ -5796,11 +5882,8 @@ function createActivityBlockHTML(block, rowLayout = null) {
         ? (getBreakdownDisplayDurationMs(popupDisplayModel.visibleRows, uniqueOverlaps) || actualDurationMs)
         : actualDurationMs;
     const durationStr = formatActivityDurationLabel(displayDurationMs, isMultipleActivityBlock ? 0 : 1);
-    const blockActivityMix = popupDisplayModel.visibleRows.reduce((mix, overlap) => {
-        return addTimelineActivityMix(mix, overlap.activityMix || emptyActivityMix());
-    }, emptyActivityMix());
-    const durationPillClass = activityMixPillClass(blockActivityMix, 'shrink-0');
-    const durationPillAttributes = activityMixPillAttributes(blockActivityMix);
+    const durationPillClass = 'duration-pill shrink-0';
+    const durationPillAttributes = '';
     const overlapKey = isSessionBlock
         ? registerActivityBlockDetailOverlaps(layout, uniqueOverlaps)
         : null;
@@ -5882,6 +5965,10 @@ function attachMemoryAidInteractions() {
         if (btnQuickAdd) {
             btnQuickAdd.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (isMixedCoarseActivityBlock(b)) {
+                    showActivityDetailsPopup(b);
+                    return;
+                }
                 const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
                 const displayModel = buildActivityBlockPopupDisplayModel(b);
                 const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs, {
@@ -6319,11 +6406,29 @@ function syncPopupActivitySelectionRows() {
     });
 }
 
+function getSelectedPopupActivityRowCount() {
+    const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
+    if (!rows) return 0;
+    return Array.from(rows).filter(row => row?.classList?.contains?.('is-selected')).length;
+}
+
+function updatePopupAssignButtonState() {
+    const button = DOM.elPopupAssignBtn;
+    if (!button) return;
+
+    const selectedCount = getSelectedPopupActivityRowCount();
+    button.disabled = selectedCount === 0;
+    button.innerHTML = selectedCount > 0
+        ? `<i class="ph ph-plus-circle text-base"></i> Assign ${selectedCount} ${selectedCount === 1 ? 'Activity' : 'Activities'}`
+        : '<i class="ph ph-plus-circle text-base"></i> Assign Activities';
+}
+
 function togglePopupActivitySelection(row) {
     if (DOM.elPopupMultiListContainer?.dataset) {
         DOM.elPopupMultiListContainer.dataset.popupSelectionDirty = 'true';
     }
     setPopupActivityRowSelected(row, !row?.classList?.contains?.('is-selected'));
+    updatePopupAssignButtonState();
 }
 
 function getPopupRowDisplayActivity(row, displayOverlaps) {
@@ -6437,6 +6542,7 @@ function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, e
     });
 
     syncPopupActivitySelectionRows();
+    updatePopupAssignButtonState();
 }
 
 // Selects or deselects an activity block for bulk actions
@@ -7033,9 +7139,7 @@ function showActivityDetailsPopup(b) {
         ? getBreakdownDisplayDurationMs(displayOverlaps, popupDisplayModel.exactRows)
         : (getActivityDurationTotalMs(displayOverlaps) || (span * state.zoom * 60000));
     const durationStr = formatPositiveActivityDurationLabel(totalMs);
-    const popupActivityMix = displayOverlaps.reduce((mix, overlap) => {
-        return addTimelineActivityMix(mix, overlap.activityMix || emptyActivityMix());
-    }, emptyActivityMix());
+    const popupActivityMix = emptyActivityMix();
 
     DOM.elPopupDuration.innerText = durationStr;
     if (DOM.elPopupDuration) {
@@ -7087,7 +7191,7 @@ function showActivityDetailsPopup(b) {
 
     if (isMultipleActivityPopup) {
         DOM.elPopupIconContainer.innerHTML = '<i class="ph ph-dots-three-circle text-base text-accent"></i>';
-        DOM.elPopupAppName.innerText = 'Multiple Activities';
+        DOM.elPopupAppName.innerText = 'Activities';
 
         DOM.elPopupSingleDetails.classList.add('hidden');
         DOM.elPopupSingleChildrenContainer?.classList?.add('hidden');
@@ -7122,13 +7226,13 @@ function showActivityDetailsPopup(b) {
             const secondaryLabelHTML = displayLabels.secondary
                 ? `<span class="popup-activity-secondary" title="${escapeAttribute(displayLabels.secondary)}">${escapeTimelineText(displayLabels.secondary)}</span>`
                 : '';
-            const rowDurationPillClass = activityMixPillClass(o.activityMix, 'shrink-0');
-            const rowDurationPillAttributes = activityMixPillAttributes(o.activityMix);
+            const rowDurationPillClass = 'duration-pill shrink-0';
+            const rowDurationPillAttributes = '';
             const expandButtonHTML = children.length > 0
                 ? `<button type="button"
                            class="popup-activity-expand"
-                           title="Show source rows"
-                           aria-label="Show source rows for ${escapeAttribute(displayLabels.primary)}"
+                           title="Show visits"
+                           aria-label="Show visits for ${escapeAttribute(displayLabels.primary)}"
                            aria-expanded="false">
                         <i class="ph ph-caret-right" aria-hidden="true"></i>
                    </button>`
@@ -7189,6 +7293,7 @@ function showActivityDetailsPopup(b) {
         bindActivityPopupBreakdownControls(b, displayOverlaps, startMs, endMs);
 
         DOM.elPopupAssignBtn.onclick = () => {
+            if (getSelectedPopupActivityRowCount() === 0) return;
             const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps, assignmentOverlaps);
             const scopedKeys = isPopupSelectionDirty() ? new Set() : getPopupSelectedSimilarityKeySet();
             const assignmentActivities = buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs, {
