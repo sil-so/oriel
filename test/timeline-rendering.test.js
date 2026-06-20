@@ -380,12 +380,31 @@ function loadModalsContext() {
     cleanTitle: title => title,
     getActivityIconHTML: () => '',
     summarizeActivityOverlaps: overlaps => overlaps,
+    URL,
     console
   };
   context.window = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync('web/js/modals.js', 'utf8'), context);
   return { context, elements };
+}
+
+function loadTimeEntrySaveContext() {
+  const context = {
+    window: {},
+    document: {
+      readyState: 'loading',
+      addEventListener() {}
+    },
+    state: {
+      zoom: 5
+    },
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
+  return context;
 }
 
 function renderMemoryAidHtml({
@@ -10050,6 +10069,262 @@ test('selected similar app-name assignment preserves aggregate row units', () =>
   assert.equal(selectedActivities[1].assignedDurationMs, 3 * 60 * 1000);
   assert.equal(selectedActivities[1].modalSourceActivities.length, 1);
   assert.equal(elements.get('modal-duration-lbl').innerText, '8 min');
+});
+
+test('selected activities group exact browser visits while child selection preserves row units', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 13, 30).getTime();
+  const first = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs,
+    end: startMs + 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentDisplayStart: startMs,
+    assignmentDisplayEnd: startMs + 60 * 1000,
+    assignmentDisplayGroupKey: 'row-unit-1',
+    sources: [
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/work-plan',
+        start: startMs,
+        end: startMs + 20 * 1000,
+        duration: 20 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/work-plan',
+        start: startMs + 20 * 1000,
+        end: startMs + 60 * 1000,
+        duration: 40 * 1000
+      }
+    ]
+  };
+  const second = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 7 * 60 * 1000,
+    duration: 2 * 60 * 1000,
+    assignedDurationMs: 2 * 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentDisplayStart: startMs + 5 * 60 * 1000,
+    assignmentDisplayEnd: startMs + 7 * 60 * 1000,
+    assignmentDisplayGroupKey: 'row-unit-2',
+    sources: [
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/work-plan',
+        start: startMs + 5 * 60 * 1000,
+        end: startMs + 7 * 60 * 1000,
+        duration: 2 * 60 * 1000
+      }
+    ]
+  };
+  const otherUrl = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/other-plan',
+    start: startMs + 8 * 60 * 1000,
+    end: startMs + 9 * 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentSource: 'activity-stream'
+  };
+
+  context.openTimeEntryModal(startMs, startMs + 9 * 60 * 1000, '', null, null, true, [first, second, otherUrl]);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
+  assert.match(listHtml, /2 visits/);
+  assert.match(listHtml, /Source details/);
+  assert.doesNotMatch(listHtml, /modal-activity-group" open/);
+  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 3);
+
+  const selectedActivities = context.getSelectedModalActivities();
+  assert.equal(selectedActivities.length, 2);
+  assert.equal(selectedActivities[0].modalSourceActivities.length, 2);
+  assert.equal(selectedActivities[0].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '4 min');
+
+  context.setModalActivitySourceIncluded(0, 1, false);
+
+  const updatedSelection = context.getSelectedModalActivities();
+  assert.equal(updatedSelection.length, 2);
+  assert.equal(updatedSelection[0].modalSourceActivities.length, 1);
+  assert.equal(updatedSelection[0].modalSourceActivities[0].assignmentDisplayGroupKey, 'row-unit-1');
+  assert.equal(updatedSelection[0].assignedDurationMs, 60 * 1000);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '2 min');
+  const updatedListHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.match(updatedListHtml, /1 visit/);
+  assert.doesNotMatch(updatedListHtml, /2 visits/);
+});
+
+test('selected activities use sessions and activities metadata for native and mixed groups', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 13, 45).getTime();
+  const nativeFirst = {
+    app: 'Obsidian',
+    title: 'Planning.md',
+    start: startMs,
+    end: startMs + 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentSource: 'activity-stream'
+  };
+  const nativeSecond = {
+    app: 'Obsidian',
+    title: 'Planning.md',
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 7 * 60 * 1000,
+    duration: 2 * 60 * 1000,
+    assignedDurationMs: 2 * 60 * 1000,
+    assignmentSource: 'activity-stream'
+  };
+  const browserSource = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs + 8 * 60 * 1000,
+    end: startMs + 9 * 60 * 1000,
+    duration: 60 * 1000,
+    modalAggregateGroupKey: 'mixed-review-group'
+  };
+  const nativeSource = {
+    app: 'Obsidian',
+    title: 'Planning.md',
+    start: startMs + 9 * 60 * 1000,
+    end: startMs + 10 * 60 * 1000,
+    duration: 60 * 1000,
+    modalAggregateGroupKey: 'mixed-review-group'
+  };
+
+  context.openTimeEntryModal(startMs, startMs + 10 * 60 * 1000, '', null, null, true, [
+    nativeFirst,
+    nativeSecond,
+    browserSource,
+    nativeSource
+  ]);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.match(listHtml, /2 sessions/);
+  assert.match(listHtml, /2 activities/);
+});
+
+test('saving grouped selected activities preserves separate canonical row unit payloads', () => {
+  const context = loadTimeEntrySaveContext();
+  const startMs = new Date(2026, 4, 21, 14, 0).getTime();
+  const firstSource = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs,
+    end: startMs + 30 * 1000,
+    duration: 30 * 1000,
+    assignedDurationMs: 30 * 1000,
+    assignmentStart: startMs,
+    assignmentEnd: startMs + 30 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: startMs,
+    assignmentDisplayEnd: startMs + 60 * 1000,
+    assignmentDisplayGroupKey: 'row-unit-1'
+  };
+  const first = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs,
+    end: startMs + 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentStart: startMs,
+    assignmentEnd: startMs + 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: startMs,
+    assignmentDisplayEnd: startMs + 60 * 1000,
+    assignmentDisplayGroupKey: 'row-unit-1',
+    sources: [
+      firstSource,
+      {
+        ...firstSource,
+        start: startMs + 30 * 1000,
+        end: startMs + 60 * 1000,
+        assignmentStart: startMs + 30 * 1000,
+        assignmentEnd: startMs + 60 * 1000
+      }
+    ]
+  };
+  const second = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 7 * 60 * 1000,
+    duration: 2 * 60 * 1000,
+    assignedDurationMs: 2 * 60 * 1000,
+    assignmentStart: startMs + 5 * 60 * 1000,
+    assignmentEnd: startMs + 7 * 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: startMs + 5 * 60 * 1000,
+    assignmentDisplayEnd: startMs + 7 * 60 * 1000,
+    assignmentDisplayGroupKey: 'row-unit-2',
+    sources: [
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/work-plan',
+        start: startMs + 5 * 60 * 1000,
+        end: startMs + 7 * 60 * 1000,
+        duration: 2 * 60 * 1000,
+        assignedDurationMs: 2 * 60 * 1000,
+        assignmentStart: startMs + 5 * 60 * 1000,
+        assignmentEnd: startMs + 7 * 60 * 1000,
+        assignmentSource: 'activity-stream',
+        assignmentModel: 'activity-stream-summary',
+        assignmentDisplayStart: startMs + 5 * 60 * 1000,
+        assignmentDisplayEnd: startMs + 7 * 60 * 1000,
+        assignmentDisplayGroupKey: 'row-unit-2'
+      }
+    ]
+  };
+
+  const payloads = context.buildBulkTimeEntryPayloads({
+    start: startMs,
+    end: startMs + 7 * 60 * 1000,
+    description: '',
+    projectId: 'project-1',
+    taskId: 'task-1',
+    billable: true,
+    activities: [
+      {
+        ...first,
+        duration: 3 * 60 * 1000,
+        assignedDurationMs: 3 * 60 * 1000,
+        modalGroupedReviewRow: true,
+        modalSourceActivities: [first, second]
+      }
+    ]
+  });
+
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].activities[0].assignmentDisplayGroupKey, 'row-unit-1');
+  assert.equal(payloads[0].activities[0].sources.length, 2);
+  assert.equal(payloads[0].activities[0].sources[0].assignmentDisplayGroupKey, 'row-unit-1');
+  assert.equal(payloads[1].activities[0].assignmentDisplayGroupKey, 'row-unit-2');
+  assert.equal(payloads[1].activities[0].sources.length, 1);
+  assert.equal(payloads[0].activities[0].modalGroupedReviewRow, undefined);
+  assert.equal(payloads[0].activities[0].modalSourceActivities, undefined);
 });
 
 test('similar-scoped multiple activity popup assigns only matching popup-visible rows', () => {

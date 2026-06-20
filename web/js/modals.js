@@ -123,11 +123,58 @@ function getModalActivitySourceActivities(activity) {
     return sources.length > 0 ? sources : [activity].filter(Boolean);
 }
 
+function getSelectedModalActivitySourceIndexes(activity, index) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    if (sources.length === 0) return null;
+
+    if (!state.modalActivitySourceSelection) {
+        state.modalActivitySourceSelection = new Map();
+    }
+
+    if (!state.modalActivitySourceSelection.has(index)) {
+        state.modalActivitySourceSelection.set(index, new Set(sources.map((_, sourceIndex) => sourceIndex)));
+    }
+
+    return state.modalActivitySourceSelection.get(index);
+}
+
+function buildSelectedModalActivity(activity, index) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    if (sources.length === 0) return activity;
+
+    const selectedSourceIndexes = getSelectedModalActivitySourceIndexes(activity, index);
+    const selectedSources = sources.filter((_, sourceIndex) => selectedSourceIndexes.has(sourceIndex));
+    if (selectedSources.length === 0) return null;
+
+    const duration = selectedSources.reduce((total, source) => total + getModalActivityDurationMs(source), 0);
+    const start = selectedSources.reduce((value, source) => (
+        Number.isFinite(source?.start) ? Math.min(value, source.start) : value
+    ), Number.MAX_SAFE_INTEGER);
+    const end = selectedSources.reduce((value, source) => (
+        Number.isFinite(source?.end) ? Math.max(value, source.end) : value
+    ), 0);
+
+    return {
+        ...activity,
+        ...(start !== Number.MAX_SAFE_INTEGER ? { start } : {}),
+        ...(end > 0 ? { end } : {}),
+        duration,
+        assignedDurationMs: duration,
+        modalSourceActivities: selectedSources
+    };
+}
+
 function getSelectedModalActivities() {
     const allActivities = state.currentModalAllActivities || state.currentModalActivities || [];
     const selection = state.modalActivitySelection;
     if (!selection || selection.size === 0) return [];
-    return allActivities.filter((_, index) => selection.has(index));
+    return allActivities
+        .map((activity, index) => selection.has(index) ? buildSelectedModalActivity(activity, index) : null)
+        .filter(Boolean);
 }
 
 function getModalActivityDurationMs(activity) {
@@ -167,12 +214,71 @@ function getBulkModalAggregationKey(activity) {
     return String(key).trim();
 }
 
+function normalizeModalActivityExactUrl(value) {
+    if (typeof normalizeActivityExactUrl === 'function') {
+        return normalizeActivityExactUrl(value);
+    }
+
+    const url = String(value || '').trim();
+    if (!url) return '';
+
+    const parseUrl = candidate => {
+        try {
+            const parsed = new URL(candidate);
+            if (!['http:', 'https:'].includes(parsed.protocol.toLowerCase())) return '';
+            const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+            const pathname = parsed.pathname || '/';
+            return `${parsed.protocol.toLowerCase()}//${hostname}${pathname}${parsed.search}`;
+        } catch {
+            return '';
+        }
+    };
+
+    return parseUrl(url)
+        || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? parseUrl(`https://${url}`) : '');
+}
+
+function getModalActivityHostname(activity) {
+    if (typeof getActivitySummaryHostname === 'function') {
+        return getActivitySummaryHostname(activity);
+    }
+
+    const exactUrl = normalizeModalActivityExactUrl(activity?.url);
+    if (!exactUrl) return '';
+
+    try {
+        return new URL(exactUrl).hostname.toLowerCase().replace(/^www\./, '');
+    } catch {
+        return '';
+    }
+}
+
+function getModalActivityExactIdentityKey(activity) {
+    const app = String(activity?.app || '').trim().toLowerCase();
+    if (!app) return '';
+
+    const title = String(cleanTitle(activity?.title || '', activity) || '').trim().toLowerCase();
+    const exactUrl = normalizeModalActivityExactUrl(activity?.url);
+    if (exactUrl) return `browser|||${app}|||${exactUrl}|||${title}`;
+
+    const host = getModalActivityHostname(activity);
+    if (host) return `browser-fallback|||${app}|||${host}|||${title || host}`;
+
+    const nativeIdentity = String(activity?.bundleId || activity?.appPath || '').trim().toLowerCase();
+    return `native|||${app}|||${nativeIdentity}|||${title || app}`;
+}
+
+function getBulkModalGroupingKey(activity) {
+    const exactKey = isAssignedModalActivity(activity) ? getModalActivityExactIdentityKey(activity) : '';
+    return exactKey || getBulkModalAggregationKey(activity);
+}
+
 function buildBulkModalDisplayActivities(activities) {
     const groupsByKey = new Map();
     const displayActivities = [];
 
     for (const activity of Array.isArray(activities) ? activities : []) {
-        const key = getBulkModalAggregationKey(activity);
+        const key = getBulkModalGroupingKey(activity);
         if (!key) {
             displayActivities.push(activity);
             continue;
@@ -213,7 +319,7 @@ function buildBulkModalDisplayActivities(activities) {
 
 function shouldBuildBulkModalDisplayActivities(activities) {
     return Array.isArray(activities)
-        && activities.some(activity => Boolean(getBulkModalAggregationKey(activity)));
+        && activities.some(activity => Boolean(getBulkModalGroupingKey(activity)));
 }
 
 function shouldUseSelectedModalActivityDuration(isBulk = window.isBulkAllocation) {
@@ -303,6 +409,137 @@ function refreshModalActivitySelectionEffects() {
     applyModalProjectSuggestion(state.currentModalActivities);
 }
 
+function isModalBrowserActivity(activity) {
+    const app = String(activity?.app || '').trim().toLowerCase();
+    const bundleId = String(activity?.bundleId || '').trim().toLowerCase();
+    const appPath = String(activity?.appPath || '').trim().toLowerCase();
+    const browserPattern = /(^|[^a-z])(brave|chrome|chromium|safari|firefox|edge|arc|opera|vivaldi|orion|dia|zen|floorp|librewolf|waterfox|tor browser|duckduckgo|mullvad)([^a-z]|$)/;
+    return browserPattern.test(app)
+        || browserPattern.test(bundleId)
+        || browserPattern.test(appPath);
+}
+
+function getModalGroupedActivityCountLabel(activity, selectedSourceIndexes = null) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    if (sources.length <= 1) return '';
+
+    const selectedSources = selectedSourceIndexes instanceof Set
+        ? sources.filter((_, sourceIndex) => selectedSourceIndexes.has(sourceIndex))
+        : sources;
+    if (selectedSources.length === 0) return '';
+
+    const allBrowser = selectedSources.every(isModalBrowserActivity);
+    const allNative = !allBrowser && selectedSources.every(source => !isModalBrowserActivity(source) && String(source?.app || '').trim());
+    const singularNoun = allBrowser ? 'visit' : (allNative ? 'session' : 'activity');
+    const pluralNoun = allBrowser ? 'visits' : (allNative ? 'sessions' : 'activities');
+    return `${selectedSources.length} ${selectedSources.length === 1 ? singularNoun : pluralNoun}`;
+}
+
+function renderModalSourceEvidence(activity) {
+    const sources = Array.isArray(activity?.sources) ? activity.sources.filter(Boolean) : [];
+    if (sources.length === 0) return '';
+
+    const rows = sources.map(source => {
+        const title = escapeModalText(cleanTitle(source.title || '', source) || source.app || 'Source activity');
+        const app = escapeModalText(source.app || '');
+        const durationLabel = escapeModalText(formatModalActivityDurationLabel(getModalActivityDurationMs(source)));
+        return `
+            <div class="modal-source-fragment-row flex items-center justify-between gap-2 py-1">
+                <span class="truncate">${title}</span>
+                <span class="text-secondary shrink-0">${app}${app ? ' · ' : ''}${durationLabel}</span>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <details class="modal-source-detail text-[10px] text-secondary pl-8 pr-2 pb-2">
+            <summary class="cursor-pointer select-none">Source details</summary>
+            <div class="mt-1 space-y-1">${rows}</div>
+        </details>
+    `;
+}
+
+function renderModalActivityMainRow(activity, index, { childIndex = null, selected = true, countLabel = '' } = {}) {
+    const displayTitle = escapeModalText(cleanTitle(activity.title || '', activity));
+    const app = escapeModalText(activity.app || '');
+    const durationLabel = escapeModalText(formatModalActivityDurationLabel(getModalActivityDurationMs(activity)));
+    const isChild = Number.isInteger(childIndex);
+    const indexAttribute = isChild
+        ? `data-modal-parent-index="${index}" data-modal-source-index="${childIndex}"`
+        : `data-modal-activity-index="${index}"`;
+    const selectedClass = selected ? 'is-selected' : 'opacity-50';
+    const iconClass = selected ? 'ph-fill ph-check-square text-base' : 'ph ph-square text-base';
+    const count = countLabel ? `<span class="text-secondary text-[10px] leading-normal">${escapeModalText(countLabel)}</span>` : '';
+
+    return `
+        <div class="modal-activity-row ${isChild ? 'modal-activity-child-row ml-6' : ''} ${selectedClass} flex items-center justify-between text-xs p-2.5 cursor-pointer"
+             ${indexAttribute}>
+            <div class="flex items-center gap-2.5 truncate max-w-[80%]">
+                <button type="button" class="modal-activity-toggle shrink-0" title="Include selected activity">
+                    <i class="${iconClass}"></i>
+                </button>
+                <div class="w-5 h-5 flex items-center justify-center shrink-0">
+                    ${getActivityIconHTML(activity.app, activity.url, activity.title, activity.appPath, activity.bundleId)}
+                </div>
+                <div class="flex flex-col truncate">
+                    <span class="font-semibold text-white leading-tight">${displayTitle}</span>
+                    <span class="text-gray-400 text-[10px] truncate leading-normal">${app}</span>
+                    ${count}
+                </div>
+            </div>
+            <span class="duration-pill shrink-0">${durationLabel}</span>
+        </div>
+    `;
+}
+
+function renderModalActivityReviewItem(activity, index) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    const selectedSourceIndexes = getSelectedModalActivitySourceIndexes(activity, index);
+    const selected = state.modalActivitySelection?.has(index) !== false;
+    const parentActivity = selected && sources.length > 1
+        ? (buildSelectedModalActivity(activity, index) || activity)
+        : activity;
+    const parentRow = renderModalActivityMainRow(parentActivity, index, {
+        selected,
+        countLabel: getModalGroupedActivityCountLabel(activity, selectedSourceIndexes)
+    });
+
+    if (sources.length <= 1) {
+        return `${parentRow}${renderModalSourceEvidence(activity)}`;
+    }
+
+    const childRows = sources.map((source, sourceIndex) => {
+        const childSelected = selected && selectedSourceIndexes.has(sourceIndex);
+        return `
+            ${renderModalActivityMainRow(source, index, {
+                childIndex: sourceIndex,
+                selected: childSelected
+            })}
+            ${renderModalSourceEvidence(source)}
+        `;
+    }).join('');
+
+    return `
+        <details class="modal-activity-group" data-modal-activity-group-index="${index}">
+            <summary class="list-none">${parentRow}</summary>
+            <div class="modal-activity-children">${childRows}</div>
+        </details>
+    `;
+}
+
+function renderModalActivityReviewList() {
+    if (!DOM.elModalMemoryAidList) return;
+    const activities = state.currentModalAllActivities || [];
+    DOM.elModalMemoryAidList.innerHTML = activities
+        .map((activity, index) => renderModalActivityReviewItem(activity, index))
+        .join('');
+    attachModalActivitySelectionHandlers();
+}
+
 function setModalActivityIncluded(index, included) {
     if (!state.modalActivitySelection) {
         state.modalActivitySelection = new Set();
@@ -310,6 +547,12 @@ function setModalActivityIncluded(index, included) {
 
     if (included) {
         state.modalActivitySelection.add(index);
+        const activity = (state.currentModalAllActivities || [])[index];
+        const sources = Array.isArray(activity?.modalSourceActivities) ? activity.modalSourceActivities : [];
+        if (sources.length > 0) {
+            if (!state.modalActivitySourceSelection) state.modalActivitySourceSelection = new Map();
+            state.modalActivitySourceSelection.set(index, new Set(sources.map((_, sourceIndex) => sourceIndex)));
+        }
     } else {
         state.modalActivitySelection.delete(index);
     }
@@ -328,13 +571,54 @@ function setModalActivityIncluded(index, included) {
         }
     }
 
+    const activity = (state.currentModalAllActivities || [])[index];
+    if (Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0) {
+        renderModalActivityReviewList();
+    }
+
+    refreshModalActivitySelectionEffects();
+}
+
+function setModalActivitySourceIncluded(activityIndex, sourceIndex, included) {
+    const activity = (state.currentModalAllActivities || [])[activityIndex];
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    if (!activity || sources.length === 0 || !Number.isInteger(sourceIndex)) return;
+
+    const selectedSourceIndexes = getSelectedModalActivitySourceIndexes(activity, activityIndex);
+    if (included) {
+        selectedSourceIndexes.add(sourceIndex);
+    } else {
+        selectedSourceIndexes.delete(sourceIndex);
+    }
+
+    if (selectedSourceIndexes.size > 0) {
+        state.modalActivitySelection.add(activityIndex);
+    } else {
+        state.modalActivitySelection.delete(activityIndex);
+    }
+
+    renderModalActivityReviewList();
     refreshModalActivitySelectionEffects();
 }
 
 function attachModalActivitySelectionHandlers() {
     if (!DOM.elModalMemoryAidList) return;
-    DOM.elModalMemoryAidList.querySelectorAll('[data-modal-activity-index]').forEach(row => {
+    DOM.elModalMemoryAidList.querySelectorAll('[data-modal-activity-index], [data-modal-source-index]').forEach(row => {
         row.addEventListener('click', (e) => {
+            const sourceIndexAttr = row.getAttribute('data-modal-source-index');
+            if (sourceIndexAttr !== null) {
+                const index = parseInt(row.getAttribute('data-modal-parent-index'), 10);
+                const sourceIndex = parseInt(sourceIndexAttr, 10);
+                const activity = (state.currentModalAllActivities || [])[index];
+                const selectedSourceIndexes = getSelectedModalActivitySourceIndexes(activity, index);
+                const nextIncluded = !selectedSourceIndexes.has(sourceIndex);
+                setModalActivitySourceIncluded(index, sourceIndex, nextIncluded);
+                e.stopPropagation();
+                return;
+            }
+
             const index = parseInt(row.getAttribute('data-modal-activity-index'), 10);
             const nextIncluded = !state.modalActivitySelection.has(index);
             setModalActivityIncluded(index, nextIncluded);
@@ -411,6 +695,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         : MODAL_DURATION_MODE_RANGE;
     state.currentModalAllActivities = finalActivities;
     state.modalActivitySelection = new Set(finalActivities.map((_, index) => index));
+    state.modalActivitySourceSelection = new Map();
     state.currentModalActivities = getSelectedModalActivities();
     updateModalDurationLabel(startMs, endMs, isBulk);
     state.modalDescriptionAutoManaged = false;
@@ -424,29 +709,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         DOM.elModalLeftPanel.classList.remove('hidden');
 
         // Render activities breakdown checklist snapshot
-        DOM.elModalMemoryAidList.innerHTML = finalActivities.map((act, index) => {
-            let displayTitle = cleanTitle(act.title, act);
-            const durationLabel = formatModalActivityDurationLabel(getModalActivityDurationMs(act));
-            return `
-                <div class="modal-activity-row is-selected flex items-center justify-between text-xs p-2.5 cursor-pointer"
-                     data-modal-activity-index="${index}">
-                    <div class="flex items-center gap-2.5 truncate max-w-[80%]">
-                        <button type="button" class="modal-activity-toggle shrink-0" title="Include recorded activity">
-                            <i class="ph-fill ph-check-square text-base"></i>
-                        </button>
-                        <div class="w-5 h-5 flex items-center justify-center shrink-0">
-                            ${getActivityIconHTML(act.app, act.url, act.title, act.appPath, act.bundleId)}
-                        </div>
-                        <div class="flex flex-col truncate">
-                            <span class="font-semibold text-white leading-tight">${displayTitle}</span>
-                            <span class="text-gray-400 text-[10px] truncate leading-normal">${act.app}</span>
-                        </div>
-                    </div>
-                    <span class="duration-pill shrink-0">${durationLabel}</span>
-                </div>
-            `;
-        }).join('');
-        attachModalActivitySelectionHandlers();
+        renderModalActivityReviewList();
 
         DOM.elModalDescription.value = initialDescription;
         DOM.elModalDescription.oninput = () => {
@@ -473,6 +736,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         DOM.elModalMemoryAidList.innerHTML = '';
         state.currentModalAllActivities = [];
         state.modalActivitySelection = new Set();
+        state.modalActivitySourceSelection = new Map();
         state.currentModalActivities = [];
 
         DOM.elModalDescription.value = initialDescription;
