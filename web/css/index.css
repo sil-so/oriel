@@ -5217,6 +5217,37 @@ body.is-column-resizing * {
     color: var(--info-text);
 }
 
+.modal-activity-status {
+    width: fit-content;
+    color: var(--warning);
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
+}
+
+.modal-activity-logged-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+    padding: 8px 10px;
+    border: 1px solid var(--info-border);
+    border-radius: var(--radius-md);
+    background: var(--info-surface);
+    color: var(--info-text);
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 600;
+}
+
+.modal-activity-logged-summary .button-secondary {
+    height: 26px;
+    padding: 0 9px;
+    font-size: 11px;
+    line-height: 14px;
+}
+
 .oriel-toggle {
     position: relative;
     display: inline-flex;

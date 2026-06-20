@@ -266,7 +266,16 @@ function hasTimeRange(activity) {
 }
 
 function timeEntryActivitySnapshot(activity) {
-    const { sources, modalSourceActivities, modalAggregateGroupKey, modalGroupedReviewRow, ...snapshot } = activity || {};
+    const {
+        sources,
+        modalSourceActivities,
+        modalAggregateGroupKey,
+        modalGroupedReviewRow,
+        alreadyLogged,
+        loggedState,
+        loggedEntryIds,
+        ...snapshot
+    } = activity || {};
     return snapshot;
 }
 
@@ -354,6 +363,25 @@ function shouldSaveSelectedModalActivityDurations() {
         && state.currentModalDurationMode === 'selected-activities';
 }
 
+function isAlreadyLoggedSelectionActivity(activity) {
+    if (!activity) return false;
+    if (activity.alreadyLogged === true || activity.loggedState === 'already-logged') return true;
+
+    const sources = Array.isArray(activity.modalSourceActivities) && activity.modalSourceActivities.length > 0
+        ? activity.modalSourceActivities
+        : (Array.isArray(activity.sources) ? activity.sources : []);
+    return sources.length > 0 && sources.every(isAlreadyLoggedSelectionActivity);
+}
+
+function shouldIncludeAlreadyLoggedActivityChanges() {
+    return Boolean(window.editingTimeEntryId || state.modalIncludeAlreadyLoggedActivities);
+}
+
+function shouldSaveSelectionActivity(activity) {
+    return shouldIncludeAlreadyLoggedActivityChanges()
+        || !isAlreadyLoggedSelectionActivity(activity);
+}
+
 function normalizeSelectedModalActivityForTimeEntrySave(activity) {
     const snapshot = normalizeActivityForTimeEntrySave(activity);
     if (isActivityStreamAssignment(activity)) {
@@ -376,7 +404,9 @@ function normalizeModalActivitiesForTimeEntrySave(activities) {
     const normalizer = shouldSaveSelectedModalActivityDurations()
         ? normalizeSelectedModalActivityForTimeEntrySave
         : normalizeActivityForTimeEntrySave;
-    return (activities || []).map(normalizer);
+    return (activities || [])
+        .filter(shouldSaveSelectionActivity)
+        .map(normalizer);
 }
 
 function getModalSelectedActivitiesDurationMs(activities) {
@@ -408,7 +438,7 @@ function getBulkAssignmentSourceActivities(activity) {
 }
 
 function buildSourceBackedBulkActivitySnapshots(activity) {
-    return getBulkAssignmentSourceActivities(activity).map(source => {
+    return getBulkAssignmentSourceActivities(activity).filter(shouldSaveSelectionActivity).map(source => {
         const duration = getActivityDurationMs(source);
         if (duration <= 0) return null;
         return normalizeActivityStreamAssignmentForSave({
@@ -465,6 +495,8 @@ function buildManualTimeEntryUpdatePayload(entry, startMs, endMs, activities) {
 }
 
 function getBulkTimeEntryActivities(activity) {
+    if (!shouldSaveSelectionActivity(activity)) return [];
+
     if (isActivityStreamAssignment(activity)) {
         if (activity?.modalGroupedReviewRow) {
             const groupedSnapshots = buildSourceBackedBulkActivitySnapshots(activity);
@@ -512,7 +544,9 @@ function buildBulkTimeEntryPayloads({ start, end, description, projectId, taskId
         .sort((first, second) => first.start - second.start);
 
     if (timedActivities.length === 0) {
-        return [{ start, end, description, projectId, taskId, billable, activities }];
+        return shouldIncludeAlreadyLoggedActivityChanges()
+            ? [{ start, end, description, projectId, taskId, billable, activities }]
+            : [];
     }
 
     return timedActivities.map(activity => ({
@@ -800,6 +834,12 @@ function applySimilarityScopeToAssignmentActivity(activity, scope) {
         selectedSimilarityMatchKey: matchKey,
         modalAggregateGroupKey: activity.modalAggregateGroupKey || getAssignmentModalAggregateGroupKey(activity)
     };
+}
+
+function decorateSelectedAssignmentActivity(activity) {
+    return typeof window.withSelectedActivityLoggedState === 'function'
+        ? withSelectedActivityLoggedState(activity)
+        : activity;
 }
 
 function syncCustomSelect(select) {
@@ -3424,6 +3464,11 @@ function setupMainEventListeners() {
                     activities: selectedModalActivities
                 });
 
+                if (payloads.length === 0) {
+                    alert('Selected activities are already logged. Include already logged activities to reassign them.');
+                    return;
+                }
+
                 const responses = await Promise.all(payloads.map(payload => (
                     fetch(`${API_BASE}/time-entries`, {
                         method: 'POST',
@@ -4121,7 +4166,7 @@ function setupMainEventListeners() {
         const startMs = dateStartOfDay + minStartCell * state.zoom * 60 * 1000;
         const endMs = dateStartOfDay + maxEndCell * state.zoom * 60 * 1000;
 
-        const selectedOverlaps = overlaps.sort((first, second) => {
+        const selectedOverlaps = overlaps.map(decorateSelectedAssignmentActivity).sort((first, second) => {
             const startA = Number.isFinite(first.start) ? first.start : Number.MAX_SAFE_INTEGER;
             const startB = Number.isFinite(second.start) ? second.start : Number.MAX_SAFE_INTEGER;
             return startA - startB;

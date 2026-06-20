@@ -208,6 +208,43 @@ function isAssignedModalActivity(activity) {
         || (Number.isFinite(activity?.assignedDurationMs) && activity.assignedDurationMs > 0);
 }
 
+function isAlreadyLoggedModalActivity(activity) {
+    if (!activity) return false;
+    if (activity.alreadyLogged === true || activity.loggedState === 'already-logged') return true;
+
+    const sources = Array.isArray(activity.modalSourceActivities) && activity.modalSourceActivities.length > 0
+        ? activity.modalSourceActivities
+        : (Array.isArray(activity.sources) ? activity.sources : []);
+    return sources.length > 0 && sources.every(isAlreadyLoggedModalActivity);
+}
+
+function getModalLoggedStateUnits(activity) {
+    const sources = Array.isArray(activity?.modalSourceActivities)
+        ? activity.modalSourceActivities.filter(Boolean)
+        : [];
+    return sources.length > 0 ? sources : [activity].filter(Boolean);
+}
+
+function getModalLoggedStateSummary(activities = state.currentModalAllActivities || []) {
+    return (Array.isArray(activities) ? activities : [])
+        .flatMap(getModalLoggedStateUnits)
+        .reduce((summary, activity) => {
+            if (isAlreadyLoggedModalActivity(activity)) {
+                summary.logged += 1;
+            } else {
+                summary.unlogged += 1;
+            }
+            return summary;
+        }, { logged: 0, unlogged: 0 });
+}
+
+function formatModalLoggedStateSummary(summary) {
+    const parts = [];
+    if (summary.unlogged > 0) parts.push(`${summary.unlogged} unlogged`);
+    if (summary.logged > 0) parts.push(`${summary.logged} already logged`);
+    return parts.join(' · ');
+}
+
 function getBulkModalAggregationKey(activity) {
     const key = activity?.modalAggregateGroupKey;
     if (key === null || key === undefined) return '';
@@ -407,6 +444,7 @@ function refreshModalActivitySelectionEffects() {
 
     updateModalDurationLabel();
     applyModalProjectSuggestion(state.currentModalActivities);
+    refreshModalLoggedActivityControls();
 }
 
 function isModalBrowserActivity(activity) {
@@ -472,6 +510,9 @@ function renderModalActivityMainRow(activity, index, { childIndex = null, select
     const selectedClass = selected ? 'is-selected' : 'opacity-50';
     const iconClass = selected ? 'ph-fill ph-check-square text-base' : 'ph ph-square text-base';
     const count = countLabel ? `<span class="text-secondary text-[10px] leading-normal">${escapeModalText(countLabel)}</span>` : '';
+    const loggedBadge = isAlreadyLoggedModalActivity(activity)
+        ? '<span class="modal-activity-status">Already logged</span>'
+        : '';
 
     return `
         <div class="modal-activity-row ${isChild ? 'modal-activity-child-row ml-6' : ''} ${selectedClass} flex items-center justify-between text-xs p-2.5 cursor-pointer"
@@ -487,6 +528,7 @@ function renderModalActivityMainRow(activity, index, { childIndex = null, select
                     <span class="font-semibold text-white leading-tight">${displayTitle}</span>
                     <span class="text-gray-400 text-[10px] truncate leading-normal">${app}</span>
                     ${count}
+                    ${loggedBadge}
                 </div>
             </div>
             <span class="duration-pill shrink-0">${durationLabel}</span>
@@ -534,10 +576,56 @@ function renderModalActivityReviewItem(activity, index) {
 function renderModalActivityReviewList() {
     if (!DOM.elModalMemoryAidList) return;
     const activities = state.currentModalAllActivities || [];
+    const loggedSummary = getModalLoggedStateSummary(activities);
+    const summaryLabel = formatModalLoggedStateSummary(loggedSummary);
+    const loggedControl = loggedSummary.logged > 0
+        ? `
+            <div class="modal-activity-logged-summary">
+                <span>${escapeModalText(summaryLabel)}</span>
+                <button type="button" class="button-secondary" data-modal-include-logged>
+                    ${state.modalIncludeAlreadyLoggedActivities ? 'Including logged' : 'Include already logged'}
+                </button>
+            </div>
+        `
+        : '';
     DOM.elModalMemoryAidList.innerHTML = activities
         .map((activity, index) => renderModalActivityReviewItem(activity, index))
         .join('');
+    DOM.elModalMemoryAidList.innerHTML = `${loggedControl}${DOM.elModalMemoryAidList.innerHTML}`;
+    refreshModalLoggedActivityControls();
+    attachModalLoggedActivityControlHandlers();
     attachModalActivitySelectionHandlers();
+}
+
+function setModalIncludeAlreadyLoggedActivities(included) {
+    state.modalIncludeAlreadyLoggedActivities = Boolean(included);
+    renderModalActivityReviewList();
+    refreshModalActivitySelectionEffects();
+}
+
+function attachModalLoggedActivityControlHandlers() {
+    DOM.elModalMemoryAidList?.querySelectorAll?.('[data-modal-include-logged]')?.forEach(button => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setModalIncludeAlreadyLoggedActivities(!state.modalIncludeAlreadyLoggedActivities);
+        });
+    });
+}
+
+function refreshModalLoggedActivityControls() {
+    const summary = getModalLoggedStateSummary(getSelectedModalActivities());
+    const hasOnlyLoggedSelection = summary.logged > 0 && summary.unlogged === 0;
+    const shouldDisableSave = !window.editingTimeEntryId
+        && hasOnlyLoggedSelection
+        && !state.modalIncludeAlreadyLoggedActivities;
+    if (DOM.elModalBtnSave) {
+        DOM.elModalBtnSave.disabled = shouldDisableSave;
+        if (shouldDisableSave) {
+            DOM.elModalBtnSave.setAttribute?.('title', 'Already logged activities need an explicit include action.');
+        } else {
+            DOM.elModalBtnSave.removeAttribute?.('title');
+        }
+    }
 }
 
 function setModalActivityIncluded(index, included) {
@@ -630,6 +718,7 @@ function attachModalActivitySelectionHandlers() {
 // Create or Edit time logs modal opening logic
 function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProjectId = null, defaultBillable = null, isBulk = false, rangeActivities = null, defaultTaskId = '') {
     window.isBulkAllocation = isBulk;
+    state.modalIncludeAlreadyLoggedActivities = Boolean(window.editingTimeEntryId);
     const hasExplicitRangeActivities = Array.isArray(rangeActivities);
     const isDragCreatedActivityModal = hasExplicitRangeActivities
         && !isBulk
@@ -842,6 +931,7 @@ function closeTimeEntryModal() {
     state.currentModalStartMs = null;
     state.currentModalEndMs = null;
     state.currentModalDurationMode = MODAL_DURATION_MODE_RANGE;
+    state.modalIncludeAlreadyLoggedActivities = false;
     state.modalDescriptionAutoManaged = false;
     state.modalProjectAutoManaged = false;
     if (DOM.elModalTaskSelect) DOM.elModalTaskSelect.value = '';

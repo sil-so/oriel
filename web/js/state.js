@@ -293,6 +293,7 @@ const DOM = {
     // Multi-select bar
     get elMultiSelectBar() { return document.getElementById('multi-select-bar'); },
     get elSelectedCount() { return document.getElementById('lbl-selected-count'); },
+    get elSelectedState() { return document.getElementById('lbl-selected-state'); },
     get elBtnSelectSimilar() { return document.getElementById('btn-select-similar'); },
     get elBtnClearSelection() { return document.getElementById('btn-clear-selection'); },
     get elBtnAssignSelected() { return document.getElementById('btn-assign-selected'); },

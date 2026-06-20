@@ -1595,6 +1595,103 @@ function getLoggedSourceSnapshotRangesForActivity(activity, index) {
     return ranges;
 }
 
+function getActivityLoggedStateRange(activity) {
+    const start = Number.isFinite(activity?.assignmentStart)
+        ? activity.assignmentStart
+        : (Number.isFinite(activity?.start) ? activity.start : null);
+    const end = Number.isFinite(activity?.assignmentEnd)
+        ? activity.assignmentEnd
+        : (Number.isFinite(activity?.end) ? activity.end : null);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    return { start, end };
+}
+
+function getActivityLoggedStateSources(activity) {
+    const sources = Array.isArray(activity?.modalSourceActivities) && activity.modalSourceActivities.length > 0
+        ? activity.modalSourceActivities
+        : (Array.isArray(activity?.sources) && activity.sources.length > 0 ? activity.sources : [activity]);
+    return sources.filter(source => getActivityLoggedStateRange(source));
+}
+
+function isActivityAlreadyLoggedForSelection(activity, timeEntries = state.timeEntries) {
+    if (activity?.alreadyLogged === true || activity?.loggedState === 'already-logged') return true;
+
+    const sources = getActivityLoggedStateSources(activity);
+    if (sources.length === 0) return false;
+
+    const basis = sources.find(source => Number.isFinite(source?.start)) || activity || {};
+    const dayStart = Number.isFinite(state.currentDate?.getTime?.())
+        ? new Date(state.currentDate).setHours(0,0,0,0)
+        : new Date(basis.start || Date.now()).setHours(0,0,0,0);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const loggedRangeIndex = buildLoggedSourceSnapshotRangeIndex(timeEntries || [], dayStart, dayEnd);
+
+    return sources.every(source => {
+        const range = getActivityLoggedStateRange(source);
+        if (!range) return false;
+        const loggedRanges = getLoggedSourceSnapshotRangesForActivity(source, loggedRangeIndex);
+        return subtractTimelineRanges([range], loggedRanges).length === 0;
+    });
+}
+
+function withSelectedActivityLoggedState(activity) {
+    if (!activity) return activity;
+    const alreadyLogged = isActivityAlreadyLoggedForSelection(activity);
+    return {
+        ...activity,
+        alreadyLogged,
+        loggedState: alreadyLogged ? 'already-logged' : 'unlogged',
+        ...(Array.isArray(activity.sources) ? {
+            sources: activity.sources.map(source => withSelectedActivityLoggedState(source))
+        } : {}),
+        ...(Array.isArray(activity.modalSourceActivities) ? {
+            modalSourceActivities: activity.modalSourceActivities.map(source => withSelectedActivityLoggedState(source))
+        } : {})
+    };
+}
+
+function getSelectedActivityBlockLoggedStateActivities(blockEl) {
+    const overlaps = getActivityBlockDetailOverlaps(blockEl);
+    const candidates = overlaps.length > 0 ? overlaps : [getActivityBlockData(blockEl)];
+    const scope = getActivityBlockSelectedSimilarityScope(blockEl);
+    const selectedKeys = new Set(Array.isArray(scope?.assignmentKeys) ? scope.assignmentKeys.filter(Boolean) : []);
+    const selectedMatches = selectedKeys.size > 0
+        ? candidates.filter(activity => getActivityAssignmentKeys(activity).some(key => selectedKeys.has(key)))
+        : candidates;
+    const activities = selectedMatches.length > 0 ? selectedMatches : candidates;
+    const seen = new Set();
+
+    return activities.filter(activity => {
+        const key = getActivityCanonicalRowUnitKeys(activity).join('|||')
+            || getActivitySourceKey(activity)
+            || getActivitySummaryKey(activity);
+        if (key && seen.has(key)) return false;
+        if (key) seen.add(key);
+        return true;
+    });
+}
+
+function getSelectedActivityLoggedStateSummary(selectedEls) {
+    return (Array.isArray(selectedEls) ? selectedEls : [])
+        .flatMap(getSelectedActivityBlockLoggedStateActivities)
+        .reduce((summary, activity) => {
+            if (isActivityAlreadyLoggedForSelection(activity)) {
+                summary.logged += 1;
+            } else {
+                summary.unlogged += 1;
+            }
+            return summary;
+        }, { logged: 0, unlogged: 0 });
+}
+
+function formatSelectedActivityLoggedStateSummary(summary) {
+    if (!summary || summary.logged <= 0) return ' items selected';
+    const parts = [];
+    if (summary.unlogged > 0) parts.push(`${summary.unlogged} unlogged`);
+    parts.push(`${summary.logged} already logged`);
+    return ` · ${parts.join(' · ')}`;
+}
+
 function getUnloggedActivityContextKey(activity) {
     return getActivitySummaryKey(activity) || getActivitySimilarityKey(activity) || getActivityIdentityKey(activity);
 }
@@ -6474,12 +6571,26 @@ function updateMultiSelectBar() {
         return total + (count > 0 ? count : 1);
     }, 0);
     const displayCount = canonicalCount > 0 ? canonicalCount : size;
+    const loggedStateSummary = getSelectedActivityLoggedStateSummary(selectedEls);
+    const loggedStateText = formatSelectedActivityLoggedStateSummary(loggedStateSummary);
+    const hasOnlyLoggedSelection = loggedStateSummary.logged > 0 && loggedStateSummary.unlogged === 0;
     if (bar) {
         if (size > 0) {
             DOM.elSelectedCount.innerText = displayCount;
+            if (DOM.elSelectedState) DOM.elSelectedState.innerText = loggedStateText;
             bar.classList.remove('hidden');
         } else {
+            if (DOM.elSelectedState) DOM.elSelectedState.innerText = ' items selected';
             bar.classList.add('hidden');
+        }
+    }
+
+    if (DOM.elBtnAssignSelected) {
+        DOM.elBtnAssignSelected.disabled = hasOnlyLoggedSelection;
+        if (hasOnlyLoggedSelection) {
+            DOM.elBtnAssignSelected.setAttribute?.('title', 'Selected activities are already logged.');
+        } else {
+            DOM.elBtnAssignSelected.removeAttribute?.('title');
         }
     }
 
@@ -7220,6 +7331,9 @@ window.getActivityBlockSelectedSimilarityMode = getActivityBlockSelectedSimilari
 window.getActivityBlockSelectedSimilarityMatchKeys = getActivityBlockSelectedSimilarityMatchKeys;
 window.getActivityBlockSelectedSimilarityScope = getActivityBlockSelectedSimilarityScope;
 window.getActivityBlockDetailOverlaps = getActivityBlockDetailOverlaps;
+window.isActivityAlreadyLoggedForSelection = isActivityAlreadyLoggedForSelection;
+window.withSelectedActivityLoggedState = withSelectedActivityLoggedState;
+window.getSelectedActivityLoggedStateSummary = getSelectedActivityLoggedStateSummary;
 window.getActivityMixInRange = getActivityMixInRange;
 window.summarizeActivityOverlaps = summarizeActivityOverlaps;
 window.summarizeSimilarActivityOverlaps = summarizeSimilarActivityOverlaps;
