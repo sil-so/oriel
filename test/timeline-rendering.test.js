@@ -126,6 +126,7 @@ function createSimilarActivityBlock({
   app,
   title = app,
   url = '',
+  domain = '',
   appPath = '',
   bundleId = '',
   selected = false,
@@ -151,6 +152,7 @@ function createSimilarActivityBlock({
       app,
       title,
       url,
+      domain,
       appPath,
       bundleId,
       overlaps: encodeURIComponent(JSON.stringify(overlaps)),
@@ -5065,6 +5067,277 @@ test('similar selection by exact URL does not select other pages on the same sit
   assert.equal(blocks[2].classList.contains('selected'), true);
 });
 
+test('similar base URL includes URL-unavailable browser rows with a known host', () => {
+  const context = loadTimelineContext();
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 10,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: '',
+      domain: 'example.com',
+      selected: true
+    }),
+    createSimilarActivityBlock({
+      startCell: 18,
+      app: 'Brave Browser',
+      title: 'Example docs',
+      url: '',
+      domain: 'www.example.com'
+    }),
+    createSimilarActivityBlock({
+      startCell: 24,
+      app: 'Brave Browser',
+      title: 'Example settings',
+      url: 'https://example.com/settings'
+    }),
+    createSimilarActivityBlock({
+      startCell: 32,
+      app: 'Brave Browser',
+      title: 'Private Window',
+      url: ''
+    })
+  ];
+
+  context.state.selectedActivities.add(10);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 3);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [10, 18, 24]);
+  assert.equal(context.DOM.elSelectedCount.innerText, 3);
+  assert.equal(blocks[1].classList.contains('selected'), true);
+  assert.equal(blocks[2].classList.contains('selected'), true);
+  assert.equal(blocks[3].classList.contains('selected'), false);
+});
+
+test('similar exact URL excludes URL-unavailable rows that only share a known host', () => {
+  const context = loadTimelineContext();
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 10,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      selected: true
+    }),
+    createSimilarActivityBlock({
+      startCell: 18,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: '',
+      domain: 'example.com'
+    }),
+    createSimilarActivityBlock({
+      startCell: 24,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard'
+    })
+  ];
+
+  context.state.selectedActivities.add(10);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'url' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [10, 24]);
+  assert.equal(blocks[1].classList.contains('selected'), false);
+  assert.equal(blocks[2].classList.contains('selected'), true);
+});
+
+test('similar exact URL excludes grouped session host fallback rows', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const groupedRows = [
+    {
+      app: 'Brave Browser',
+      title: 'example.com/a',
+      url: 'https://example.com/a',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(18),
+      end: atCell(18) + 60 * 1000,
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'example.com/b',
+      url: 'https://example.com/b',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(18) + 2 * 60 * 1000,
+      end: atCell(18) + 3 * 60 * 1000,
+      duration: 60 * 1000
+    }
+  ];
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 10,
+      app: 'Brave Browser',
+      title: 'Example host root',
+      url: 'https://example.com/',
+      selected: true
+    }),
+    createSimilarActivityBlock({
+      startCell: 18,
+      app: 'Brave Browser',
+      title: '',
+      url: '',
+      overlaps: groupedRows
+    })
+  ];
+
+  context.state.selectedActivities.add(10);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'url' }), 1);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [10]);
+  assert.equal(blocks[1].classList.contains('selected'), false);
+});
+
+test('rendered grouped session rows do not expose host fallback as exact similarity URL', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const groupedRows = [
+    {
+      app: 'Brave Browser',
+      title: 'example.com/a',
+      url: 'https://example.com/a',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(18),
+      end: atCell(18) + 60 * 1000,
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'example.com/b',
+      url: 'https://example.com/b',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(18) + 2 * 60 * 1000,
+      end: atCell(18) + 3 * 60 * 1000,
+      duration: 60 * 1000
+    }
+  ];
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 5;
+
+  const html = context.createActivityBlockHTML({
+    startCell: 18,
+    span: 1,
+    app: 'Brave Browser',
+    title: 'example.com',
+    url: 'https://example.com/a',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    overlaps: groupedRows
+  });
+
+  assert.match(html, /data-url="https:\/\/example\.com"/);
+  assert.match(html, /data-similarity-url=""/);
+  assert.doesNotMatch(html, /data-similarity-url="https:\/\/example\.com/);
+});
+
+test('similar base URL from a grouped review seed broadens exact activity identity to host', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const sourceKey = activity => [
+    activity.app,
+    activity.title,
+    activity.url,
+    activity.appPath,
+    activity.bundleId,
+    activity.start,
+    activity.end
+  ].join('|||');
+  const selectedSource = {
+    app: 'Brave Browser',
+    title: 'Example dashboard',
+    url: 'https://example.com/dashboard',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: atCell(10),
+    end: atCell(11),
+    duration: 5 * 60 * 1000
+  };
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 10,
+      app: 'Brave Browser',
+      title: 'Selected Activities group',
+      url: 'https://example.com/dashboard',
+      selected: true,
+      selectedSimilarityKeys: [sourceKey(selectedSource)],
+      overlaps: [selectedSource]
+    }),
+    createSimilarActivityBlock({
+      startCell: 18,
+      app: 'Brave Browser',
+      title: 'Example docs',
+      url: 'https://example.com/docs'
+    }),
+    createSimilarActivityBlock({
+      startCell: 24,
+      app: 'Brave Browser',
+      title: 'Other site',
+      url: 'https://other.example.net/'
+    })
+  ];
+
+  context.state.zoom = 5;
+  context.state.selectedActivities.add(10);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+  context.DOM.elMultiSelectBar = { classList: { add() {}, remove() {} } };
+  context.DOM.elSelectedCount = { innerText: '' };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+  assert.deepEqual([...context.state.selectedActivities].sort((a, b) => a - b), [10, 18]);
+  assert.equal(blocks[1].classList.contains('selected'), true);
+  assert.equal(blocks[2].classList.contains('selected'), false);
+});
+
 test('similar base URL selection seeds from selected row identity instead of mixed detail overlaps', () => {
   const context = loadTimelineContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
@@ -5738,6 +6011,70 @@ test('similar modal defaults browser apps without usable URLs to App Name', () =
   assert.equal(modalDom.app.radio.checked, true);
 });
 
+test('similar modal defaults browser rows with a known host to Base URL without enabling Exact URL', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const activity = {
+    app: 'Safari',
+    title: 'Example workspace',
+    url: '',
+    domain: 'example.com',
+    appPath: '/Applications/Safari.app',
+    bundleId: 'com.apple.Safari'
+  };
+  const blocks = [
+    createSimilarActivityBlock({ startCell: 28, ...activity, selected: true })
+  ];
+
+  context.state.selectedActivities.add(28);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.isBrowserLikeActivity(activity), true);
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, false);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.host.radio.checked, true);
+  assert.equal(modalDom.app.radio.checked, false);
+});
+
+test('similar modal does not enable Exact URL from a display URL fallback', () => {
+  const context = loadTimelineContext();
+  const modalDom = attachSimilarModalDom(context);
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 28,
+      app: 'Safari',
+      title: 'Example workspace',
+      url: 'https://example.com/display',
+      domain: 'example.com',
+      appPath: '/Applications/Safari.app',
+      bundleId: 'com.apple.Safari',
+      selected: true
+    })
+  ];
+  blocks[0].dataset.similarityUrl = '';
+
+  context.state.selectedActivities.add(28);
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') return blocks.filter(block => block.classList.contains('selected'));
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.openSimilarSelectionModal(), true);
+  assert.equal(modalDom.host.radio.disabled, false);
+  assert.equal(modalDom.url.radio.disabled, true);
+  assert.equal(modalDom.host.radio.checked, true);
+});
+
 test('similar toolbar action is available only for one selected activity', () => {
   const context = loadTimelineContext();
   const bar = new FakeElement('multi-select-bar');
@@ -5764,6 +6101,213 @@ test('similar toolbar action is available only for one selected activity', () =>
   context.state.selectedActivities.clear();
   context.updateMultiSelectBar();
   assert.equal(bar.classList.contains('hidden'), true);
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+});
+
+test('similar selection count uses canonical row units from grouped review rows', () => {
+  const context = loadTimelineContext();
+  const bar = new FakeElement('multi-select-bar');
+  const similarButton = new FakeElement('btn-select-similar');
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const groupedActivity = (startCell, title, url) => [
+    {
+      app: 'Brave Browser',
+      title: `${title} page one`,
+      url: `${url}?unit=1`,
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(startCell),
+      end: atCell(startCell) + 60 * 1000,
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: `${title} page two`,
+      url: `${url}?unit=2`,
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(startCell) + 2 * 60 * 1000,
+      end: atCell(startCell) + 4 * 60 * 1000,
+      duration: 2 * 60 * 1000
+    }
+  ];
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 40,
+      app: 'Brave Browser',
+      title: 'Selected Activities group',
+      url: 'https://example.com/dashboard',
+      selected: true,
+      overlaps: groupedActivity(40, 'Selected Activities group', 'https://example.com/dashboard')
+    }),
+    createSimilarActivityBlock({
+      startCell: 44,
+      app: 'Brave Browser',
+      title: 'Selected Activities group',
+      url: 'https://example.com/docs',
+      overlaps: groupedActivity(44, 'Selected Activities group', 'https://example.com/docs')
+    })
+  ];
+
+  context.state.selectedActivities.add(40);
+  context.DOM.elMultiSelectBar = bar;
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elBtnSelectSimilar = similarButton;
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+
+  assert.equal(context.DOM.elSelectedCount.innerText, 4);
+  assert.equal(blocks[0].dataset.selectedCanonicalCount, '2');
+  assert.equal(blocks[1].dataset.selectedCanonicalCount, '2');
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+});
+
+test('similar selection count keeps repeated same-identity grouped row units separate', () => {
+  const context = loadTimelineContext();
+  const bar = new FakeElement('multi-select-bar');
+  const similarButton = new FakeElement('btn-select-similar');
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const repeatedActivity = (firstCell, secondCell) => [
+    {
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(firstCell),
+      end: atCell(firstCell) + 60 * 1000,
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(secondCell),
+      end: atCell(secondCell) + 60 * 1000,
+      duration: 60 * 1000
+    }
+  ];
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 40,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      selected: true,
+      overlaps: repeatedActivity(40, 42)
+    }),
+    createSimilarActivityBlock({
+      startCell: 44,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      overlaps: repeatedActivity(44, 46)
+    })
+  ];
+
+  context.state.selectedActivities.add(40);
+  context.DOM.elMultiSelectBar = bar;
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elBtnSelectSimilar = similarButton;
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+
+  assert.equal(context.DOM.elSelectedCount.innerText, 4);
+  assert.equal(blocks[0].dataset.selectedCanonicalCount, '2');
+  assert.equal(blocks[1].dataset.selectedCanonicalCount, '2');
+  assert.equal(similarButton.classList.contains('hidden'), true);
+  assert.equal(similarButton.disabled, true);
+});
+
+test('similar selection count merges same-identity source fragments across session gap', () => {
+  const context = loadTimelineContext();
+  const bar = new FakeElement('multi-select-bar');
+  const similarButton = new FakeElement('btn-select-similar');
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const atCell = cell => dateStart + cell * 5 * 60 * 1000;
+  const fragmentedActivity = startCell => [
+    {
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(startCell),
+      end: atCell(startCell) + 60 * 1000,
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      start: atCell(startCell) + 70 * 1000,
+      end: atCell(startCell) + 2 * 60 * 1000 + 10 * 1000,
+      duration: 60 * 1000
+    }
+  ];
+  const blocks = [
+    createSimilarActivityBlock({
+      startCell: 40,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      selected: true,
+      overlaps: fragmentedActivity(40)
+    }),
+    createSimilarActivityBlock({
+      startCell: 44,
+      app: 'Brave Browser',
+      title: 'Example dashboard',
+      url: 'https://example.com/dashboard',
+      overlaps: fragmentedActivity(44)
+    })
+  ];
+
+  context.state.selectedActivities.add(40);
+  context.DOM.elMultiSelectBar = bar;
+  context.DOM.elSelectedCount = { innerText: '' };
+  context.DOM.elBtnSelectSimilar = similarButton;
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      if (selector === '.activity-block.selected') {
+        return blocks.filter(block => block.classList.contains('selected'));
+      }
+      if (selector === '.activity-block') return blocks;
+      return [];
+    }
+  };
+
+  assert.equal(context.selectSimilarActivities({ mode: 'host' }), 2);
+
+  assert.equal(context.DOM.elSelectedCount.innerText, 2);
+  assert.equal(blocks[0].dataset.selectedCanonicalCount, '1');
+  assert.equal(blocks[1].dataset.selectedCanonicalCount, '1');
   assert.equal(similarButton.classList.contains('hidden'), true);
   assert.equal(similarButton.disabled, true);
 });
