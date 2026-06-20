@@ -185,6 +185,7 @@ function buildBulkModalDisplayActivities(activities) {
                 end: Number.isFinite(activity?.end) ? activity.end : undefined,
                 duration: 0,
                 assignedDurationMs: 0,
+                modalGroupedReviewRow: true,
                 modalSourceActivities: []
             };
             groupsByKey.set(key, group);
@@ -354,7 +355,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
 
     // Handle assignment layout copy.
     if (isBulk) {
-        DOM.elModalTitle.innerText = 'Assign Selected Activity';
+        DOM.elModalTitle.innerText = 'Assign Selected Activities';
     } else {
         DOM.elModalTitle.innerText = window.editingTimeEntryId ? 'Edit Time Entry' : 'Log Time Entry';
     }
@@ -416,7 +417,7 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
     state.modalProjectAutoManaged = !defaultProjectId;
     const initialDescription = window.editingTimeEntryId ? defaultDescription : '';
 
-    // Handle left panel responsive layout and detailed recorded activity snapshot.
+    // Handle left panel responsive layout and selected activity review rows.
     if (finalActivities.length > 0) {
         DOM.elModalContent.classList.remove('modal-size--md');
         DOM.elModalContent.classList.add('modal-size--split');
