@@ -414,6 +414,7 @@ function buildSourceBackedBulkActivitySnapshots(activity) {
         return normalizeActivityStreamAssignmentForSave({
             ...activity,
             ...source,
+            modalSourceActivities: source.modalSourceActivities,
             title: source.title || activity.title,
             app: source.app || activity.app,
             url: source.url || activity.url || '',
