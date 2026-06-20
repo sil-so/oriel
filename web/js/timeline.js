@@ -5678,6 +5678,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const visibleSecondaryOverlaps = getInlineBadgePopupRows(popupDisplayModel.secondaryRows);
     const inlineIconOverlaps = visibleSecondaryOverlaps.slice(0, 2);
     const hiddenInlineIconCount = Math.max(0, visibleSecondaryOverlaps.length - inlineIconOverlaps.length);
+    const isMixedCoarseRow = state.zoom > 1 && popupDisplayModel.isMultiple;
 
     const iconHTML = getActivityIconHTML(displayApp, displayUrl, displayTitleSource, displayAppPath, displayBundleId);
 
@@ -5722,11 +5723,14 @@ function createActivityBlockHTML(block, rowLayout = null) {
              data-domain="${escapeAttribute(displayActivity.domain || domain)}"
              data-app-path="${escapeAttribute(displayAppPath)}"
              data-bundle-id="${escapeAttribute(displayBundleId)}"
+             ${isMixedCoarseRow ? 'data-mixed-coarse-row="true"' : ''}
              ${selectedScopeAttributes}
              ${overlapDataAttribute}>
-            <div class="activity-checkbox activity-block__checkbox ${isSelected ? 'is-selected' : ''}">
-                <i class="${isSelected ? 'ph-fill ph-check-square' : 'ph ph-square'} text-base"></i>
-            </div>
+            ${isMixedCoarseRow ? '' : `
+                <div class="activity-checkbox activity-block__checkbox ${isSelected ? 'is-selected' : ''}">
+                    <i class="${isSelected ? 'ph-fill ph-check-square' : 'ph ph-square'} text-base"></i>
+                </div>
+            `}
             <div class="activity-block__icon">
                 ${iconHTML}
             </div>
@@ -5758,6 +5762,10 @@ function createActivityBlockHTML(block, rowLayout = null) {
     `;
 }
 
+function isMixedCoarseActivityBlock(blockEl) {
+    return blockEl?.dataset?.mixedCoarseRow === 'true';
+}
+
 // Binds visual event handlers to Activity Stream blocks
 function attachMemoryAidInteractions() {
     const itemsMem = DOM.elItemsMemoryAid;
@@ -5784,6 +5792,11 @@ function attachMemoryAidInteractions() {
 
             const isCheckbox = e.target.closest('.activity-checkbox');
             const isModifier = e.ctrlKey || e.metaKey || e.shiftKey;
+            if ((isCheckbox || isModifier) && isMixedCoarseActivityBlock(b)) {
+                e.stopPropagation();
+                showActivityDetailsPopup(b);
+                return;
+            }
 
             if (isCheckbox || isModifier) {
                 e.stopPropagation();

@@ -701,6 +701,124 @@ test('blank native app Activity Stream rows fall back to app name when no source
   assert.match(html, /class="activity-block__title">mymind<\/span>/);
 });
 
+test('mixed coarse Activity Stream rows hide top-level selection while single-identity rows remain selectable', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const mixedHtml = renderActivityBlockChromeHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 4, 21),
+    startCell: 120,
+    span: 1,
+    app: 'Multiple Activities',
+    title: 'Multiple Activities',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/planning',
+        start: at(10, 0),
+        end: at(10, 3),
+        duration: 3 * 60 * 1000
+      },
+      {
+        app: 'Obsidian',
+        title: 'Planning.md',
+        start: at(10, 3),
+        end: at(10, 5),
+        duration: 2 * 60 * 1000
+      }
+    ]
+  });
+  const singleIdentityHtml = renderActivityBlockChromeHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 4, 21),
+    startCell: 126,
+    span: 2,
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/planning',
+    overlaps: [
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/planning',
+        start: at(10, 30),
+        end: at(10, 33),
+        duration: 3 * 60 * 1000
+      },
+      {
+        app: 'Brave Browser',
+        title: 'Planning notes',
+        url: 'https://example.com/planning',
+        start: at(10, 36),
+        end: at(10, 39),
+        duration: 3 * 60 * 1000
+      }
+    ]
+  });
+
+  assert.match(mixedHtml, /data-mixed-coarse-row="true"/);
+  assert.doesNotMatch(mixedHtml, /activity-block__checkbox/);
+  assert.doesNotMatch(mixedHtml, /ph-square/);
+  assert.doesNotMatch(singleIdentityHtml, /data-mixed-coarse-row="true"/);
+  assert.match(singleIdentityHtml, /activity-block__checkbox/);
+});
+
+test('modifier clicking a mixed coarse Activity Stream row opens breakdown instead of toggling selection', () => {
+  const context = loadTimelineContext();
+  const listeners = {};
+  let openedBreakdown = false;
+  let stopped = false;
+  const mixedBlock = {
+    dataset: {
+      mixedCoarseRow: 'true',
+      startCell: '120',
+      span: '1'
+    },
+    classList: {
+      add() {},
+      remove() {},
+      contains() {
+        return false;
+      }
+    },
+    querySelector() {
+      return null;
+    },
+    addEventListener(type, listener) {
+      listeners[type] = listener;
+    }
+  };
+
+  context.showActivityDetailsPopup = block => {
+    openedBreakdown = block === mixedBlock;
+  };
+  context.DOM.elItemsMemoryAid = {
+    querySelectorAll(selector) {
+      return selector === '.activity-block' ? [mixedBlock] : [];
+    }
+  };
+
+  context.attachMemoryAidInteractions();
+  listeners.click({
+    target: {
+      closest() {
+        return null;
+      }
+    },
+    metaKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    stopPropagation() {
+      stopped = true;
+    }
+  });
+
+  assert.equal(openedBreakdown, true);
+  assert.equal(stopped, true);
+  assert.equal(context.state.selectedActivities.size, 0);
+});
+
 function expectedExactGeometry({ dateStart, start, end, zoom }) {
   const rowDurationMs = zoom * 60 * 1000;
   const startRow = Math.max(0, (start - dateStart) / rowDurationMs);
