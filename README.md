@@ -26,8 +26,6 @@ billable, and reporting entries.
 
 - Review captured work in day and week views with the Activity Stream Timeline,
   Time Entries, and Work Times sidebar aligned around the same local timeline.
-- See hands-on and hands-off time with Activity Mix, based on recent keyboard,
-  mouse, click, and scroll input.
 - Convert selected activity into project entries with categories, billable
   defaults, hourly or fixed-rate project settings, and reporting.
 - Track project history with project totals, billing summaries, a Time History
