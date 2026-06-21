@@ -540,17 +540,12 @@ function activityMixHandsOnPercent(mix) {
 
 function activityMixPillClass(mix, extraClass = '') {
     const classes = ['duration-pill'];
-    if (activityMixHasAny(mix)) classes.push('activity-mix-pill');
     if (extraClass) classes.push(extraClass);
     return classes.join(' ');
 }
 
 function activityMixPillAttributes(mix) {
-    if (!activityMixHasAny(mix)) return '';
-
-    const tooltipData = activityMixTooltipData(mix);
-    const handsOnPercent = formatCssNumber(activityMixHandsOnPercent(mix));
-    return ` data-activity-mix-tooltip="${escapeAttribute(tooltipData.tooltip)}" data-activity-mix-hands-on-duration="${escapeAttribute(tooltipData.handsOnDuration)}" data-activity-mix-hands-off-duration="${escapeAttribute(tooltipData.handsOffDuration)}" aria-label="${escapeAttribute(tooltipData.tooltip)}" style="--activity-mix-hands-on: ${handsOnPercent}%"`;
+    return '';
 }
 
 function setActivityMixTooltipElementAttributes(element, mix) {
@@ -587,23 +582,11 @@ function renderPopupActivityMix(mix) {
     const infoButton = DOM.elPopupActivityMixInfo;
     if (!container) return;
 
-    if (!activityMixHasAny(mix)) {
-        container.classList.add('hidden');
-        container.title = '';
-        container.removeAttribute?.('aria-label');
-        clearActivityMixTooltipElementAttributes(infoButton);
-        if (label) label.innerText = '';
-        return;
-    }
-
-    const mixLabel = activityMixLabel(mix);
-    const mixTooltip = activityMixTooltip(mix);
-    container.classList.remove('hidden');
+    container.classList.add('hidden');
     container.title = '';
-    container.setAttribute?.('aria-label', mixTooltip);
-    setActivityMixInfoTooltipElementAttributes(infoButton);
-    if (label) label.innerText = mixLabel;
-    bindActivityMixTooltipInteractions(container);
+    container.removeAttribute?.('aria-label');
+    clearActivityMixTooltipElementAttributes(infoButton);
+    if (label) label.innerText = '';
 }
 
 function getActivityMixTooltipElement() {
@@ -2268,7 +2251,7 @@ function getPopupActivityDisplayLabels(activity) {
     if (activity?.popupContextSummary) {
         const host = getActivitySummaryHostname(activity);
         const app = normalizeActivityText(activity?.app).trim();
-        const primary = getActivityDisplayTitle(activity) || host || app || 'Recorded Activity';
+        const primary = getMeaningfulActivityDisplayTitle(activity) || host || app || 'Recorded Activity';
         const secondary = app && primary.trim().toLowerCase() !== app.toLowerCase() ? app : '';
 
         return {
@@ -5131,13 +5114,14 @@ function summarizeSimilarActivityOverlaps(overlaps, rangeStart, rangeEnd) {
 
 function getPopupActivityExactGroupingKey(activity) {
     const app = normalizeActivityText(activity?.app).trim().toLowerCase();
-    const title = getActivityDisplayTitle(activity).toLowerCase();
+    const title = getActivityDisplayTitle(activity).trim().toLowerCase();
+    const exactUrl = normalizeActivityExactUrl(activity?.similarityUrl ?? activity?.url);
     const host = getActivitySummaryHostname(activity);
-    if (host) {
-        return `${app}|||${title}|||${host}`;
+    if (exactUrl || host) {
+        return `browser|||${app}|||${exactUrl || host}|||${title || host}`;
     }
 
-    return `${app}|||${title || app}`;
+    return `native|||${app}|||${title || app}`;
 }
 
 function getPopupActivityHostBucketKey(activity) {
@@ -5147,10 +5131,19 @@ function getPopupActivityHostBucketKey(activity) {
 }
 
 function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
-    const groupedOverlaps = {};
+    const groupedOverlaps = [];
     const seenSources = new Set();
 
-    for (const overlap of overlaps || []) {
+    const sortedOverlaps = [...(overlaps || [])].sort((left, right) => {
+        const startA = Number.isFinite(left?.start) ? left.start : Number.MAX_SAFE_INTEGER;
+        const startB = Number.isFinite(right?.start) ? right.start : Number.MAX_SAFE_INTEGER;
+        if (startA !== startB) return startA - startB;
+        const endA = Number.isFinite(left?.end) ? left.end : Number.MAX_SAFE_INTEGER;
+        const endB = Number.isFinite(right?.end) ? right.end : Number.MAX_SAFE_INTEGER;
+        return endA - endB;
+    });
+
+    for (const overlap of sortedOverlaps) {
         const key = getPopupActivityExactGroupingKey(overlap) || getActivitySummaryKey(overlap);
         const sourceKey = getActivitySourceKey(overlap);
         const clippedStart = Number.isFinite(overlap.start) && Number.isFinite(rangeStart)
@@ -5167,8 +5160,14 @@ function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
             seenSources.add(sourceKey);
         }
 
-        if (!groupedOverlaps[key]) {
-            groupedOverlaps[key] = {
+        const previous = groupedOverlaps[groupedOverlaps.length - 1];
+        const canMergePrevious = previous?._popupGroupingKey === key
+            && Number.isFinite(previous.end)
+            && Number.isFinite(clippedStart)
+            && clippedStart <= previous.end + ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
+        if (!canMergePrevious) {
+            groupedOverlaps.push({
+                _popupGroupingKey: key,
                 duration: 0,
                 activityMix: emptyActivityMix(),
                 app: overlap.app,
@@ -5179,22 +5178,20 @@ function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
                 start: clippedStart,
                 end: clippedEnd,
                 sources: []
-            };
+            });
         } else {
-            const group = groupedOverlaps[key];
-            if (Number.isFinite(clippedStart)) {
-                group.start = Number.isFinite(group.start) ? Math.min(group.start, clippedStart) : clippedStart;
-            }
+            const group = previous;
             if (Number.isFinite(clippedEnd)) {
                 group.end = Number.isFinite(group.end) ? Math.max(group.end, clippedEnd) : clippedEnd;
             }
         }
 
-        applyAssignmentSummaryMetadata(groupedOverlaps[key], overlap);
-        groupedOverlaps[key].duration += clippedDuration;
-        groupedOverlaps[key].activityMix = addTimelineActivityMix(groupedOverlaps[key].activityMix, clippedMix);
+        const group = groupedOverlaps[groupedOverlaps.length - 1];
+        applyAssignmentSummaryMetadata(group, overlap);
+        group.duration += clippedDuration;
+        group.activityMix = addTimelineActivityMix(group.activityMix, clippedMix);
         if (clippedDuration > 0) {
-            groupedOverlaps[key].sources.push({
+            group.sources.push({
                 ...overlap,
                 title: getActivityDisplayTitle(overlap),
                 appPath: overlap.appPath || '',
@@ -5207,7 +5204,15 @@ function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
         }
     }
 
-    return sortActivitySummaries(groupedOverlaps);
+    return groupedOverlaps
+        .map(({ _popupGroupingKey, ...summary }) => {
+            if (summary.assignmentSource === 'activity-stream'
+                && (!Number.isFinite(summary.assignedDurationMs) || summary.assignedDurationMs <= 0)) {
+                summary.assignedDurationMs = summary.duration;
+            }
+            return summary;
+        })
+        .filter(summary => Number(summary.duration) > 0);
 }
 
 function getActivityPopupContextKey(activity) {
@@ -5480,43 +5485,34 @@ function sortPopupDisplayRows(rows) {
 }
 
 function buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity = null) {
-    const groups = new Map();
-    const primaryContextKey = getActivityPopupContextKey(primaryActivity || {});
-
-    for (const row of Array.isArray(exactRows) ? exactRows : []) {
+    const primaryExactKey = getPopupActivityExactGroupingKey(primaryActivity || {});
+    const rows = (Array.isArray(exactRows) ? exactRows : [])
+        .map(row => ({
+            ...row,
+            popupContextSummary: true,
+            popupContextKey: getPopupActivityExactGroupingKey(row),
+            children: []
+        }));
+    const visibleRows = rows.filter(row => {
         const duration = Number(row?.duration);
-        if (!Number.isFinite(duration) || duration <= 0) {
-            continue;
-        }
+        return Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+    });
 
-        const contextKey = getActivityPopupContextKey(row);
-        if (!contextKey) continue;
+    if (visibleRows.length > 0) return sortPopupDisplayRows(visibleRows);
 
-        if (!groups.has(contextKey)) {
-            groups.set(contextKey, {
-                contextKey,
-                rows: []
-            });
-        }
+    const primaryRows = rows.filter(row => row.popupContextKey === primaryExactKey);
+    if (primaryRows.length > 0) return sortPopupDisplayRows(primaryRows).slice(0, 1);
 
-        groups.get(contextKey).rows.push(row);
-    }
+    const sortedRows = sortPopupDisplayRows(rows);
+    if (sortedRows.length <= 1) return sortedRows;
 
-    const rows = Array.from(groups.values())
-        .map(group => buildPopupSessionSummaryRow(group.rows, group.contextKey, rangeStart, rangeEnd))
-        .filter(Boolean)
-        .filter(row => {
-            const duration = Number(row?.duration);
-            return (Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS)
-                || row?.popupContextKey === primaryContextKey;
-        });
-
-    return sortPopupDisplayRows(rows);
+    const fallbackRow = getBestMeaningfulPopupPrimaryRow(sortedRows) || sortedRows[0];
+    return fallbackRow ? [fallbackRow] : [];
 }
 
 function isGenericPopupPrimaryActivity(activity) {
     const title = getActivityDisplayTitle(activity).trim().toLowerCase();
-    return title === 'multiple activities' || isWeakPopupActivityTitle(title, activity);
+    return title === 'activities' || title === 'multiple activities' || isWeakPopupActivityTitle(title, activity);
 }
 
 function buildPrimaryPopupDisplayRow(primaryActivity, exactRows, rangeStart, rangeEnd, activeDurationMs, zoom) {
@@ -5587,9 +5583,8 @@ function buildActivityPopupDisplayModel({
     const isGenericPrimary = isGenericPopupPrimaryActivity(primaryActivity || {});
     const primaryRow = (isGenericPrimary ? getBestMeaningfulPopupPrimaryRow(topLevelRows) : null)
         || (!isGenericPrimary
-            ? topLevelRows.find(row => row.popupSessionSummary && row.popupContextKey === primaryActivityContextKey)
+            ? topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
                 || topLevelRows.find(row => row.popupContextSummary && getActivityPopupContextKey(row) === primaryActivityContextKey)
-                || topLevelRows.find(row => getPopupActivityExactGroupingKey(row) === primaryActivityExactKey)
             : null)
         || (topLevelRows.length === 1 ? topLevelRows[0] : null)
         || (isGenericPrimary ? topLevelRows[0] : null)
@@ -5601,7 +5596,8 @@ function buildActivityPopupDisplayModel({
             if (startA !== startB) return startA - startB;
             return right.duration - left.duration;
         });
-    const visibleRows = [primaryRow, ...secondaryRows];
+    const timelineRows = sortPopupDisplayRows(topLevelRows);
+    const visibleRows = timelineRows.length > 1 ? timelineRows : [primaryRow];
 
     return {
         exactRows,
@@ -5609,7 +5605,7 @@ function buildActivityPopupDisplayModel({
         secondaryRows,
         visibleRows,
         assignmentRows: visibleRows,
-        isMultiple: secondaryRows.length > 0
+        isMultiple: visibleRows.length > 1
     };
 }
 
@@ -5882,6 +5878,10 @@ function attachMemoryAidInteractions() {
         if (btnQuickAdd) {
             btnQuickAdd.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (isMixedCoarseActivityBlock(b)) {
+                    showActivityDetailsPopup(b);
+                    return;
+                }
                 const { start: startMs, end: endMs } = getActivityBlockTimeRange(b);
                 const displayModel = buildActivityBlockPopupDisplayModel(b);
                 const assignmentActivities = buildPopupAssignmentActivities(displayModel.assignmentRows, startMs, endMs, {
@@ -6319,11 +6319,24 @@ function syncPopupActivitySelectionRows() {
     });
 }
 
+function updatePopupAssignButtonState() {
+    const button = DOM.elPopupAssignBtn;
+    const rows = Array.from(DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]') || []);
+    if (!button || rows.length === 0) return;
+
+    const selectedCount = rows.filter(row => row?.classList?.contains?.('is-selected')).length;
+    button.disabled = selectedCount === 0;
+    button.innerHTML = selectedCount > 0
+        ? `<i class="ph ph-plus-circle text-base"></i> Assign ${selectedCount} ${selectedCount === 1 ? 'Activity' : 'Activities'}`
+        : '<i class="ph ph-plus-circle text-base"></i> Select Activities';
+}
+
 function togglePopupActivitySelection(row) {
     if (DOM.elPopupMultiListContainer?.dataset) {
         DOM.elPopupMultiListContainer.dataset.popupSelectionDirty = 'true';
     }
     setPopupActivityRowSelected(row, !row?.classList?.contains?.('is-selected'));
+    updatePopupAssignButtonState();
 }
 
 function getPopupRowDisplayActivity(row, displayOverlaps) {
@@ -6363,9 +6376,6 @@ function getSelectedPopupAssignmentActivities(displayOverlaps, fallbackOverlaps 
     const rows = DOM.elPopupMultiListContainer?.querySelectorAll?.('[data-popup-overlap-index]');
     if (!rows) return fallbackOverlaps;
 
-    const scopedKeys = getPopupSelectedSimilarityKeySet();
-    const hasScopedSelection = scopedKeys.size > 0;
-    const selectionDirty = isPopupSelectionDirty();
     const selectedActivities = [];
     rows.forEach(row => {
         if (!row?.classList?.contains?.('is-selected')) return;
@@ -6375,17 +6385,7 @@ function getSelectedPopupAssignmentActivities(displayOverlaps, fallbackOverlaps 
     });
 
     if (selectedActivities.length > 0) return selectedActivities;
-    if (hasScopedSelection || selectionDirty) return [];
-
-    return displayOverlaps.length > 0 ? displayOverlaps : fallbackOverlaps;
-}
-
-function assignPopupActivity(activity, startMs, endMs) {
-    dismissActivityDetailsPopup();
-    openTimeEntryModal(startMs, endMs, '', null, null, false, buildPopupAssignmentActivities([activity], startMs, endMs, {
-        assignmentDisplayStart: startMs,
-        assignmentDisplayEnd: endMs
-    }));
+    return [];
 }
 
 function setPopupActivityChildrenExpanded(parentIndex, expanded, expandButton = null) {
@@ -6429,14 +6429,10 @@ function bindActivityPopupBreakdownControls(blockEl, displayOverlaps, startMs, e
             event.stopPropagation();
             togglePopupActivitySelection(row);
         });
-
-        row.querySelector?.('.popup-activity-quick-add')?.addEventListener('click', event => {
-            event.stopPropagation();
-            assignPopupActivity(activity, startMs, endMs);
-        });
     });
 
     syncPopupActivitySelectionRows();
+    updatePopupAssignButtonState();
 }
 
 // Selects or deselects an activity block for bulk actions
@@ -7087,7 +7083,7 @@ function showActivityDetailsPopup(b) {
 
     if (isMultipleActivityPopup) {
         DOM.elPopupIconContainer.innerHTML = '<i class="ph ph-dots-three-circle text-base text-accent"></i>';
-        DOM.elPopupAppName.innerText = 'Multiple Activities';
+        DOM.elPopupAppName.innerText = 'Activities';
 
         DOM.elPopupSingleDetails.classList.add('hidden');
         DOM.elPopupSingleChildrenContainer?.classList?.add('hidden');
@@ -7127,8 +7123,8 @@ function showActivityDetailsPopup(b) {
             const expandButtonHTML = children.length > 0
                 ? `<button type="button"
                            class="popup-activity-expand"
-                           title="Show source rows"
-                           aria-label="Show source rows for ${escapeAttribute(displayLabels.primary)}"
+                           title="Show visits"
+                           aria-label="Show visits for ${escapeAttribute(displayLabels.primary)}"
                            aria-expanded="false">
                         <i class="ph ph-caret-right" aria-hidden="true"></i>
                    </button>`
@@ -7167,12 +7163,6 @@ function showActivityDetailsPopup(b) {
                         ${secondaryLabelHTML}
                     </div>
                     <span class="${rowDurationPillClass}"${rowDurationPillAttributes}>${oDurationStr}</span>
-                    <button type="button"
-                            class="popup-activity-quick-add activity-quick-add"
-                            title="Assign to Project"
-                            aria-label="Assign activity to project">
-                        <i class="ph ph-plus-circle text-lg"></i>
-                    </button>
                 </div>
                 ${childRowsHTML}
             `;
@@ -7190,6 +7180,8 @@ function showActivityDetailsPopup(b) {
 
         DOM.elPopupAssignBtn.onclick = () => {
             const selectedOverlaps = getSelectedPopupAssignmentActivities(displayOverlaps, assignmentOverlaps);
+            if (selectedOverlaps.length === 0) return;
+
             const scopedKeys = isPopupSelectionDirty() ? new Set() : getPopupSelectedSimilarityKeySet();
             const assignmentActivities = buildPopupAssignmentActivities(selectedOverlaps, startMs, endMs, {
                 selectedKeys: scopedKeys,
@@ -7198,9 +7190,9 @@ function showActivityDetailsPopup(b) {
                     assignmentDisplayEnd: endMs
                 } : {})
             });
-            dismissActivityDetailsPopup();
-            if (selectedOverlaps.length === 0) return;
             if (assignmentActivities.length === 0) return;
+
+            dismissActivityDetailsPopup();
             openTimeEntryModal(startMs, endMs, '', null, null, false, assignmentActivities);
         };
     } else {
@@ -7273,6 +7265,8 @@ function showActivityDetailsPopup(b) {
                 assignmentDisplayEnd: endMs
             }));
         };
+        DOM.elPopupAssignBtn.disabled = false;
+        DOM.elPopupAssignBtn.innerHTML = '<i class="ph ph-plus-circle text-base"></i> Assign to Project';
     }
 
     const rowLayout = getTimelineRowLayout({ dateStartOfDay, zoom: state.zoom });
