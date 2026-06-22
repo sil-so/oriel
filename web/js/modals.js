@@ -311,18 +311,21 @@ function getBulkModalGroupingKey(activity) {
 }
 
 function buildBulkModalDisplayActivities(activities) {
-    const groupsByKey = new Map();
     const displayActivities = [];
+    let currentGroup = null;
+    let currentGroupKey = '';
 
     for (const activity of Array.isArray(activities) ? activities : []) {
         const key = getBulkModalGroupingKey(activity);
         if (!key) {
             displayActivities.push(activity);
+            currentGroup = null;
+            currentGroupKey = '';
             continue;
         }
 
-        if (!groupsByKey.has(key)) {
-            const group = {
+        if (currentGroupKey !== key) {
+            currentGroup = {
                 ...activity,
                 start: Number.isFinite(activity?.start) ? activity.start : undefined,
                 end: Number.isFinite(activity?.end) ? activity.end : undefined,
@@ -331,20 +334,19 @@ function buildBulkModalDisplayActivities(activities) {
                 modalGroupedReviewRow: true,
                 modalSourceActivities: []
             };
-            groupsByKey.set(key, group);
-            displayActivities.push(group);
+            currentGroupKey = key;
+            displayActivities.push(currentGroup);
         }
 
-        const group = groupsByKey.get(key);
         const duration = getModalActivityDurationMs(activity);
-        group.duration += duration;
-        group.assignedDurationMs += duration;
-        group.modalSourceActivities.push(activity);
+        currentGroup.duration += duration;
+        currentGroup.assignedDurationMs += duration;
+        currentGroup.modalSourceActivities.push(activity);
         if (Number.isFinite(activity?.start)) {
-            group.start = Number.isFinite(group.start) ? Math.min(group.start, activity.start) : activity.start;
+            currentGroup.start = Number.isFinite(currentGroup.start) ? Math.min(currentGroup.start, activity.start) : activity.start;
         }
         if (Number.isFinite(activity?.end)) {
-            group.end = Number.isFinite(group.end) ? Math.max(group.end, activity.end) : activity.end;
+            currentGroup.end = Number.isFinite(currentGroup.end) ? Math.max(currentGroup.end, activity.end) : activity.end;
         }
     }
 
@@ -475,30 +477,6 @@ function getModalGroupedActivityCountLabel(activity, selectedSourceIndexes = nul
     return `${selectedSources.length} ${selectedSources.length === 1 ? singularNoun : pluralNoun}`;
 }
 
-function renderModalSourceEvidence(activity) {
-    const sources = Array.isArray(activity?.sources) ? activity.sources.filter(Boolean) : [];
-    if (sources.length === 0) return '';
-
-    const rows = sources.map(source => {
-        const title = escapeModalText(cleanTitle(source.title || '', source) || source.app || 'Source activity');
-        const app = escapeModalText(source.app || '');
-        const durationLabel = escapeModalText(formatModalActivityDurationLabel(getModalActivityDurationMs(source)));
-        return `
-            <div class="modal-source-fragment-row flex items-center justify-between gap-2 py-1">
-                <span class="truncate">${title}</span>
-                <span class="text-secondary shrink-0">${app}${app ? ' · ' : ''}${durationLabel}</span>
-            </div>
-        `;
-    }).join('');
-
-    return `
-        <details class="modal-source-detail text-[10px] text-secondary pl-8 pr-2 pb-2">
-            <summary class="cursor-pointer select-none">Source details</summary>
-            <div class="mt-1 space-y-1">${rows}</div>
-        </details>
-    `;
-}
-
 function renderModalActivityMainRow(activity, index, { childIndex = null, selected = true, countLabel = '' } = {}) {
     const displayTitle = escapeModalText(cleanTitle(activity.title || '', activity));
     const app = escapeModalText(activity.app || '');
@@ -551,18 +529,15 @@ function renderModalActivityReviewItem(activity, index) {
     });
 
     if (sources.length <= 1) {
-        return `${parentRow}${renderModalSourceEvidence(activity)}`;
+        return parentRow;
     }
 
     const childRows = sources.map((source, sourceIndex) => {
         const childSelected = selected && selectedSourceIndexes.has(sourceIndex);
-        return `
-            ${renderModalActivityMainRow(source, index, {
-                childIndex: sourceIndex,
-                selected: childSelected
-            })}
-            ${renderModalSourceEvidence(source)}
-        `;
+        return renderModalActivityMainRow(source, index, {
+            childIndex: sourceIndex,
+            selected: childSelected
+        });
     }).join('');
 
     return `
@@ -770,7 +745,6 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
 
     if (!isBulk
         && window.editingTimeEntryId
-        && window.editingTimeEntryUsesSelectedActivityReview === true
         && shouldBuildBulkModalDisplayActivities(finalActivities)) {
         finalActivities = buildBulkModalDisplayActivities(finalActivities);
     } else if (!isBulk) {
