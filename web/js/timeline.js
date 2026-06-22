@@ -113,7 +113,9 @@ function getCurrentDayTimelineActivityCells(dateStartOfDay, zoom) {
         dateStartOfDay,
         zoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries: Array.isArray(state.timeEntries) ? state.timeEntries : [],
+        canonicalMembership: true
     });
 }
 
@@ -252,7 +254,9 @@ function getDayTimelineRenderModel({
             dateStartOfDay: dayStart,
             zoom: renderZoom,
             ownershipActivities,
-            visibleActivities
+            visibleActivities,
+            timeEntries,
+            canonicalMembership: true
         });
     const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(timeEntries, renderZoom, dayStart);
     const rowLayout = buildDayTimelineRowLayout({
@@ -791,99 +795,408 @@ function getTimelineTimeEntryListSignature(entries) {
     return `${entries.length}:${hash}`;
 }
 
-function buildVisibleActivityCells({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
+function getCanonicalActivityStreamPlacementDuration(activity, rangeStart, rangeEnd) {
+    const sources = Array.isArray(activity?.sources) && activity.sources.length > 0
+        ? activity.sources
+        : [activity];
+
+    return sources.reduce((total, source) => total + getClippedDurationMs(source, rangeStart, rangeEnd), 0);
+}
+
+function getCanonicalActivityStreamSourceRows(activity) {
+    const sources = Array.isArray(activity?.sources) && activity.sources.length > 0
+        ? activity.sources
+        : [activity];
+
+    return sources
+        .map(source => {
+            const start = Number(source?.start);
+            const end = Number(source?.end);
+            const duration = Number(source?.duration);
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+            return {
+                ...stripActivitySources(source),
+                title: getActivityDisplayTitle(source),
+                appPath: source?.appPath || '',
+                bundleId: source?.bundleId || '',
+                start,
+                end,
+                duration: Number.isFinite(duration) && duration > 0 ? duration : end - start,
+                activityMix: source?.activityMix || getActivityMixInRange(source, start, end)
+            };
+        })
+        .filter(Boolean);
+}
+
+function getCanonicalActivityStreamDisplayModel(session) {
+    const rangeStart = Number(session?.start);
+    const rangeEnd = Number(session?.end);
+    const overlaps = Array.isArray(session?.overlaps) && session.overlaps.length > 0
+        ? session.overlaps
+        : (Array.isArray(session?.sources) ? session.sources : [session]);
+    const summaries = summarizeActivityOverlaps(overlaps, rangeStart, rangeEnd);
+    const primaryActivity = {
+        app: session?.app || '',
+        title: getActivityDisplayTitle(session) || session?.title || '',
+        url: session?.url || '',
+        domain: session?.domain || session?.hostname || session?.host || session?.site || '',
+        similarityUrl: session?.similarityUrl ?? session?.url ?? '',
+        appPath: session?.appPath || '',
+        bundleId: session?.bundleId || ''
+    };
+    const popupDisplayModel = buildActivityPopupDisplayModel({
+        overlaps: summaries,
+        rangeStart,
+        rangeEnd,
+        primaryActivity,
+        activeDurationMs: Number(session?.activeDurationMs),
+        zoom: 1
+    });
+    const displayActivity = getTimelineBlockDisplayActivity(primaryActivity, popupDisplayModel) || primaryActivity;
+    const displayKey = getPopupActivityExactGroupingKey(displayActivity) || getActivitySummaryKey(displayActivity);
+    let displayRow = popupDisplayModel.visibleRows.find(row => {
+        return (getPopupActivityExactGroupingKey(row) || getActivitySummaryKey(row)) === displayKey;
+    }) || displayActivity;
+    const sessionSummaryKey = getActivitySummaryKey(session);
+    if (!activityMatchesAssignmentIdentity(displayRow, session, sessionSummaryKey)) {
+        displayRow = popupDisplayModel.visibleRows.find(row => (
+            activityMatchesAssignmentIdentity(row, session, sessionSummaryKey)
+        )) || displayActivity;
+    }
+
+    return {
+        displayRow,
+        visibleRows: popupDisplayModel.visibleRows
+    };
+}
+
+function getCanonicalActivityStreamDisplayRow(session) {
+    return getCanonicalActivityStreamDisplayModel(session).displayRow;
+}
+
+function buildCanonicalActivityStreamDetailRow(activity, fallbackSession) {
+    const sources = getCanonicalActivityStreamSourceRows(activity);
+    const duration = Number(activity?.duration)
+        || getCanonicalActivityStreamPlacementDuration(activity, fallbackSession.start, fallbackSession.end);
+    if (duration < ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS || sources.length === 0) return null;
+
+    const start = sources.reduce((value, source) => Math.min(value, source.start), Number.MAX_SAFE_INTEGER);
+    const end = sources.reduce((value, source) => Math.max(value, source.end), 0);
+    const activityMix = sources.reduce((mix, source) => {
+        return addTimelineActivityMix(mix, source.activityMix || emptyActivityMix());
+    }, emptyActivityMix());
+
+    return {
+        ...stripActivitySources(activity),
+        app: activity?.app || fallbackSession?.app || '',
+        title: getActivityDisplayTitle(activity) || activity?.title || fallbackSession?.title || '',
+        url: activity?.url || fallbackSession?.url || '',
+        appPath: activity?.appPath || fallbackSession?.appPath || '',
+        bundleId: activity?.bundleId || fallbackSession?.bundleId || '',
+        start: start === Number.MAX_SAFE_INTEGER ? fallbackSession.start : start,
+        end: end > 0 ? end : fallbackSession.end,
+        duration,
+        activityMix,
+        summaryKey: getActivitySummaryKey(activity),
+        sources
+    };
+}
+
+// Always-present canonical row built from the whole visible session. The row's
+// identity (title/app/url) comes from the session's chosen display row (the
+// meaningful page, e.g. a product title), but its duration, range, and source
+// fragments come from the session aggregate. This is the fix for issue #63: a
+// browser host session is visible at 1 min because its TOTAL active duration
+// crossed the threshold, not because any single page did. The previous WIP
+// re-thresholded by the display page's own duration and dropped the whole
+// session at coarse zoom; building the row from the session keeps every visible
+// 1-min row represented at every coarser zoom.
+function buildCanonicalActivityStreamSessionRow(session) {
+    const displayRow = getCanonicalActivityStreamDisplayRow(session);
+    const sources = getCanonicalActivityStreamSourceRows(session);
+    // Use the session's visible source-sum duration (the same visible duration
+    // the 1-min Activity Stream row represents), not activeDurationMs, which is
+    // reduced to the assigned overlap when the session is already logged. This
+    // keeps coarse projected/visible durations equal to the visible row.
+    const duration = getCanonicalActivityStreamPlacementDuration(session, session.start, session.end)
+        || Number(session?.activeDurationMs)
+        || Number(session?.duration)
+        || 0;
+    const activityMix = sources.length > 0
+        ? sources.reduce((mix, source) => addTimelineActivityMix(mix, source.activityMix || emptyActivityMix()), emptyActivityMix())
+        : (session?.activityMix || emptyActivityMix());
+
+    return {
+        app: displayRow?.app || session?.app || '',
+        title: getActivityDisplayTitle(displayRow) || displayRow?.title || getActivityDisplayTitle(session) || session?.title || '',
+        url: displayRow?.url || session?.url || '',
+        appPath: displayRow?.appPath || session?.appPath || '',
+        bundleId: displayRow?.bundleId || session?.bundleId || '',
+        start: Number(session?.start),
+        end: Number(session?.end),
+        duration,
+        activityMix,
+        summaryKey: getActivitySummaryKey(displayRow) || getActivitySummaryKey(session),
+        sources
+    };
+}
+
+function buildCanonicalActivityStreamRow(session) {
+    const sessionRow = buildCanonicalActivityStreamSessionRow(session);
+    if (!Number.isFinite(sessionRow.start) || !Number.isFinite(sessionRow.end) || sessionRow.end <= sessionRow.start) {
+        return null;
+    }
+
+    const displayModel = getCanonicalActivityStreamDisplayModel(session);
+    const projectionRows = (Array.isArray(displayModel.visibleRows) ? displayModel.visibleRows : [])
+        .map(row => buildCanonicalActivityStreamDetailRow(row, session))
+        .filter(Boolean);
+
+    return {
+        ...sessionRow,
+        canonicalProjectionRows: projectionRows.length > 0 ? projectionRows : [sessionRow]
+    };
+}
+
+function getCanonicalActivityStreamProjectionRows(row) {
+    return Array.isArray(row?.canonicalProjectionRows) && row.canonicalProjectionRows.length > 0
+        ? row.canonicalProjectionRows
+        : [row].filter(Boolean);
+}
+
+function dedupeCanonicalActivityStreamRows(rows) {
+    const seen = new Set();
+    return (Array.isArray(rows) ? rows : []).filter(row => {
+        const key = getActivitySourceKey(row) || `${row?.summaryKey || getActivitySummaryKey(row)}:${row?.start}:${row?.end}`;
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+// Build coarse Activity Stream cells from the canonical 1-min visible sessions.
+// Each session is already a complete, visible canonical row unit; coarse zoom
+// places it into its overlapping cell(s) and never re-thresholds or drops it, so
+// every row visible at 1 min stays represented at every coarser zoom, either as
+// a cell's primary row or inside a grouped cell whose popup reveals each
+// canonical unit in timeline order.
+function buildCanonicalActivityStreamCells({ dateStartOfDay, zoom, ownershipActivities, visibleActivities, timeEntries }) {
+    const totalCells = Math.floor(1440 / zoom);
+    const cellDurationMs = zoom * 60 * 1000;
+    const rowsByCell = Array.from({ length: totalCells }, () => []);
+    const sessions = buildActivityStreamSessions({
+        dateStartOfDay,
+        activities: ownershipActivities,
+        detailActivities: visibleActivities,
+        timeEntries
+    });
+    const canonicalRows = sessions
+        .map(buildCanonicalActivityStreamRow)
+        .filter(Boolean)
+        .map(row => {
+            const firstCell = Math.max(0, Math.floor((row.start - dateStartOfDay) / cellDurationMs));
+            const lastCell = Math.min(totalCells, Math.ceil((row.end - dateStartOfDay) / cellDurationMs));
+            let bestPlacement = null;
+            const visiblePlacements = [];
+            const connectorPlacements = [];
+
+            for (let index = firstCell; index < lastCell; index++) {
+                const cellStart = dateStartOfDay + index * cellDurationMs;
+                const cellEnd = cellStart + cellDurationMs;
+                const placementDuration = getCanonicalActivityStreamPlacementDuration(row, cellStart, cellEnd);
+                if (placementDuration <= 0) continue;
+                if (!bestPlacement || placementDuration > bestPlacement.placementDuration) {
+                    bestPlacement = { index, placementDuration };
+                }
+                if (placementDuration >= ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS) {
+                    visiblePlacements.push({ index, placementDuration });
+                } else {
+                    connectorPlacements.push({ index, placementDuration });
+                }
+            }
+
+            // A visible session is never dropped: if it never reaches the
+            // visible threshold within a single coarse cell (split across cell
+            // boundaries), it is placed in its single strongest overlapping cell.
+            return {
+                row,
+                visiblePlacements: visiblePlacements.length > 0
+                    ? visiblePlacements
+                    : (bestPlacement ? [bestPlacement] : []),
+                connectorPlacements
+            };
+        });
+
+    canonicalRows.forEach(({ row, visiblePlacements }) => {
+        visiblePlacements.forEach(placement => {
+            rowsByCell[placement.index].push({ row, placementDuration: placement.placementDuration });
+        });
+    });
+
+    // A sub-threshold clipped tail may connect through a coarse cell that
+    // already contains the same canonical activity, preserving cross-boundary
+    // block continuity. It must not create standalone coarse membership.
+    canonicalRows.forEach(({ row, connectorPlacements }) => {
+        connectorPlacements.forEach(placement => {
+            const cellRows = rowsByCell[placement.index];
+            const hasSameVisibleActivity = cellRows.some(item => item.row?.summaryKey === row.summaryKey);
+            const alreadyPlaced = cellRows.some(item => item.row === row);
+            if (!hasSameVisibleActivity || alreadyPlaced) return;
+
+            cellRows.push({ row, placementDuration: placement.placementDuration });
+        });
+    });
+
+    return rowsByCell.map((placements, index) => {
+        if (placements.length === 0) return null;
+
+        const cellStart = dateStartOfDay + index * cellDurationMs;
+        const cellEnd = cellStart + cellDurationMs;
+        const primary = [...placements]
+            .sort((left, right) => {
+                if (right.placementDuration !== left.placementDuration) {
+                    return right.placementDuration - left.placementDuration;
+                }
+                return left.row.start - right.row.start;
+            })[0].row;
+        const overlaps = placements
+            .map(placement => placement.row)
+            .sort((left, right) => left.start - right.start || left.end - right.end);
+        const projectionOverlaps = dedupeCanonicalActivityStreamRows(
+            placements.flatMap(placement => getCanonicalActivityStreamProjectionRows(placement.row))
+        ).sort((left, right) => left.start - right.start || left.end - right.end);
+
+        return {
+            ...primary,
+            start: cellStart,
+            end: cellEnd,
+            canonicalMembership: true,
+            projectionOverlaps,
+            overlaps
+        };
+    });
+}
+
+function buildVisibleActivityCells({
+    dateStartOfDay,
+    zoom,
+    ownershipActivities,
+    visibleActivities,
+    timeEntries = [],
+    canonicalMembership = false
+}) {
     const totalCells = Math.floor(1440 / zoom);
     const ownershipList = Array.isArray(ownershipActivities) ? ownershipActivities : [];
     const visibleList = Array.isArray(visibleActivities) ? visibleActivities : ownershipList;
+    const timeEntryList = Array.isArray(timeEntries) ? timeEntries : [];
     const usesSeparateVisibilitySource = ownershipList !== visibleList;
     const ownershipSignature = getActivityListCacheSignature(ownershipList);
     const visibleSignature = usesSeparateVisibilitySource
         ? getActivityListCacheSignature(visibleList)
         : 'same';
+    const usesCanonicalMembership = Boolean(canonicalMembership) && Math.max(1, Number(zoom) || 1) > 1;
+    const timeEntrySignature = usesCanonicalMembership
+        ? getTimelineTimeEntryListSignature(timeEntryList)
+        : 'none';
 
     if (visibleActivityCellsCache
         && visibleActivityCellsCache.dateStartOfDay === dateStartOfDay
         && visibleActivityCellsCache.zoom === zoom
+        && visibleActivityCellsCache.usesCanonicalMembership === usesCanonicalMembership
         && visibleActivityCellsCache.ownershipList === ownershipList
         && visibleActivityCellsCache.visibleList === visibleList
         && visibleActivityCellsCache.ownershipSignature === ownershipSignature
-        && visibleActivityCellsCache.visibleSignature === visibleSignature) {
+        && visibleActivityCellsCache.visibleSignature === visibleSignature
+        && visibleActivityCellsCache.timeEntrySignature === timeEntrySignature) {
         return visibleActivityCellsCache.cells;
     }
 
-    const cellActivities = new Array(totalCells).fill(null);
+    const cellActivities = usesCanonicalMembership
+        ? buildCanonicalActivityStreamCells({
+            dateStartOfDay,
+            zoom,
+            ownershipActivities: ownershipList,
+            visibleActivities: visibleList,
+            timeEntries: timeEntryList
+        })
+        : new Array(totalCells).fill(null);
 
-    for (let i = 0; i < totalCells; i++) {
-        const cellStart = dateStartOfDay + i * zoom * 60 * 1000;
-        const cellEnd = cellStart + zoom * 60 * 1000;
-        const ownershipOverlaps = ownershipList
-            .map(activity => getActivityOverlapInRange(activity, cellStart, cellEnd))
-            .filter(Boolean);
-
-        if (ownershipOverlaps.length === 0) continue;
-
-        const groups = {};
-        for (const overlap of ownershipOverlaps) {
-            const key = getActivitySummaryKey(overlap);
-            if (!groups[key]) {
-                groups[key] = {
-                    duration: 0,
-                    activityMix: emptyActivityMix(),
-                    app: overlap.app,
-                    title: getActivityDisplayTitle(overlap),
-                    url: overlap.url,
-                    appPath: overlap.appPath || '',
-                    bundleId: overlap.bundleId || '',
-                    summaryKey: key
-                };
-            }
-            groups[key].duration += overlap.duration;
-            groups[key].activityMix = addTimelineActivityMix(groups[key].activityMix, overlap.activityMix);
-        }
-
-        let dominant = null;
-        for (const key in groups) {
-            if (!dominant || groups[key].duration > dominant.duration) {
-                dominant = groups[key];
-            }
-        }
-
-        const minOwnershipDuration = zoom * 60 * 1000 * ACTIVITY_STREAM_MIN_OWNERSHIP_RATIO;
-        const minVisibleDuration = Math.max(minOwnershipDuration, ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS);
-        if (!dominant || dominant.duration < minVisibleDuration) {
-            continue;
-        }
-
-        let detailsOverlaps = ownershipOverlaps;
-        if (usesSeparateVisibilitySource) {
-            const visibleOverlaps = visibleList
+    if (!usesCanonicalMembership) {
+        for (let i = 0; i < totalCells; i++) {
+            const cellStart = dateStartOfDay + i * zoom * 60 * 1000;
+            const cellEnd = cellStart + zoom * 60 * 1000;
+            const ownershipOverlaps = ownershipList
                 .map(activity => getActivityOverlapInRange(activity, cellStart, cellEnd))
                 .filter(Boolean);
-            const dominantIsVisible = visibleOverlaps
-                .some(overlap => getActivitySummaryKey(overlap) === dominant.summaryKey);
 
-            if (!dominantIsVisible) continue;
+            if (ownershipOverlaps.length === 0) continue;
 
-            detailsOverlaps = visibleOverlaps.concat(
-                ownershipOverlaps.filter(overlap => getActivitySummaryKey(overlap) === dominant.summaryKey)
-            );
+            const groups = {};
+            for (const overlap of ownershipOverlaps) {
+                const key = getActivitySummaryKey(overlap);
+                if (!groups[key]) {
+                    groups[key] = {
+                        duration: 0,
+                        activityMix: emptyActivityMix(),
+                        app: overlap.app,
+                        title: getActivityDisplayTitle(overlap),
+                        url: overlap.url,
+                        appPath: overlap.appPath || '',
+                        bundleId: overlap.bundleId || '',
+                        summaryKey: key
+                    };
+                }
+                groups[key].duration += overlap.duration;
+                groups[key].activityMix = addTimelineActivityMix(groups[key].activityMix, overlap.activityMix);
+            }
+
+            let dominant = null;
+            for (const key in groups) {
+                if (!dominant || groups[key].duration > dominant.duration) {
+                    dominant = groups[key];
+                }
+            }
+
+            const minOwnershipDuration = zoom * 60 * 1000 * ACTIVITY_STREAM_MIN_OWNERSHIP_RATIO;
+            const minVisibleDuration = Math.max(minOwnershipDuration, ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS);
+            if (!dominant || dominant.duration < minVisibleDuration) {
+                continue;
+            }
+
+            let detailsOverlaps = ownershipOverlaps;
+            if (usesSeparateVisibilitySource) {
+                const visibleOverlaps = visibleList
+                    .map(activity => getActivityOverlapInRange(activity, cellStart, cellEnd))
+                    .filter(Boolean);
+                const dominantIsVisible = visibleOverlaps
+                    .some(overlap => getActivitySummaryKey(overlap) === dominant.summaryKey);
+
+                if (!dominantIsVisible) continue;
+
+                detailsOverlaps = visibleOverlaps.concat(
+                    ownershipOverlaps.filter(overlap => getActivitySummaryKey(overlap) === dominant.summaryKey)
+                );
+            }
+
+            cellActivities[i] = {
+                ...dominant,
+                start: cellStart,
+                end: cellEnd,
+                overlaps: detailsOverlaps
+            };
         }
-
-        cellActivities[i] = {
-            ...dominant,
-            start: cellStart,
-            end: cellEnd,
-            overlaps: detailsOverlaps
-        };
     }
 
     visibleActivityCellsCache = {
         dateStartOfDay,
         zoom,
+        usesCanonicalMembership,
         ownershipList,
         visibleList,
         ownershipSignature,
         visibleSignature,
+        timeEntrySignature,
         cells: cellActivities
     };
 
@@ -1178,6 +1491,7 @@ function buildVisibleActivityRunsForSummary({
     summaryKey,
     ownershipActivities,
     visibleActivities,
+    timeEntries = [],
     zoom = 1
 }) {
     if (!Number.isFinite(dateStartOfDay)
@@ -1193,7 +1507,9 @@ function buildVisibleActivityRunsForSummary({
         dateStartOfDay,
         zoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries,
+        canonicalMembership: true
     });
     const firstCell = Math.max(0, Math.floor((rangeStart - dateStartOfDay) / cellDurationMs));
     const lastCell = Math.min(cellActivities.length, Math.ceil((rangeEnd - dateStartOfDay) / cellDurationMs));
@@ -1301,6 +1617,7 @@ function buildActivityStreamAssignmentActivities(selectedActivity, rangeStart, r
         summaryKey: key,
         ownershipActivities,
         visibleActivities,
+        timeEntries: Array.isArray(state.timeEntries) ? state.timeEntries : [],
         zoom: 1
     });
 
@@ -1942,6 +2259,7 @@ function buildActivityCellBlocksHTML(cellActivities, rowLayout) {
         if (cellAct) {
             if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cellAct)) {
                 currentBlock.span++;
+                currentBlock.canonicalMembership = currentBlock.canonicalMembership || Boolean(cellAct.canonicalMembership);
                 if (cellAct.overlaps) {
                     currentBlock.overlaps = currentBlock.overlaps.concat(cellAct.overlaps);
                 }
@@ -1958,6 +2276,7 @@ function buildActivityCellBlocksHTML(cellActivities, rowLayout) {
                     appPath: cellAct.appPath || '',
                     bundleId: cellAct.bundleId || '',
                     summaryKey: cellAct.summaryKey,
+                    canonicalMembership: Boolean(cellAct.canonicalMembership),
                     overlaps: cellAct.overlaps ? [...cellAct.overlaps] : []
                 };
             }
@@ -3030,9 +3349,13 @@ function isResolvedActivityStreamAssignmentRun(activity) {
 }
 
 function activityStreamBlockMatchesAssignment(block, activity, summaryKey) {
+    if (!block) return false;
     if (block?.summaryKey === summaryKey) return true;
+    if ((block?.overlaps || []).some(overlap => activityMatchesAssignmentIdentity(overlap, activity, summaryKey))) {
+        return true;
+    }
 
-    const activitySimilarityKey = getActivitySimilarityKey(activity);
+    const activitySimilarityKey = activity ? getActivitySimilarityKey(activity) : '';
     return Boolean(activitySimilarityKey)
         && getActivitySimilarityKey(block) === activitySimilarityKey;
 }
@@ -3040,7 +3363,7 @@ function activityStreamBlockMatchesAssignment(block, activity, summaryKey) {
 function activityMatchesAssignmentIdentity(candidate, activity, summaryKey) {
     if (summaryKey && getActivitySummaryKey(candidate) === summaryKey) return true;
 
-    const activitySimilarityKey = getActivitySimilarityKey(activity);
+    const activitySimilarityKey = activity ? getActivitySimilarityKey(activity) : '';
     return Boolean(activitySimilarityKey)
         && getActivitySimilarityKey(candidate) === activitySimilarityKey;
 }
@@ -3124,14 +3447,23 @@ function getActivitySummaryForAssignmentWithinRange(activities, activity, summar
     return applySameNativePopupAssignmentDuration(summary, summaries, activity);
 }
 
-function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
+function buildVisibleActivityBlocks({
+    dateStartOfDay,
+    zoom,
+    ownershipActivities,
+    visibleActivities,
+    timeEntries = [],
+    canonicalMembership = false
+}) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const rowDurationMs = renderZoom * 60 * 1000;
     const cellActivities = buildVisibleActivityCells({
         dateStartOfDay,
         zoom: renderZoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries,
+        canonicalMembership
     });
     const blocks = [];
     let currentBlock = null;
@@ -3151,7 +3483,9 @@ function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities,
         const cell = cellActivities[rowIndex];
         if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cell)) {
             currentBlock.span++;
+            currentBlock.canonicalMembership = currentBlock.canonicalMembership || Boolean(cell.canonicalMembership);
             currentBlock.overlaps = currentBlock.overlaps.concat(cell.overlaps || []);
+            currentBlock.projectionOverlaps = currentBlock.projectionOverlaps.concat(cell.projectionOverlaps || []);
             continue;
         }
 
@@ -3166,7 +3500,9 @@ function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities,
                 appPath: cell.appPath || '',
                 bundleId: cell.bundleId || '',
                 summaryKey: cell.summaryKey,
-                overlaps: cell.overlaps ? [...cell.overlaps] : []
+                canonicalMembership: Boolean(cell.canonicalMembership),
+                overlaps: cell.overlaps ? [...cell.overlaps] : [],
+                projectionOverlaps: cell.projectionOverlaps ? [...cell.projectionOverlaps] : []
             }
             : null;
     }
@@ -3175,14 +3511,23 @@ function buildVisibleActivityBlocks({ dateStartOfDay, zoom, ownershipActivities,
     return blocks;
 }
 
-function buildActivityStreamAssignmentProjectionBlocks({ dateStartOfDay, zoom, ownershipActivities, visibleActivities }) {
+function buildActivityStreamAssignmentProjectionBlocks({
+    dateStartOfDay,
+    zoom,
+    ownershipActivities,
+    visibleActivities,
+    timeEntries = null
+}) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    const projectionTimeEntries = Array.isArray(timeEntries)
+        ? timeEntries
+        : (Array.isArray(state.timeEntries) ? state.timeEntries : []);
     if (shouldRenderExactActivityStreamSessions(renderZoom)) {
         return buildActivityStreamSessions({
             dateStartOfDay,
             activities: ownershipActivities,
             detailActivities: visibleActivities,
-            timeEntries: Array.isArray(state.timeEntries) ? state.timeEntries : []
+            timeEntries: projectionTimeEntries
         });
     }
 
@@ -3190,7 +3535,9 @@ function buildActivityStreamAssignmentProjectionBlocks({ dateStartOfDay, zoom, o
         dateStartOfDay,
         zoom: renderZoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries: projectionTimeEntries,
+        canonicalMembership: true
     });
 }
 
@@ -3204,11 +3551,14 @@ function getActivityStreamVisibleBlocksForSummary(summaryKey, dateStartOfDay, zo
     const visibleActivities = Array.isArray(state.activities)
         ? state.activities
         : ownershipActivities;
+    const timeEntries = Array.isArray(state.timeEntries) ? state.timeEntries : [];
     const cellActivities = buildVisibleActivityCells({
         dateStartOfDay,
         zoom: renderZoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries,
+        canonicalMembership: true
     });
     const rowDurationMs = renderZoom * 60 * 1000;
     const blocks = [];
@@ -3220,7 +3570,7 @@ function getActivityStreamVisibleBlocksForSummary(summaryKey, dateStartOfDay, zo
         const start = dateStartOfDay + currentBlock.startCell * rowDurationMs;
         const end = start + currentBlock.span * rowDurationMs;
         const summaries = summarizeActivityOverlaps(currentBlock.overlaps, start, end);
-        const matchingSummary = summaries.find(summary => getActivitySummaryKey(summary) === summaryKey);
+        const matchingSummary = summaries.find(summary => activityMatchesAssignmentIdentity(summary, activity, summaryKey));
         const duration = matchingSummary?.duration || currentBlock.duration || 0;
         if (duration <= 0) return;
 
@@ -3234,7 +3584,9 @@ function getActivityStreamVisibleBlocksForSummary(summaryKey, dateStartOfDay, zo
 
     for (let i = 0; i < cellActivities.length; i++) {
         const cell = cellActivities[i];
-        if (hasContinuousMatchingActivityAcrossBoundary(currentBlock, cell)) {
+        const currentMatches = activityStreamBlockMatchesAssignment(currentBlock, activity, summaryKey);
+        const cellMatches = activityStreamBlockMatchesAssignment(cell, activity, summaryKey);
+        if (currentMatches && cellMatches) {
             currentBlock.span++;
             currentBlock.duration += cell.duration || 0;
             currentBlock.overlaps = currentBlock.overlaps.concat(cell.overlaps || []);
@@ -3668,7 +4020,7 @@ function activityMatchesSourceProjectionIdentity(candidate, source, assignmentAc
 
 function sourceIsVisibleInActivityBlock(source, block, assignmentActivity) {
     const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
-        block?.overlaps,
+        getActivityBlockProjectionOverlaps(block),
         block?.start,
         block?.end
     );
@@ -3679,6 +4031,12 @@ function sourceIsVisibleInActivityBlock(source, block, assignmentActivity) {
     ));
 }
 
+function getActivityBlockProjectionOverlaps(block) {
+    return Array.isArray(block?.projectionOverlaps) && block.projectionOverlaps.length > 0
+        ? block.projectionOverlaps
+        : block?.overlaps;
+}
+
 function getSourceBackedAssignmentProjectionMatch(activity, block, range) {
     const sources = getAssignmentSourceActivities(activity);
     if (sources.length === 0) {
@@ -3686,7 +4044,7 @@ function getSourceBackedAssignmentProjectionMatch(activity, block, range) {
     }
 
     const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(
-        block?.overlaps,
+        getActivityBlockProjectionOverlaps(block),
         block?.start,
         block?.end
     );
@@ -3762,7 +4120,14 @@ function getActivitySourceOverlapDuration(source, rangeStart, rangeEnd) {
     return Math.min(activeDuration, activeDuration * ((end - start) / elapsedDuration));
 }
 
-function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range, summaryKey, dateStartOfDay, zoom) {
+function buildActivityStreamSummaryAssignmentDisplayProjections(
+    activity,
+    range,
+    summaryKey,
+    dateStartOfDay,
+    zoom,
+    timeEntries = null
+) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const assignedDuration = getActivitySourceDuration(activity, range.start, range.end);
     if (!Number.isFinite(assignedDuration) || assignedDuration <= 0) {
@@ -3781,7 +4146,8 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(activity, range,
         dateStartOfDay,
         zoom: renderZoom,
         ownershipActivities,
-        visibleActivities
+        visibleActivities,
+        timeEntries
     });
     const projections = [];
 
@@ -3850,7 +4216,8 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
         range,
         summaryKey,
         dateStartOfDay,
-        zoom
+        zoom,
+        options.timeEntries
     );
     const projections = projectionResult.projections || [];
 
@@ -3955,7 +4322,7 @@ function shouldRenderManualSummaryAssignmentFromSavedRange(entry, assignmentActi
     });
 }
 
-function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zoom) {
+function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zoom, timeEntries = null) {
     const renderZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
     if (assignmentActivities.length === 0) return [entry];
@@ -4029,7 +4396,8 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                         { start: renderActivity.start, end: renderActivity.end },
                         getActivitySummaryKey(renderActivity),
                         dateStartOfDay,
-                        renderZoom
+                        renderZoom,
+                        { timeEntries }
                     ));
                 });
                 return;
@@ -4046,7 +4414,8 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
                 renderZoom,
                 {
                     rowScopedDisplayGroups: Boolean(displayBounds),
-                    sourceBackedUnitMetadata
+                    sourceBackedUnitMetadata,
+                    timeEntries
                 }
             ));
             return;
@@ -4088,7 +4457,6 @@ const TIME_ENTRY_CONTENT_LEFT_PX = 64;
 const TIME_ENTRY_CONTENT_RIGHT_INSET_PX = 12;
 const TIME_ENTRY_LANE_GAP_PX = 4;
 const TIME_ENTRY_LANE_TOUCH_TOLERANCE_MS = 1000;
-const AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS = 30 * 1000;
 
 function getLoggedTimeEntryLaneRange(item) {
     const start = Number(item?.displayStart);
@@ -4488,7 +4856,10 @@ function getAutoRuleVisibleActivityDisplaySegments(entry, exactStart, exactEnd, 
     visibleActivityCells.forEach(cell => {
         if (!cell || cell.end <= exactStart || cell.start >= exactEnd) return;
 
-        const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(cell.overlaps || [cell], cell.start, cell.end);
+        const cellOverlaps = Array.isArray(cell.projectionOverlaps) && cell.projectionOverlaps.length > 0
+            ? cell.projectionOverlaps
+            : (cell.overlaps || [cell]);
+        const visibleOverlaps = getVisibleMultiActivityBreakdownOverlaps(cellOverlaps, cell.start, cell.end);
         const hasVisibleMatch = visibleOverlaps.some(overlap => activityMatchesAnyKey(overlap, matchKeys));
         if (!hasVisibleMatch) return;
 
@@ -4668,7 +5039,7 @@ function buildAutoRuleDisplayRangeGroups(sortedEntries) {
         });
 }
 
-function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
+function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom, timeEntries = []) {
     if (shouldRenderExactActivityStreamSessions(zoom)) {
         return buildAutoRuleExactFragmentItems(groupEntries);
     }
@@ -4679,7 +5050,9 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom) {
             dateStartOfDay,
             zoom,
             ownershipActivities: Array.isArray(state.timelineActivities) ? state.timelineActivities : state.activities,
-            visibleActivities: state.activities
+            visibleActivities: state.activities,
+            timeEntries: Array.isArray(timeEntries) ? timeEntries : [],
+            canonicalMembership: true
         });
     const sortedEntries = groupEntries
         .flatMap(({ entry, sourceIndex }) => {
@@ -4720,7 +5093,7 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
 
     entries.forEach((entry, sourceIndex) => {
         if (isTimelineHiddenAutoAssignedTimeEntry(entry)) return;
-        const renderEntries = buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom);
+        const renderEntries = buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom, entries);
 
         renderEntries.forEach((renderEntry, renderIndex) => {
             const assignmentKey = getActivityStreamAssignmentGroupKey(renderEntry);
@@ -4793,16 +5166,14 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
     }
 
     for (const groupEntries of Object.values(autoAssignmentGroupsByKey)) {
-        const rowGroups = buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom);
+        const rowGroups = buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom, entries);
         let currentGroup = null;
         for (const rowGroup of rowGroups) {
             const canMergeWithCurrent = currentGroup
                 && Number.isFinite(rowGroup.displayStart)
                 && Number.isFinite(rowGroup.displayEnd)
                 && Number.isFinite(currentGroup.displayEnd)
-                && rowGroup.displayStart <= currentGroup.displayEnd
-                && (rowGroup.displayStart < currentGroup.displayEnd
-                    || rowGroup.start <= currentGroup.end + AUTO_RULE_ASSIGNMENT_MERGE_GAP_MS);
+                && rowGroup.displayStart <= currentGroup.displayEnd;
             const shouldStartGroup = !canMergeWithCurrent;
 
             if (shouldStartGroup) {
@@ -5706,10 +6077,12 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const span = isSessionBlock ? Math.max(1, sourceRange.endRow - sourceRange.startRow) : fallbackSpan;
     const rawPrimaryActivity = { app, title, url, domain, similarityUrl: url, appPath, bundleId };
     const blockOverlaps = block.overlaps || [];
-    const uniqueOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
-    const overlapsData = encodeURIComponent(JSON.stringify(uniqueOverlaps));
+    const preserveCanonicalRows = Boolean(block.canonicalMembership);
+    const summaryOverlaps = summarizeActivityOverlaps(blockOverlaps, blockStart, blockEnd);
+    const detailOverlaps = preserveCanonicalRows ? blockOverlaps : summaryOverlaps;
+    const overlapsData = encodeURIComponent(JSON.stringify(detailOverlaps));
     const popupDisplayModel = buildActivityPopupDisplayModel({
-        overlaps: uniqueOverlaps,
+        overlaps: detailOverlaps,
         rangeStart: blockStart,
         rangeEnd: blockEnd,
         primaryActivity: rawPrimaryActivity,
@@ -5784,12 +6157,12 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const iconHTML = getActivityIconHTML(displayApp, displayUrl, displayTitleSource, displayAppPath, displayBundleId);
 
     const fallbackDurationMs = blockEnd - blockStart;
-    const actualDurationMs = getActivityDurationTotalMs(uniqueOverlaps) || fallbackDurationMs;
-    const isMultipleActivityBlock = popupDisplayModel.isMultiple || uniqueOverlaps.length > 1;
+    const actualDurationMs = getActivityDurationTotalMs(summaryOverlaps) || fallbackDurationMs;
+    const isMultipleActivityBlock = popupDisplayModel.isMultiple || detailOverlaps.length > 1;
     const displayDurationMs = Number.isFinite(block.activeDurationMs) && block.activeDurationMs > 0
         ? block.activeDurationMs
         : isMultipleActivityBlock
-        ? (getBreakdownDisplayDurationMs(popupDisplayModel.visibleRows, uniqueOverlaps) || actualDurationMs)
+        ? (getBreakdownDisplayDurationMs(popupDisplayModel.visibleRows, summaryOverlaps) || actualDurationMs)
         : actualDurationMs;
     const durationStr = formatActivityDurationLabel(displayDurationMs, isMultipleActivityBlock ? 0 : 1);
     const blockActivityMix = popupDisplayModel.visibleRows.reduce((mix, overlap) => {
@@ -5798,7 +6171,7 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const durationPillClass = activityMixPillClass(blockActivityMix, 'shrink-0');
     const durationPillAttributes = activityMixPillAttributes(blockActivityMix);
     const overlapKey = isSessionBlock
-        ? registerActivityBlockDetailOverlaps(layout, uniqueOverlaps)
+        ? registerActivityBlockDetailOverlaps(layout, detailOverlaps)
         : null;
     const overlapDataAttribute = overlapKey
         ? `data-overlap-key="${escapeAttribute(overlapKey)}"`
