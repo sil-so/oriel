@@ -8401,6 +8401,8 @@ test('coarse merged source-backed Time Entry opens edit with grouped canonical v
     'entry-planning-first-display',
     'entry-planning-second-display'
   ]);
+  modalArgs[6][0].sources[0].title = 'Checkout step one';
+  modalArgs[6][0].sources[1].title = 'Checkout step two';
 
   const { context: modalContext, elements } = loadModalsContext();
   modalContext.window.editingTimeEntryId = 'entry-planning-first';
@@ -8420,7 +8422,9 @@ test('coarse merged source-backed Time Entry opens edit with grouped canonical v
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 1);
   assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
   assert.match(listHtml, /2 visits/);
-  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 3);
+  assert.doesNotMatch(listHtml, /Source details/);
+  assert.doesNotMatch(listHtml, /Checkout step one|Checkout step two|20s|40s/);
+  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 0);
   assert.equal(modalContext.getSelectedModalActivities()[0].modalSourceActivities.length, 2);
   assert.equal(elements.get('modal-duration-lbl').innerText, '3 min');
 });
@@ -11029,6 +11033,85 @@ test('edited time entry modal with explicit activity candidates sums selected ac
   assert.equal(elements.get('modal-duration-lbl').innerText, '14 min');
 });
 
+test('regular activity-stream edit uses grouped canonical review rows', () => {
+  const { context, elements } = loadModalsContext();
+  const startMs = new Date(2026, 4, 21, 21, 0).getTime();
+  const first = {
+    app: 'Brave Browser',
+    title: 'Planning notes',
+    url: 'https://example.com/work-plan',
+    start: startMs,
+    end: startMs + 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentStart: startMs,
+    assignmentEnd: startMs + 60 * 1000,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    sources: [
+      {
+        app: 'Brave Browser',
+        title: 'Checkout step one',
+        url: 'https://example.com/work-plan',
+        start: startMs,
+        end: startMs + 20 * 1000,
+        duration: 20 * 1000
+      }
+    ]
+  };
+  const second = {
+    ...first,
+    start: startMs + 5 * 60 * 1000,
+    end: startMs + 7 * 60 * 1000,
+    duration: 2 * 60 * 1000,
+    assignedDurationMs: 2 * 60 * 1000,
+    assignmentStart: startMs + 5 * 60 * 1000,
+    assignmentEnd: startMs + 7 * 60 * 1000,
+    sources: [
+      {
+        app: 'Brave Browser',
+        title: 'Checkout step two',
+        url: 'https://example.com/work-plan',
+        start: startMs + 5 * 60 * 1000,
+        end: startMs + 5 * 60 * 1000 + 40 * 1000,
+        duration: 40 * 1000
+      }
+    ]
+  };
+  const other = {
+    ...first,
+    title: 'Other planning notes',
+    url: 'https://example.com/other-plan',
+    start: startMs + 8 * 60 * 1000,
+    end: startMs + 9 * 60 * 1000,
+    duration: 60 * 1000,
+    assignedDurationMs: 60 * 1000,
+    assignmentStart: startMs + 8 * 60 * 1000,
+    assignmentEnd: startMs + 9 * 60 * 1000,
+    sources: []
+  };
+
+  context.window.editingTimeEntryId = 'entry-1';
+  context.state.timeEntries = [{
+    id: 'entry-1',
+    start: startMs,
+    end: startMs + 9 * 60 * 1000,
+    projectId: 'project-1',
+    billable: true,
+    activities: [first, second, other]
+  }];
+
+  context.openTimeEntryModal(startMs, startMs + 9 * 60 * 1000, '', 'project-1', true, false, null);
+
+  const listHtml = elements.get('modal-memory-aid-list').innerHTML;
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
+  assert.match(listHtml, /2 visits/);
+  assert.doesNotMatch(listHtml, /Source details|Checkout step one|Checkout step two|20s|40s/);
+  assert.equal(context.getSelectedModalActivities()[0].modalSourceActivities.length, 2);
+  assert.equal(elements.get('modal-duration-lbl').innerText, '4 min');
+});
+
 test('drag-created time entry modal falls back to manual range when no visible activities remain', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 11, 30).getTime();
@@ -11427,15 +11510,17 @@ test('selected similar app-name assignment preserves aggregate row units', () =>
   ]);
 
   const listHtml = elements.get('modal-memory-aid-list').innerHTML;
-  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 3);
   assert.match(listHtml, /readme - sil-so/);
   assert.match(listHtml, /tasks - sil-so/);
   const selectedActivities = context.getSelectedModalActivities();
-  assert.equal(selectedActivities.length, 2);
-  assert.equal(selectedActivities[0].assignedDurationMs, 5 * 60 * 1000);
-  assert.equal(selectedActivities[0].modalSourceActivities.length, 2);
+  assert.equal(selectedActivities.length, 3);
+  assert.equal(selectedActivities[0].assignedDurationMs, 3 * 60 * 1000);
+  assert.equal(selectedActivities[0].modalSourceActivities.length, 1);
   assert.equal(selectedActivities[1].assignedDurationMs, 3 * 60 * 1000);
   assert.equal(selectedActivities[1].modalSourceActivities.length, 1);
+  assert.equal(selectedActivities[2].assignedDurationMs, 2 * 60 * 1000);
+  assert.equal(selectedActivities[2].modalSourceActivities.length, 1);
   assert.equal(elements.get('modal-duration-lbl').innerText, '8 min');
 });
 
@@ -11457,7 +11542,7 @@ test('selected activities group exact browser visits while child selection prese
     sources: [
       {
         app: 'Brave Browser',
-        title: 'Planning notes',
+        title: 'Checkout step one',
         url: 'https://example.com/work-plan',
         start: startMs,
         end: startMs + 20 * 1000,
@@ -11465,7 +11550,7 @@ test('selected activities group exact browser visits while child selection prese
       },
       {
         app: 'Brave Browser',
-        title: 'Planning notes',
+        title: 'Checkout step two',
         url: 'https://example.com/work-plan',
         start: startMs + 20 * 1000,
         end: startMs + 60 * 1000,
@@ -11513,9 +11598,10 @@ test('selected activities group exact browser visits while child selection prese
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
   assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
   assert.match(listHtml, /2 visits/);
-  assert.match(listHtml, /Source details/);
+  assert.doesNotMatch(listHtml, /Source details/);
+  assert.doesNotMatch(listHtml, /Checkout step one|Checkout step two|20s|40s/);
   assert.doesNotMatch(listHtml, /modal-activity-group" open/);
-  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 3);
+  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 0);
 
   const selectedActivities = context.getSelectedModalActivities();
   assert.equal(selectedActivities.length, 2);
