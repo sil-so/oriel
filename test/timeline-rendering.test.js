@@ -1041,6 +1041,308 @@ test('compressed Activity Stream skips empty gaps without merging repeated activ
   assert.deepEqual(styles.map(style => style.height), [37, 37]);
 });
 
+test('coarse Activity Stream membership follows the exact visible display row', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const searchTitle = 'shop.example.test/?q=laptop';
+  const checkoutTitle = 'Checkout details';
+  const activities = [
+    {
+      app: 'Brave Browser',
+      title: searchTitle,
+      url: 'https://shop.example.test/?q=laptop',
+      start: at(11, 25),
+      end: at(11, 28),
+      duration: 3 * 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: checkoutTitle,
+      url: 'https://shop.example.test/checkout/details',
+      start: at(11, 28),
+      end: at(11, 29),
+      duration: 60 * 1000
+    }
+  ];
+
+  assert.ok(activities[0].duration > activities[1].duration);
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 1;
+  const [exactSession] = context.buildActivityStreamSessions({
+    dateStartOfDay: dateStart,
+    activities,
+    detailActivities: activities
+  });
+  const exactHtml = context.createActivityBlockHTML(
+    exactSession,
+    context.buildFullDayTimelineRowLayout(dateStart, 1)
+  );
+
+  assert.match(exactHtml, />Checkout details<\/span>/);
+
+  [5, 10, 15, 30, 60].forEach(zoom => {
+    const coarseCells = context.buildVisibleActivityCells({
+      dateStartOfDay: dateStart,
+      zoom,
+      ownershipActivities: activities,
+      visibleActivities: activities,
+      timeEntries: [],
+      canonicalMembership: true
+    });
+    const representedCells = coarseCells.filter(cell => {
+      return cell && (cell.overlaps || []).some(activity => activity.title === checkoutTitle);
+    });
+
+    assert.equal(representedCells.length, 1, `${zoom} min represented cell count`);
+    assert.equal(representedCells[0].title, checkoutTitle, `${zoom} min display title`);
+    assert.deepEqual(
+      Array.from(representedCells[0].overlaps, activity => activity.title),
+      [checkoutTitle],
+      `${zoom} min canonical overlaps`
+    );
+  });
+});
+
+test('aggregated browser session with a short display page stays represented across coarse zooms', () => {
+  // Regression for issue #63: a browser host session is visible at 1 min
+  // because its TOTAL active duration crossed the threshold, not because any
+  // single page did. Coarse zoom must keep it represented; it must not be
+  // dropped just because its resolved display page is under the visible
+  // threshold. Two such short-display browser sessions plus one dominant native
+  // session share the same 60-min cell, so the browser sessions are also tested
+  // as non-dominant grouped rows.
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second = 0) => dateStart + (hour * 60 + minute) * 60 * 1000 + second * 1000;
+  const browserPage = (title, path, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url: `https://shop.example.test${path}`,
+    start,
+    end,
+    duration: end - start
+  });
+  // Session A: shop.example visit, 75s total, every page well under 60s.
+  const sessionA = [
+    browserPage('Widget Pro 1TB SSD', '/widget-pro', at(11, 17, 0), at(11, 17, 15)),
+    browserPage('Shopping cart', '/cart', at(11, 17, 15), at(11, 17, 55)),
+    browserPage('Newsletter signup', '/newsletter', at(11, 17, 55), at(11, 18, 15))
+  ];
+  // Dominant native session in the same coarse cell.
+  const editor = [{
+    app: 'Project Editor',
+    title: 'Project Editor — notes',
+    appPath: '/Applications/ProjectEditor.app',
+    bundleId: 'com.example.editor',
+    start: at(11, 19, 0),
+    end: at(11, 21, 0),
+    duration: 2 * 60 * 1000
+  }];
+  // Session C: another short-display shop.example visit, 65s total.
+  const sessionC = [
+    browserPage('My account', '/account', at(11, 34, 0), at(11, 34, 30)),
+    browserPage('Order history', '/orders', at(11, 34, 30), at(11, 35, 5))
+  ];
+  const activities = [...sessionA, ...editor, ...sessionC];
+
+  // Each shop.example page is shorter than the visible threshold; only the
+  // aggregated session crosses it.
+  [...sessionA, ...sessionC].forEach(page => {
+    assert.ok(page.duration < 60 * 1000, `page ${page.title} should be sub-threshold`);
+  });
+
+  context.state.currentDate = new Date(2026, 4, 21);
+  context.state.zoom = 1;
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+
+  const sessions = context.buildActivityStreamSessions({
+    dateStartOfDay: dateStart,
+    activities,
+    detailActivities: activities
+  });
+  // Three visible canonical row units at 1 min: shop visit, editor, account visit.
+  assert.equal(sessions.length, 3, '1-min visible session count');
+  const sessionStarts = Array.from(sessions, session => session.start).sort((a, b) => a - b);
+
+  [5, 10, 15, 30, 60].forEach(zoom => {
+    const cells = context.buildVisibleActivityCells({
+      dateStartOfDay: dateStart,
+      zoom,
+      ownershipActivities: activities,
+      visibleActivities: activities,
+      timeEntries: [],
+      canonicalMembership: true
+    });
+    const representedStarts = new Set();
+    cells.forEach(cell => {
+      if (!cell) return;
+      (cell.overlaps || []).forEach(row => representedStarts.add(row.start));
+    });
+    // Every 1-min session is still represented; nothing dropped, nothing extra.
+    assert.deepEqual(
+      Array.from(representedStarts).sort((a, b) => a - b),
+      sessionStarts,
+      `${zoom} min represents every canonical session`
+    );
+  });
+
+  // At 60 min all three sessions land in one grouped cell; opening it reveals
+  // each canonical unit in timeline order with no host-only parent row.
+  const coarseCells = context.buildVisibleActivityCells({
+    dateStartOfDay: dateStart,
+    zoom: 60,
+    ownershipActivities: activities,
+    visibleActivities: activities,
+    timeEntries: [],
+    canonicalMembership: true
+  }).filter(Boolean);
+  assert.equal(coarseCells.length, 1, '60 min grouped cell count');
+  const popup = context.buildActivityPopupDisplayModel({
+    overlaps: coarseCells[0].overlaps,
+    rangeStart: coarseCells[0].start,
+    rangeEnd: coarseCells[0].end,
+    primaryActivity: { app: coarseCells[0].app, title: coarseCells[0].title, url: coarseCells[0].url },
+    activeDurationMs: coarseCells[0].duration,
+    zoom: 60
+  });
+  assert.equal(popup.isMultiple, true, '60 min popup is a grouped breakdown');
+  assert.equal(popup.visibleRows.length, 3, '60 min popup reveals each canonical unit');
+  const popupStarts = Array.from(popup.visibleRows, row => row.start);
+  assert.deepEqual(popupStarts, Array.from(popupStarts).sort((a, b) => a - b), 'popup rows in timeline order');
+  popup.visibleRows.forEach(row => {
+    const title = String(row.title || '').trim().toLowerCase();
+    assert.notEqual(title, 'shop.example.test', 'no host-only parent row');
+  });
+});
+
+test('coarse Activity Stream popup preserves repeated canonical row units in timeline order', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const activities = [
+    {
+      app: 'Brave Browser',
+      title: 'Task draft',
+      url: 'https://docs.example.test/task',
+      start: at(11, 0),
+      end: at(11, 1),
+      duration: 60 * 1000
+    },
+    {
+      app: 'Calendar',
+      title: 'Planning break',
+      appPath: '/Applications/Calendar.app',
+      bundleId: 'com.apple.iCal',
+      start: at(11, 1),
+      end: at(11, 2),
+      duration: 60 * 1000
+    },
+    {
+      app: 'Brave Browser',
+      title: 'Task draft',
+      url: 'https://docs.example.test/task',
+      start: at(11, 2),
+      end: at(11, 3),
+      duration: 60 * 1000
+    }
+  ];
+  const html = renderMemoryAidHtml({
+    activities,
+    zoom: 5,
+    currentDate: new Date(dateStart)
+  });
+  const overlaps = extractActivityOverlaps(html, 'Task draft');
+
+  assert.deepEqual(
+    overlaps.map(activity => activity.title),
+    ['Task draft', 'Planning break', 'Task draft']
+  );
+
+  const popup = renderMultipleActivitiesPopup({
+    overlaps,
+    app: 'Brave Browser',
+    title: 'Task draft',
+    url: 'https://docs.example.test/task',
+    startCell: 132,
+    span: 1,
+    zoom: 5
+  });
+  const popupTitles = Array.from(
+    popup.renderedMultiList.matchAll(/<span class="popup-activity-title"[^>]*>([^<]+)<\/span>/g),
+    match => match[1]
+  );
+
+  assert.deepEqual(popupTitles, ['Task draft', 'Planning break', 'Task draft']);
+});
+
+test('canonical Activity Stream cell cache includes time entry state', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const activities = [{
+    app: 'Notes',
+    title: 'Planning notes',
+    appPath: '/Applications/Notes.app',
+    bundleId: 'com.apple.Notes',
+    start: at(10, 0),
+    end: at(10, 3),
+    duration: 3 * 60 * 1000
+  }];
+  const baseOptions = {
+    dateStartOfDay: dateStart,
+    zoom: 5,
+    ownershipActivities: activities,
+    visibleActivities: activities,
+    canonicalMembership: true
+  };
+
+  const emptyEntryCells = context.buildVisibleActivityCells({
+    ...baseOptions,
+    timeEntries: []
+  });
+  const loggedEntryCells = context.buildVisibleActivityCells({
+    ...baseOptions,
+    timeEntries: [{
+      id: 'entry-planning',
+      start: at(10, 0),
+      end: at(10, 3),
+      projectId: 'project-1',
+      activities: []
+    }]
+  });
+
+  assert.notStrictEqual(loggedEntryCells, emptyEntryCells);
+});
+
+test('auto-rule coarse aggregation cache uses scoped render entries', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const firstStart = dateStart + 10 * 60 * 60 * 1000;
+  const firstEnd = firstStart + 2 * 60 * 1000;
+  const secondStart = firstEnd;
+  const secondEnd = secondStart + 2 * 60 * 1000;
+  const activities = [
+    codexActivity(firstStart, firstEnd),
+    codexActivity(secondStart, secondEnd)
+  ];
+
+  context.state.activities = activities;
+  context.state.timelineActivities = activities;
+  context.state.timeEntries = [];
+  context.__orielTimelineDiagnostics = { activitySessionBuilds: 0 };
+
+  context.buildLoggedTimeEntryRenderItems([
+    makeAutoRuleEntry({ id: 'entry-cache-first', start: firstStart, end: firstEnd })
+  ], 5, dateStart);
+  context.buildLoggedTimeEntryRenderItems([
+    makeAutoRuleEntry({ id: 'entry-cache-second', start: secondStart, end: secondEnd })
+  ], 5, dateStart);
+
+  assert.equal(context.__orielTimelineDiagnostics.activitySessionBuilds, 2);
+});
+
 test('compressed timeline grid keeps unassigned activity rows and manual time entry rows', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const atRow = row => dateStart + row * 5 * 60 * 1000;
@@ -2503,7 +2805,7 @@ test('auto-rule capture fragments at five-minute zoom render as a row summary', 
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['11 min']);
 });
 
-test('auto-rule coarse summaries merge when visible row summaries touch across hidden source gaps', () => {
+test('auto-rule coarse summaries do not bridge through hidden canonical row gaps', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
   const firstStart = dateStart + (13 * 60 + 20) * 60 * 1000;
@@ -2543,14 +2845,20 @@ test('auto-rule coarse summaries merge when visible row summaries touch across h
   });
   const styles = extractEntryStyles(html);
 
-  assert.equal(styles.length, 1);
+  assert.equal(styles.length, 2);
   assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
     dateStart,
     start: firstStart,
-    end: laterSameRowEnd,
+    end: firstEnd,
     zoom: 5
-  }), 'touching coarse auto-rule summary');
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+  }), 'first canonical auto-rule summary');
+  assertStyleMatchesRowGeometry(styles[1], expectedRowGeometry({
+    dateStart,
+    start: dateStart + (13 * 60 + 40) * 60 * 1000,
+    end: dateStart + (13 * 60 + 45) * 60 * 1000,
+    zoom: 5
+  }), 'later canonical auto-rule summary');
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min', '1 min']);
 });
 
 test('auto-rule projection skips one-minute rows without matching breakdown activity', () => {
@@ -3072,6 +3380,108 @@ test('activity-stream assignments include earlier current zoom rows when the ass
     zoom: 30
   }));
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+});
+
+test('source-backed assignments project through popup-visible canonical rows', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const projects = [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }];
+  const primaryStart = dateStart + 10 * 60 * 60 * 1000;
+  const primaryEnd = primaryStart + 15 * 60 * 1000;
+  const secondaryStart = primaryStart + 2 * 60 * 1000;
+  const secondaryEnd = secondaryStart + 2 * 60 * 1000;
+  const primaryActivity = {
+    app: 'Design Tool',
+    title: 'Design review',
+    appPath: '/Applications/Design Tool.app',
+    bundleId: 'test.design-tool',
+    start: primaryStart,
+    end: primaryEnd,
+    duration: primaryEnd - primaryStart
+  };
+  const secondaryActivity = codexActivity(secondaryStart, secondaryEnd);
+  const timeEntries = [{
+    id: 'entry-secondary-source-backed',
+    start: secondaryStart,
+    end: secondaryEnd,
+    projectId: 'project-1',
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...secondaryActivity,
+      assignedDurationMs: secondaryEnd - secondaryStart,
+      assignmentStart: secondaryStart,
+      assignmentEnd: secondaryEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1,
+      sources: [secondaryActivity]
+    }]
+  }];
+
+  const html = renderLoggedTimeEntriesHtml({
+    zoom: 15,
+    projects,
+    activities: [primaryActivity, secondaryActivity],
+    timelineActivities: [primaryActivity],
+    timeEntries
+  });
+  const styles = extractEntryStyles(html);
+
+  assert.equal(styles.length, 1);
+  assertStyleMatchesRowGeometry(styles[0], expectedRowGeometry({
+    dateStart,
+    start: primaryStart,
+    end: primaryEnd,
+    zoom: 15
+  }));
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
+});
+
+test('source-backed projection cache uses scoped render entries', () => {
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const primaryStart = dateStart + 10 * 60 * 60 * 1000;
+  const primaryEnd = primaryStart + 15 * 60 * 1000;
+  const sourceStart = primaryStart + 2 * 60 * 1000;
+  const sourceEnd = sourceStart + 2 * 60 * 1000;
+  const primaryActivity = {
+    app: 'Design Tool',
+    title: 'Design review',
+    appPath: '/Applications/Design Tool.app',
+    bundleId: 'test.design-tool',
+    start: primaryStart,
+    end: primaryEnd,
+    duration: primaryEnd - primaryStart
+  };
+  const sourceActivity = codexActivity(sourceStart, sourceEnd);
+  const sourceBackedEntry = id => ({
+    id,
+    start: sourceStart,
+    end: sourceEnd,
+    projectId: 'project-1',
+    createdBy: 'manual',
+    description: '',
+    activities: [{
+      ...sourceActivity,
+      assignedDurationMs: sourceEnd - sourceStart,
+      assignmentStart: sourceStart,
+      assignmentEnd: sourceEnd,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 1,
+      sources: [sourceActivity]
+    }]
+  });
+
+  context.state.activities = [primaryActivity, sourceActivity];
+  context.state.timelineActivities = [primaryActivity];
+  context.state.timeEntries = [];
+  context.__orielTimelineDiagnostics = { activitySessionBuilds: 0 };
+
+  context.buildLoggedTimeEntryRenderItems([sourceBackedEntry('entry-source-first')], 15, dateStart);
+  context.buildLoggedTimeEntryRenderItems([sourceBackedEntry('entry-source-second')], 15, dateStart);
+
+  assert.equal(context.__orielTimelineDiagnostics.activitySessionBuilds, 2);
 });
 
 test('activity-stream assignments still skip current zoom rows without matching breakdown activity', () => {
@@ -3919,7 +4329,7 @@ test('cross-zoom assignment blocks use standard styling and never overlap at any
     const styles = extractEntryStyles(html);
     const expectedBlockCount = zoom >= 10 ? 2 : 3;
     const expectedLabels = zoom === 15
-      ? ['83 min', '15 min']
+      ? ['83 min', '16 min']
       : zoom >= 10
         ? ['83 min', '16 min']
         : ['53 min', '30 min', '16 min'];
@@ -6665,9 +7075,9 @@ test('similar selection ignores unrelated secondary overlaps for a selected visi
   assert.equal(blocks[2].classList.contains('selected'), false);
 });
 
-test('recorded activity duration preserves exact source duration at one-minute zoom', () => {
+test('recorded activity duration preserves canonical row-unit duration across zooms', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
-  const title = '(1) IQOS Iluma Review - YouTube';
+  const title = 'Product setup walkthrough';
   const activities = [
     {
       start: dateStart + (14 * 60 + 25) * 60 * 1000,
@@ -6681,7 +7091,7 @@ test('recorded activity duration preserves exact source duration at one-minute z
       end: dateStart + (14 * 60 + 32) * 60 * 1000 + 21025,
       app: 'Brave Browser',
       title,
-      url: 'https://www.youtube.com/watch?v=L5tCTMAZiGs'
+      url: 'https://video.example.test/watch/product-setup'
     }
   ];
 
@@ -6689,7 +7099,7 @@ test('recorded activity duration preserves exact source duration at one-minute z
   const fiveMinuteHtml = renderMemoryAidHtml({ activities, zoom: 5 });
 
   assert.equal(extractActivityDuration(oneMinuteHtml, title), '3 min');
-  assert.equal(extractActivityDuration(fiveMinuteHtml, title), '2 min');
+  assert.equal(extractActivityDuration(fiveMinuteHtml, title), '3 min');
 });
 
 test('activity stream uses exact geometry only at one-minute zoom', () => {
@@ -7768,7 +8178,7 @@ test('saved Activity Stream row units use the primary visible row duration at co
       'users',
       at(11, 54),
       at(11, 55),
-      '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto'
+      'https://design.example.test/documents/mockup.afphoto'
     )
   ];
   const activities = [...savedRowSources, ...adjacentDocumentSources];
@@ -7779,7 +8189,9 @@ test('saved Activity Stream row units use the primary visible row duration at co
   [
     { zoom: 5, rowStart: at(11, 50), rowEnd: at(11, 55), labels: ['2 min'] },
     { zoom: 10, rowStart: at(11, 50), rowEnd: at(12, 0), labels: ['2 min'] },
-    { zoom: 15, rowStart: at(11, 45), rowEnd: at(12, 0), labels: ['2 min'] }
+    { zoom: 15, rowStart: at(11, 45), rowEnd: at(12, 0), labels: ['2 min'] },
+    { zoom: 30, rowStart: at(11, 30), rowEnd: at(12, 0), labels: ['2 min'] },
+    { zoom: 60, rowStart: at(11, 0), rowEnd: at(12, 0), labels: ['2 min'] }
   ].forEach(({ zoom, rowStart, rowEnd, labels }) => {
     const html = renderLoggedTimeEntriesHtml({
       zoom,
@@ -7800,19 +8212,6 @@ test('saved Activity Stream row units use the primary visible row duration at co
       zoom
     }), `${zoom} min geometry`);
     assert.deepEqual(extractTimeEntryDurationLabels(html), labels, `${zoom} min duration`);
-  });
-
-  [30, 60].forEach(zoom => {
-    const html = renderLoggedTimeEntriesHtml({
-      zoom,
-      projects: [project],
-      activities,
-      timeEntries,
-      currentDate: new Date(dateStart)
-    });
-
-    assert.equal(extractEntryStyles(html).length, 0, `${zoom} min hidden without a matching visible Activity Stream row`);
-    assert.deepEqual(extractTimeEntryDurationLabels(html), [], `${zoom} min duration`);
   });
 });
 
@@ -7891,7 +8290,7 @@ test('source-backed row units keep stable rounded labels when merged at 10 minut
   const firstEnd = at(11, 53, 26, 151);
   const secondStart = at(11, 53, 14, 775);
   const secondEnd = at(11, 56, 0, 779);
-  const documentUrl = '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto';
+  const documentUrl = 'https://design.example.test/documents/mockup.afphoto';
   const timeEntries = [
     rowUnitEntry('entry-affinity', 'Affinity', firstStart, firstEnd, '', 71291),
     rowUnitEntry(
@@ -8080,7 +8479,7 @@ test('source-backed row units saved at coarse zoom render exact visible rows at 
   const firstEnd = at(11, 53, 26, 151);
   const secondStart = at(11, 53, 42, 347);
   const secondEnd = at(11, 56, 12, 154);
-  const documentUrl = '/Users/sil/Documents/eagle/silso.library/images/MFM5S35JSBY6C.info/leon.afphoto';
+  const documentUrl = 'https://design.example.test/documents/mockup.afphoto';
   const activities = [
     source('Affinity', firstStart, firstEnd),
     source('Affinity - leon.afphoto @ 30%', secondStart, secondEnd, documentUrl, 142014)
