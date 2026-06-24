@@ -5525,6 +5525,91 @@ function expandLoggedTimeEntryOccupancySpecs(item, activities, dateStartOfDay, z
     });
 }
 
+// Merge same project/task occupancy specs whose display-row ranges are
+// consecutive or overlapping into one block (Slice 4), unioning entry ids and
+// summing weight, regardless of the saved displayGroupKey. A gap row between two
+// runs keeps them split. Exact (1 min) geometry specs are never merged so their
+// precise sub-row sessions stay distinct.
+function mergeLoggedTimeEntryBlockSpecs(specs) {
+    const exactSpecs = specs.filter(spec => spec.renderExactGeometry);
+    const mergeableByKey = new Map();
+    specs.filter(spec => !spec.renderExactGeometry).forEach(spec => {
+        const key = `${spec.projectId ?? ''} ${spec.taskId ?? ''}`;
+        if (!mergeableByKey.has(key)) mergeableByKey.set(key, []);
+        mergeableByKey.get(key).push(spec);
+    });
+
+    const mergedSpecs = [];
+    for (const group of mergeableByKey.values()) {
+        group.sort((left, right) => left.displayRowStart - right.displayRowStart || left.displayRowEnd - right.displayRowEnd);
+        let current = null;
+        for (const spec of group) {
+            if (current && spec.displayRowStart <= current.displayRowEnd) {
+                current.displayRowStart = Math.min(current.displayRowStart, spec.displayRowStart);
+                current.displayRowEnd = Math.max(current.displayRowEnd, spec.displayRowEnd);
+                current.displayStart = Math.min(current.displayStart, spec.displayStart);
+                current.displayEnd = Math.max(current.displayEnd, spec.displayEnd);
+                current.start = Math.min(current.start, spec.start);
+                current.end = Math.max(current.end, spec.end);
+                current.entryIds = [...new Set([...current.entryIds, ...spec.entryIds])];
+                current.entries = [...current.entries, ...spec.entries];
+                current.weight += spec.weight;
+                current.isAssignedGroup = current.isAssignedGroup || spec.isAssignedGroup;
+            } else {
+                current = { ...spec, entryIds: [...spec.entryIds], entries: [...spec.entries] };
+                mergedSpecs.push(current);
+            }
+        }
+    }
+
+    return [...exactSpecs, ...mergedSpecs]
+        .sort((left, right) => left.displayRowStart - right.displayRowStart
+            || left.displayStart - right.displayStart);
+}
+
+// Assign lanes so blocks whose display-row ranges overlap render side by side.
+// Same project/task runs are already merged, so only different project/task
+// overlaps produce extra lanes.
+function assignLoggedTimeEntryBlockLanes(blocks) {
+    blocks.forEach(block => { block.laneIndex = 0; block.laneCount = 1; });
+    const intervals = blocks
+        .map((block, index) => ({ block, index, start: block.displayRowStart, end: block.displayRowEnd }))
+        .filter(interval => Number.isFinite(interval.start) && Number.isFinite(interval.end) && interval.end > interval.start)
+        .sort((left, right) => left.start - right.start || left.end - right.end || left.index - right.index);
+
+    const components = [];
+    let component = null;
+    for (const interval of intervals) {
+        if (!component || interval.start >= component.end) {
+            component = { end: interval.end, items: [] };
+            components.push(component);
+        }
+        component.items.push(interval);
+        component.end = Math.max(component.end, interval.end);
+    }
+
+    for (const current of components) {
+        if (current.items.length <= 1) continue;
+        let activeLanes = [];
+        const availableLanes = [];
+        let nextLane = 0;
+        for (const interval of current.items) {
+            const stillActive = [];
+            for (const lane of activeLanes) {
+                if (interval.start >= lane.end) availableLanes.push(lane.index);
+                else stillActive.push(lane);
+            }
+            activeLanes = stillActive;
+            availableLanes.sort((left, right) => left - right);
+            const laneIndex = availableLanes.length > 0 ? availableLanes.shift() : nextLane++;
+            interval.block.laneIndex = laneIndex;
+            activeLanes.push({ index: laneIndex, end: interval.end });
+        }
+        const laneCount = Math.max(1, nextLane);
+        current.items.forEach(interval => { interval.block.laneCount = laneCount; });
+    }
+}
+
 // Distribute each saved entry's zoom-invariant logged duration across the block
 // specs it appears in, so a split entry's blocks sum to the saved total and a
 // merged block sums its members. Proportional to each spec's weight, with the
@@ -5582,7 +5667,9 @@ function buildLoggedTimeEntryBlocks({
     const layout = rowLayout || buildFullDayTimelineRowLayout(dayStart, renderZoom);
 
     const renderItems = buildLoggedTimeEntryRenderItems(sourceEntries, renderZoom, dayStart);
-    const specs = renderItems.flatMap(item => expandLoggedTimeEntryOccupancySpecs(item, activities, dayStart, renderZoom, layout));
+    const occupancySpecs = renderItems.flatMap(item => expandLoggedTimeEntryOccupancySpecs(item, activities, dayStart, renderZoom, layout));
+    const specs = mergeLoggedTimeEntryBlockSpecs(occupancySpecs);
+    assignLoggedTimeEntryBlockLanes(specs);
     const loggedDurations = allocateLoggedTimeEntryBlockDurations(specs, sourceEntries);
 
     return specs.map((spec, index) => ({
