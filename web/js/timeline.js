@@ -5391,6 +5391,109 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
     return assignLoggedTimeEntryLanes(visibleRenderItems);
 }
 
+// The display rows a render item occupies, mapped through the active row layout
+// (identity-mapped when empty rows are not hidden).
+function getLoggedTimeEntryBlockDisplayRows(item, dateStartOfDay, zoom, rowLayout) {
+    const hasDisplayRange = Number.isFinite(item?.displayStart)
+        && Number.isFinite(item?.displayEnd)
+        && item.displayEnd > item.displayStart;
+    const rangeStart = hasDisplayRange ? item.displayStart : item.start;
+    const rangeEnd = hasDisplayRange ? item.displayEnd : item.end;
+    const sourceRange = getTimelineDisplayRowRange(rangeStart, rangeEnd, dateStartOfDay, zoom);
+    const lastSourceRow = Math.max(sourceRange.startRow, sourceRange.endRow - 1);
+    const startDisplay = getDisplayRowForSourceRow(rowLayout, sourceRange.startRow);
+    const endDisplay = getDisplayRowForSourceRow(rowLayout, lastSourceRow);
+    const displayRowStart = startDisplay >= 0 ? startDisplay : sourceRange.startRow;
+    const displayRowEnd = (endDisplay >= 0 ? endDisplay : lastSourceRow) + 1;
+    return { displayRowStart, displayRowEnd };
+}
+
+// Distribute each saved entry's zoom-invariant logged duration across the render
+// items it appears in, so a split entry's blocks sum to the saved total and a
+// merged block sums its members. Proportional to each item's projected weight,
+// with the last contribution taking the remainder so the sum stays exact.
+function allocateLoggedTimeEntryBlockDurations(renderItems, sourceEntries) {
+    const savedDurationById = new Map();
+    (Array.isArray(sourceEntries) ? sourceEntries : []).forEach(entry => {
+        if (entry?.id) savedDurationById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
+    });
+
+    const contributionsByEntryId = new Map();
+    renderItems.forEach((item, index) => {
+        const ids = [...new Set((item.entries || []).map(entry => entry?.id).filter(Boolean))];
+        if (ids.length === 0) return;
+        const projected = Number(item.durationMs);
+        const weight = (Number.isFinite(projected) && projected > 0 ? projected : 1) / ids.length;
+        ids.forEach(id => {
+            if (!contributionsByEntryId.has(id)) contributionsByEntryId.set(id, []);
+            contributionsByEntryId.get(id).push({ index, weight });
+        });
+    });
+
+    const durations = renderItems.map(() => 0);
+    for (const [id, contributions] of contributionsByEntryId) {
+        const saved = savedDurationById.get(id) || 0;
+        const totalWeight = contributions.reduce((total, contribution) => total + contribution.weight, 0);
+        let remaining = saved;
+        contributions.forEach((contribution, position) => {
+            const isLast = position === contributions.length - 1;
+            const share = (isLast || totalWeight <= 0)
+                ? remaining
+                : Math.round(saved * (contribution.weight / totalWeight));
+            durations[contribution.index] += share;
+            remaining -= share;
+        });
+    }
+    return durations;
+}
+
+// The single seam for the logged Time Entry render path: assemble saved entries
+// into block descriptors carrying the cross-zoom contract (see
+// docs/adr/0001 and docs/timeline-decisions.md 2026-06-24). The descriptor list
+// is the interface; pixels are derived from these by the templater.
+function buildLoggedTimeEntryBlocks({
+    entries = state.timeEntries,
+    activities = state.activities,
+    zoom = state.zoom,
+    dateStartOfDay = new Date(state.currentDate).setHours(0, 0, 0, 0),
+    rowLayout = null
+} = {}) {
+    const renderZoom = Math.max(1, Number(zoom) || 1);
+    const dayStart = Number.isFinite(dateStartOfDay)
+        ? dateStartOfDay
+        : new Date(state.currentDate).setHours(0, 0, 0, 0);
+    const sourceEntries = Array.isArray(entries) ? entries : [];
+    const layout = rowLayout || buildFullDayTimelineRowLayout(dayStart, renderZoom);
+
+    const renderItems = buildLoggedTimeEntryRenderItems(sourceEntries, renderZoom, dayStart);
+    const loggedDurations = allocateLoggedTimeEntryBlockDurations(renderItems, sourceEntries);
+
+    return renderItems.map((item, index) => {
+        const firstEntry = item.firstEntry || item.entries?.[0] || {};
+        const entryIds = [...new Set((item.entries || []).map(entry => entry?.id).filter(Boolean))];
+        const { displayRowStart, displayRowEnd } = getLoggedTimeEntryBlockDisplayRows(item, dayStart, renderZoom, layout);
+        return {
+            projectId: firstEntry.projectId,
+            taskId: firstEntry.taskId || '',
+            entryIds,
+            displayRowStart,
+            displayRowEnd,
+            laneIndex: Number.isFinite(item.laneIndex) ? item.laneIndex : 0,
+            laneCount: Number.isFinite(item.laneCount) ? item.laneCount : 1,
+            loggedDurationMs: loggedDurations[index],
+            // Precise display ranges + flags retained for the templater (Slice 6).
+            displayStart: item.displayStart,
+            displayEnd: item.displayEnd,
+            start: item.start,
+            end: item.end,
+            renderExactGeometry: item.renderExactGeometry === true,
+            isAssignedGroup: item.isAssignedGroup === true,
+            firstEntry,
+            entries: item.entries
+        };
+    });
+}
+
 function applyAssignmentSummaryMetadata(summary, overlap) {
     if (overlap?.assignmentSource) {
         summary.assignmentSource = overlap.assignmentSource;
@@ -7884,6 +7987,7 @@ window.buildActivityStreamAssignmentActivities = buildActivityStreamAssignmentAc
 window.buildActivityStreamSummaryAssignmentActivities = buildActivityStreamSummaryAssignmentActivities;
 window.buildActivityStreamRenderEntries = buildActivityStreamRenderEntries;
 window.buildLoggedTimeEntryRenderItems = buildLoggedTimeEntryRenderItems;
+window.buildLoggedTimeEntryBlocks = buildLoggedTimeEntryBlocks;
 window.buildUnloggedActivityGroups = buildUnloggedActivityGroups;
 window.buildUnloggedBackfillActivities = buildUnloggedBackfillActivities;
 window.renderUnloggedRecordedWorkReview = renderUnloggedRecordedWorkReview;
