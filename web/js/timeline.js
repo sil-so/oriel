@@ -5408,29 +5408,145 @@ function getLoggedTimeEntryBlockDisplayRows(item, dateStartOfDay, zoom, rowLayou
     return { displayRowStart, displayRowEnd };
 }
 
-// Distribute each saved entry's zoom-invariant logged duration across the render
-// items it appears in, so a split entry's blocks sum to the saved total and a
-// merged block sums its members. Proportional to each item's projected weight,
-// with the last contribution taking the remainder so the sum stays exact.
-function allocateLoggedTimeEntryBlockDurations(renderItems, sourceEntries) {
+// The visible-activity identity keys a source-backed item is logged against.
+// Empty for a freehand manual entry (no Activity Stream assignment).
+function getLoggedTimeEntryBlockIdentityKeys(item) {
+    const keys = new Set();
+    (Array.isArray(item?.entries) ? item.entries : []).forEach(entry => {
+        getActivityStreamAssignmentActivities(entry).forEach(activity => {
+            const key = getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
+            if (key) keys.add(key);
+        });
+    });
+    return keys;
+}
+
+// The set of source rows in [startRow, endRow) that hold visible activity
+// matching one of the identity keys.
+function getMatchingActivityRowSet(identityKeys, activities, startRow, endRow, dateStartOfDay, zoom) {
+    const occupied = new Set();
+    if (!identityKeys || identityKeys.size === 0) return occupied;
+    const rowDurationMs = Math.max(1, Number(zoom) || 1) * 60 * 1000;
+    const matching = (Array.isArray(activities) ? activities : []).filter(activity => {
+        const key = getActivitySimilarityKey(activity) || getActivitySummaryKey(activity);
+        return key && identityKeys.has(key);
+    });
+    if (matching.length === 0) return occupied;
+    for (let row = startRow; row < endRow; row++) {
+        const rowStart = dateStartOfDay + row * rowDurationMs;
+        const rowEnd = rowStart + rowDurationMs;
+        const present = matching.some(activity => Number(activity.start) < rowEnd && Number(activity.end) > rowStart);
+        if (present) occupied.add(row);
+    }
+    return occupied;
+}
+
+// Break a set of occupied rows into maximal runs of consecutive rows.
+function splitOccupiedRowsIntoRuns(occupiedRows, startRow, endRow) {
+    const runs = [];
+    let current = null;
+    for (let row = startRow; row < endRow; row++) {
+        if (occupiedRows.has(row)) {
+            if (!current) {
+                current = { startRow: row, endRow: row + 1 };
+                runs.push(current);
+            } else {
+                current.endRow = row + 1;
+            }
+        } else {
+            current = null;
+        }
+    }
+    return runs;
+}
+
+// Expand one render item into occupancy specs (Slice 3): a source-backed,
+// row-aligned item occupies only the rows where its identity has matching
+// visible activity, so it breaks into one spec per maximal matching run instead
+// of bridging a gap. Exact (1 min) geometry and freehand manual items pass
+// through as a single spec covering their saved range.
+function expandLoggedTimeEntryOccupancySpecs(item, activities, dateStartOfDay, zoom, rowLayout) {
+    const firstEntry = item.firstEntry || item.entries?.[0] || {};
+    const entryIds = [...new Set((Array.isArray(item.entries) ? item.entries : []).map(entry => entry?.id).filter(Boolean))];
+    const makeSpec = (displayRowStart, displayRowEnd, displayStart, displayEnd, weight) => ({
+        item,
+        firstEntry,
+        entries: item.entries,
+        entryIds,
+        projectId: firstEntry.projectId,
+        taskId: firstEntry.taskId || '',
+        laneIndex: Number.isFinite(item.laneIndex) ? item.laneIndex : 0,
+        laneCount: Number.isFinite(item.laneCount) ? item.laneCount : 1,
+        renderExactGeometry: item.renderExactGeometry === true,
+        isAssignedGroup: item.isAssignedGroup === true,
+        start: item.start,
+        end: item.end,
+        displayRowStart,
+        displayRowEnd,
+        displayStart,
+        displayEnd,
+        weight: Number.isFinite(weight) && weight > 0 ? weight : 1
+    });
+
+    const wholeRange = () => {
+        const { displayRowStart, displayRowEnd } = getLoggedTimeEntryBlockDisplayRows(item, dateStartOfDay, zoom, rowLayout);
+        return [makeSpec(displayRowStart, displayRowEnd, item.displayStart, item.displayEnd, Number(item.durationMs))];
+    };
+
+    const identityKeys = getLoggedTimeEntryBlockIdentityKeys(item);
+    if (item.renderExactGeometry === true || identityKeys.size === 0) {
+        return wholeRange();
+    }
+
+    const rowDurationMs = Math.max(1, Number(zoom) || 1) * 60 * 1000;
+    const hasDisplayRange = Number.isFinite(item.displayStart)
+        && Number.isFinite(item.displayEnd)
+        && item.displayEnd > item.displayStart;
+    const rangeStart = hasDisplayRange ? item.displayStart : item.start;
+    const rangeEnd = hasDisplayRange ? item.displayEnd : item.end;
+    const sourceRange = getTimelineDisplayRowRange(rangeStart, rangeEnd, dateStartOfDay, zoom);
+    const occupied = getMatchingActivityRowSet(identityKeys, activities, sourceRange.startRow, sourceRange.endRow, dateStartOfDay, zoom);
+    const runs = splitOccupiedRowsIntoRuns(occupied, sourceRange.startRow, sourceRange.endRow);
+    // No matching visible activity at all: keep the saved range as one block
+    // rather than dropping a logged entry from the timeline.
+    if (runs.length === 0) return wholeRange();
+
+    return runs.map(run => {
+        const lastRow = Math.max(run.startRow, run.endRow - 1);
+        const startDisplay = getDisplayRowForSourceRow(rowLayout, run.startRow);
+        const endDisplay = getDisplayRowForSourceRow(rowLayout, lastRow);
+        return makeSpec(
+            startDisplay >= 0 ? startDisplay : run.startRow,
+            (endDisplay >= 0 ? endDisplay : lastRow) + 1,
+            dateStartOfDay + run.startRow * rowDurationMs,
+            dateStartOfDay + run.endRow * rowDurationMs,
+            run.endRow - run.startRow
+        );
+    });
+}
+
+// Distribute each saved entry's zoom-invariant logged duration across the block
+// specs it appears in, so a split entry's blocks sum to the saved total and a
+// merged block sums its members. Proportional to each spec's weight, with the
+// last contribution taking the remainder so the sum stays exact.
+function allocateLoggedTimeEntryBlockDurations(specs, sourceEntries) {
     const savedDurationById = new Map();
     (Array.isArray(sourceEntries) ? sourceEntries : []).forEach(entry => {
         if (entry?.id) savedDurationById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
     });
 
     const contributionsByEntryId = new Map();
-    renderItems.forEach((item, index) => {
-        const ids = [...new Set((item.entries || []).map(entry => entry?.id).filter(Boolean))];
+    specs.forEach((spec, index) => {
+        const ids = Array.isArray(spec.entryIds) ? spec.entryIds : [];
         if (ids.length === 0) return;
-        const projected = Number(item.durationMs);
-        const weight = (Number.isFinite(projected) && projected > 0 ? projected : 1) / ids.length;
+        const weight = (Number.isFinite(spec.weight) && spec.weight > 0 ? spec.weight : 1) / ids.length;
         ids.forEach(id => {
             if (!contributionsByEntryId.has(id)) contributionsByEntryId.set(id, []);
             contributionsByEntryId.get(id).push({ index, weight });
         });
     });
 
-    const durations = renderItems.map(() => 0);
+    const durations = specs.map(() => 0);
     for (const [id, contributions] of contributionsByEntryId) {
         const saved = savedDurationById.get(id) || 0;
         const totalWeight = contributions.reduce((total, contribution) => total + contribution.weight, 0);
@@ -5466,32 +5582,28 @@ function buildLoggedTimeEntryBlocks({
     const layout = rowLayout || buildFullDayTimelineRowLayout(dayStart, renderZoom);
 
     const renderItems = buildLoggedTimeEntryRenderItems(sourceEntries, renderZoom, dayStart);
-    const loggedDurations = allocateLoggedTimeEntryBlockDurations(renderItems, sourceEntries);
+    const specs = renderItems.flatMap(item => expandLoggedTimeEntryOccupancySpecs(item, activities, dayStart, renderZoom, layout));
+    const loggedDurations = allocateLoggedTimeEntryBlockDurations(specs, sourceEntries);
 
-    return renderItems.map((item, index) => {
-        const firstEntry = item.firstEntry || item.entries?.[0] || {};
-        const entryIds = [...new Set((item.entries || []).map(entry => entry?.id).filter(Boolean))];
-        const { displayRowStart, displayRowEnd } = getLoggedTimeEntryBlockDisplayRows(item, dayStart, renderZoom, layout);
-        return {
-            projectId: firstEntry.projectId,
-            taskId: firstEntry.taskId || '',
-            entryIds,
-            displayRowStart,
-            displayRowEnd,
-            laneIndex: Number.isFinite(item.laneIndex) ? item.laneIndex : 0,
-            laneCount: Number.isFinite(item.laneCount) ? item.laneCount : 1,
-            loggedDurationMs: loggedDurations[index],
-            // Precise display ranges + flags retained for the templater (Slice 6).
-            displayStart: item.displayStart,
-            displayEnd: item.displayEnd,
-            start: item.start,
-            end: item.end,
-            renderExactGeometry: item.renderExactGeometry === true,
-            isAssignedGroup: item.isAssignedGroup === true,
-            firstEntry,
-            entries: item.entries
-        };
-    });
+    return specs.map((spec, index) => ({
+        projectId: spec.projectId,
+        taskId: spec.taskId,
+        entryIds: spec.entryIds,
+        displayRowStart: spec.displayRowStart,
+        displayRowEnd: spec.displayRowEnd,
+        laneIndex: spec.laneIndex,
+        laneCount: spec.laneCount,
+        loggedDurationMs: loggedDurations[index],
+        // Precise display ranges + flags retained for the templater (Slice 6).
+        displayStart: spec.displayStart,
+        displayEnd: spec.displayEnd,
+        start: spec.start,
+        end: spec.end,
+        renderExactGeometry: spec.renderExactGeometry,
+        isAssignedGroup: spec.isAssignedGroup,
+        firstEntry: spec.firstEntry,
+        entries: spec.entries
+    }));
 }
 
 function applyAssignmentSummaryMetadata(summary, overlap) {
