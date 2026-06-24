@@ -137,3 +137,50 @@ Costs / risks / follow-ups:
 
 The behavioral contract is recorded in `docs/timeline-decisions.md`
 (2026-06-24). Implementation slices are tracked in sil-so/oriel#67.
+
+## Addendum (2026-06-24): the detail side-map is retained, not deleted
+
+Decision point 5 ("delete the detail side-map") was re-evaluated against the
+running code once the rest of the contract was implemented, and **reversed**:
+the side-map stays. The deletion test rested on a premise that turned out to be
+true for only half the cases.
+
+- **The premise held for coarse/merged blocks.** There, one block maps to one or
+  more whole saved entries, and `entryIds -> state.timeEntries` reconstructs the
+  Edit breakdown and the scoped-save data faithfully.
+- **The premise failed for exact `1 min` blocks.** At `1 min` a single saved
+  entry fans out into *several* projection blocks, and each block's Edit panel
+  shows a *different* render-derived source child — not the saved entry's
+  activities. Those blocks all carry identical `entryIds`, so
+  `entryIds -> state.timeEntries` cannot tell them apart; it can only return the
+  whole saved entry. The per-projection breakdown is genuinely render-derived and
+  does not live in `state.timeEntries`. (Pinned by the existing test "logged time
+  entries keep exact source projections... open edit scoped to the clicked
+  projection".)
+
+So the side-map is not the "fragile indirection, not a responsibility" the
+deletion test assumed: at exact zoom it carries a real responsibility. Deleting
+it would have required either re-encoding that render-derived payload back into
+the DOM (against the 2026-06-10 performance decision, which deliberately moved
+detail population to render time behind a small key) or re-running the projection
+inside the edit handler (duplicating the seam's logic in a second place, against
+this ADR's own *locality* goal). Both are worse than keeping the map.
+
+The bug that originally motivated the deletion — the merged pill and its Edit
+panel disagreeing (#4a) — is already fixed by the **duration contract** (the pill
+now reads `loggedDurationMs` from the same model the Edit panel resolves). The
+side-map is no longer implicated in any reproduced bug, so retaining it costs no
+correctness.
+
+`renderLoggedTimeEntries` therefore keeps registering per-block detail at render
+time; it is a templater plus that one render-time registration, not a fully pure
+templater. A latent fragility remains (the positional `time-entry-detail-${n}`
+key read back through the single-slot model cache with no fallback); it is not
+triggered today because the map and the DOM are built together and the model is
+keyed on `state.timeEntries`. If it ever needs hardening, the cheap
+behavior-preserving move is a content-derived key (`entryIds` + block range) with
+a DOM fallback — the "harden it" alternative above — rather than deletion.
+
+The other four decisions (duration contract, one row-grid predicate, occupancy by
+type, geometry regimes) and all six contract invariants are implemented and
+hold; only this fifth structural deletion was withdrawn.
