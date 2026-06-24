@@ -201,12 +201,12 @@ function getDayTimelineRenderModel({
     const dayStart = Number.isFinite(dateStartOfDay)
         ? dateStartOfDay
         : new Date(state.currentDate).setHours(0,0,0,0);
-    const ownershipActivities = Array.isArray(state.timelineActivities)
+    const ownershipActivities = getActivityStreamRenderableActivities(Array.isArray(state.timelineActivities)
         ? state.timelineActivities
-        : state.activities;
-    const visibleActivities = Array.isArray(state.activities)
+        : state.activities);
+    const visibleActivities = getActivityStreamRenderableActivities(Array.isArray(state.activities)
         ? state.activities
-        : ownershipActivities;
+        : ownershipActivities);
     const timeEntries = Array.isArray(state.timeEntries) ? state.timeEntries : [];
     const signature = {
         dateStartOfDay: dayStart,
@@ -1784,8 +1784,30 @@ function getMatchingActivitySourceRanges(overlaps, summaryKey) {
         .sort((left, right) => left.start - right.start || left.end - right.end);
 }
 
+function getCoarseCellIdentityPresenceMs(cell, summaryKey) {
+    if (!cell || !summaryKey) return 0;
+    const start = Number(cell.start);
+    const end = Number(cell.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+
+    return (Array.isArray(cell.overlaps) ? cell.overlaps : [])
+        .filter(row => getActivitySummaryKey(row) === summaryKey)
+        .reduce((total, row) => total + getCanonicalActivityStreamPlacementDuration(row, start, end), 0);
+}
+
 function hasContinuousMatchingActivityAcrossBoundary(currentBlock, nextCell) {
     if (!currentBlock || !nextCell || currentBlock.summaryKey !== nextCell.summaryKey) return false;
+
+    // Merge a contiguous run of the same activity identity into ONE Activity
+    // Stream block when that identity fills the next coarse row (>= the
+    // visible-duration threshold, 60s) AND there is no long idle gap across the
+    // boundary. The gap tolerance is one row's worth of time, so the split
+    // granularity follows the zoom's row size: coarser zoom merges across bigger
+    // gaps (one block to batch-assign), finer zoom splits more (granular assign).
+    // Two genuinely separate runs of the same app stay split.
+    if (getCoarseCellIdentityPresenceMs(nextCell, nextCell.summaryKey) < ACTIVITY_STREAM_MIN_VISIBLE_DURATION_MS) {
+        return false;
+    }
 
     const currentRanges = getMatchingActivitySourceRanges(currentBlock.overlaps, currentBlock.summaryKey);
     const nextRanges = getMatchingActivitySourceRanges(nextCell.overlaps, nextCell.summaryKey);
@@ -1793,7 +1815,12 @@ function hasContinuousMatchingActivityAcrossBoundary(currentBlock, nextCell) {
 
     const currentEnd = Math.max(...currentRanges.map(range => range.end));
     const nextStart = Math.min(...nextRanges.map(range => range.start));
-    return nextStart <= currentEnd + ACTIVITY_STREAM_SESSION_MERGE_GAP_MS;
+    const rowDurationMs = Number(nextCell.end) - Number(nextCell.start);
+    const gapToleranceMs = Math.max(
+        ACTIVITY_STREAM_SESSION_MERGE_GAP_MS,
+        Number.isFinite(rowDurationMs) && rowDurationMs > 0 ? rowDurationMs : 0
+    );
+    return nextStart <= currentEnd + gapToleranceMs;
 }
 
 function subtractTimelineRanges(baseRanges, blockerRanges) {
@@ -2446,6 +2473,18 @@ function getBreakdownDisplayDurationMs(displayOverlaps, fallbackOverlaps) {
     return getActivityDurationTotalMs(fallbackOverlaps);
 }
 
+// Sum a coarse block's own (primary) identity duration from its summarized,
+// source-deduped, span-clipped overlaps — ignoring concurrent secondary
+// identities so the pill reflects only the run the block represents.
+function getCoarsePrimaryIdentityDurationMs(summaryOverlaps, primaryKey) {
+    if (!primaryKey) return 0;
+    return (Array.isArray(summaryOverlaps) ? summaryOverlaps : []).reduce((total, summary) => {
+        if (getActivitySummaryKey(summary) !== primaryKey) return total;
+        const duration = Number(summary?.duration);
+        return Number.isFinite(duration) && duration > 0 ? total + duration : total;
+    }, 0);
+}
+
 function formatActivityDurationLabel(totalMs, minimumSeconds = 0) {
     if (totalMs >= 60000) {
         return `${Math.round(totalMs / 60000)} min`;
@@ -2611,6 +2650,25 @@ function getActivitySimilarityKey(activity) {
     const app = normalizeActivityText(activity.app).trim().toLowerCase();
     const host = getActivityUrlHostname(normalizeActivityText(activity.url));
     return host ? `${app}|||${host}` : app;
+}
+
+// The Activity Stream (rows + multi-activity popups) must match what actually gets
+// logged: the logged side drops isolated sub-minute auto-rule runs as context-switch
+// noise, so the captured side drops the same runs. Keyed by the session/host identity
+// (getActivitySimilarityKey) so a browser host whose sub-minute page visits aggregate
+// to a >=60s run is kept (issue #63), while a native app's isolated sub-minute bursts
+// (e.g. stray Codex blips) are removed. Memoized per source array so the day render
+// model cache (which keys on these list references) is not thrashed.
+const activityStreamRenderableCache = new WeakMap();
+function getActivityStreamRenderableActivities(activities) {
+    if (!Array.isArray(activities)) return activities;
+    if (typeof filterIsolatedSubMinuteRuns !== 'function') return activities;
+    if (activityStreamRenderableCache.has(activities)) {
+        return activityStreamRenderableCache.get(activities);
+    }
+    const result = filterIsolatedSubMinuteRuns(activities, { keyFn: getActivitySimilarityKey });
+    activityStreamRenderableCache.set(activities, result);
+    return result;
 }
 
 function normalizeActivityExactUrl(value) {
@@ -3156,7 +3214,20 @@ function getRenderedTimeEntryDurationMs(entry) {
     }
 
     if (entry?.createdBy === 'manual') {
-        return Math.max(0, (entry?.end || 0) - (entry?.start || 0));
+        // A drag/manual entry whose activities carry assigned durations is logged
+        // BY those activities (issue #60): its pill must show the summed logged
+        // duration — the same value Work Times (getTimeEntryDurationMs) and the Edit
+        // modal already use — not the elapsed drag span. A plain manual block with no
+        // assigned activity durations still falls back to its span.
+        const assignedDurationMs = Array.isArray(entry?.activities)
+            ? entry.activities.reduce((total, activity) => {
+                const duration = Number(activity?.assignedDurationMs);
+                return total + (Number.isFinite(duration) && duration > 0 ? duration : 0);
+            }, 0)
+            : 0;
+        return assignedDurationMs > 0
+            ? assignedDurationMs
+            : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
     }
 
     if (typeof getTimeEntryDurationMs === 'function') {
@@ -4160,12 +4231,14 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(
             const exactEnd = Math.min(range.end, block.end);
             if (exactEnd <= exactStart) continue;
 
+            const savedDurationMs = getSourceBackedAssignmentSavedDurationMs(activity, range);
             projections.push({
                 displayStart: block.start,
                 displayEnd: block.end,
                 exactStart,
                 exactEnd,
-                durationMs: sourceBackedProjection.durationMs,
+                durationMs: savedDurationMs,
+                sourceBackedRawDurationMs: sourceBackedProjection.durationMs,
                 displayRepairKey: `${getSourceBackedAssignmentProjectionKey(activity, summaryKey)}|||sources|||${block.start}|||${block.end}`,
                 modalActivities: sourceBackedProjection.modalActivities,
                 sourceBacked: true,
@@ -4203,6 +4276,22 @@ function buildActivityStreamSummaryAssignmentDisplayProjections(
             displayRepairKey: `${summaryKey}|||${block.start}|||${block.end}`
         });
     }
+
+    const sourceBackedProjections = projections.filter(projection => projection.sourceBacked === true);
+    if (sourceBackedProjections.length > 1) {
+        const savedDurationMs = getSourceBackedAssignmentSavedDurationMs(activity, range);
+        const allocations = allocateRoundedMinuteDurations(
+            sourceBackedProjections,
+            savedDurationMs,
+            projection => projection.sourceBackedRawDurationMs
+        );
+        sourceBackedProjections.forEach(projection => {
+            projection.durationMs = allocations.get(projection) ?? projection.durationMs;
+        });
+    }
+    sourceBackedProjections.forEach(projection => {
+        delete projection.sourceBackedRawDurationMs;
+    });
 
     return {
         projections,
@@ -4257,6 +4346,9 @@ function buildActivityStreamSummaryAssignmentRenderEntries(entry, activity, rang
             start: projection.exactStart,
             end: projection.exactEnd,
             duration: projection.durationMs,
+            assignedDurationMs: projection.sourceBacked === true
+                ? projection.durationMs
+                : activity.assignedDurationMs,
             assignmentStart: projection.exactStart,
             assignmentEnd: projection.exactEnd,
             assignmentDisplayGroupKey: options.rowScopedDisplayGroups && repairKey ? repairKey : '',
@@ -4327,7 +4419,10 @@ function buildActivityStreamRenderEntries(entry, dateStartOfDay, zoom = state.zo
     const assignmentActivities = getActivityStreamAssignmentActivities(entry);
     if (assignmentActivities.length === 0) return [entry];
     if (shouldRenderManualSummaryAssignmentFromSavedRange(entry, assignmentActivities)) {
-        return [{ ...entry, renderManualSavedRange: true }];
+        const loggedDurationMs = assignmentActivities.reduce((total, activity) => (
+            total + getSourceBackedAssignmentSavedDurationMs(activity, getAssignmentActivityRange(entry, activity))
+        ), 0);
+        return [{ ...entry, renderManualSavedRange: true, renderDurationMs: loggedDurationMs }];
     }
 
     const sourceBackedUnitMetadataByKey = buildSourceBackedAssignmentUnitMetadata(entry, assignmentActivities);
@@ -5039,9 +5134,61 @@ function buildAutoRuleDisplayRangeGroups(sortedEntries) {
         });
 }
 
+// Keeps auto-rule entries only when they belong to a gap-separated run whose
+// summed logged duration reaches the minimum render duration. Isolated
+// sub-minute captures (context-switch noise) are dropped so coarse merges and
+// totals match what the 1 min zoom already renders. The clustering mirrors
+// buildAutoRuleExactFragmentItems so every zoom level agrees.
+function filterAutoRuleEntriesToRenderableRuns(groupEntries) {
+    const items = (Array.isArray(groupEntries) ? groupEntries : [])
+        .map(groupEntry => {
+            const exactRange = getAutoRuleExactRange(groupEntry.entry);
+            const exactStart = exactRange?.start ?? groupEntry.entry?.start;
+            const exactEnd = exactRange?.end ?? groupEntry.entry?.end;
+            if (!Number.isFinite(exactStart) || !Number.isFinite(exactEnd) || exactEnd <= exactStart) {
+                return null;
+            }
+            return {
+                groupEntry,
+                exactStart,
+                exactEnd,
+                durationMs: getRenderedTimeEntryDurationMs(groupEntry.entry)
+            };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.exactStart - right.exactStart || left.exactEnd - right.exactEnd);
+
+    const renderable = [];
+    let current = null;
+    const flushCurrent = () => {
+        if (!current) return;
+        const totalMs = current.items.reduce((total, item) => total + item.durationMs, 0);
+        if (totalMs >= LOGGED_TIME_ENTRY_MIN_RENDER_DURATION_MS) {
+            renderable.push(...current.items.map(item => item.groupEntry));
+        }
+        current = null;
+    };
+
+    for (const item of items) {
+        const gapMs = current ? item.exactStart - current.end : Number.POSITIVE_INFINITY;
+        if (!current || gapMs > ACTIVITY_STREAM_SESSION_MERGE_GAP_MS) {
+            flushCurrent();
+            current = { end: item.exactEnd, items: [item] };
+            continue;
+        }
+        current.items.push(item);
+        current.end = Math.max(current.end, item.exactEnd);
+    }
+    flushCurrent();
+
+    return renderable;
+}
+
 function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom, timeEntries = []) {
+    const renderableEntries = filterAutoRuleEntriesToRenderableRuns(groupEntries);
+    if (renderableEntries.length === 0) return [];
     if (shouldRenderExactActivityStreamSessions(zoom)) {
-        return buildAutoRuleExactFragmentItems(groupEntries);
+        return buildAutoRuleExactFragmentItems(renderableEntries);
     }
 
     const visibleActivityCells = shouldRenderExactActivityStreamSessions(zoom)
@@ -5054,7 +5201,7 @@ function buildAutoRuleRowAggregatedItems(groupEntries, dateStartOfDay, zoom, tim
             timeEntries: Array.isArray(timeEntries) ? timeEntries : [],
             canonicalMembership: true
         });
-    const sortedEntries = groupEntries
+    const sortedEntries = renderableEntries
         .flatMap(({ entry, sourceIndex }) => {
             const exactRange = getAutoRuleExactRange(entry);
             const exactStart = exactRange?.start ?? entry.start;
@@ -5195,7 +5342,33 @@ function buildLoggedTimeEntryRenderItems(entries, zoom, dateStartOfDay) {
         }
     }
 
+    // Coarse auto-rule blocks are geometry-segmented (clipped to the cells where
+    // the identity is visible), which undercounts their logged duration. The pill
+    // must show the full logged duration (issue #60), so derive it from the
+    // distinct original time entries the block represents (by id), attributing each
+    // original entry to a single block in display order so none is double counted.
+    const originalEntriesById = new Map(
+        (Array.isArray(entries) ? entries : []).map(entry => [entry.id, entry]).filter(([id]) => id)
+    );
+    const countedAutoRuleEntryIds = new Set();
+    const autoRuleAssignmentItems = assignmentItems
+        .filter(item => (item.entries || []).some(isAutoRuleExactTimeEntry))
+        .sort((left, right) => (left.displayStart || left.start || 0) - (right.displayStart || right.start || 0));
+    for (const item of autoRuleAssignmentItems) {
+        const ownEntryIds = [...new Set((item.entries || []).map(entry => entry?.id).filter(Boolean))]
+            .filter(id => !countedAutoRuleEntryIds.has(id));
+        ownEntryIds.forEach(id => countedAutoRuleEntryIds.add(id));
+        const originals = ownEntryIds.map(id => originalEntriesById.get(id)).filter(Boolean);
+        // Sequential auto-rule entries never overlap, so the honest logged
+        // duration is the plain sum of their assigned durations — identical to
+        // Work Times (getSelectedPeriodTimeEntryDurationMs) and the edit modal.
+        item.durationMs = originals.length > 0
+            ? originals.reduce((total, entry) => total + getRenderedTimeEntryDurationMs(entry), 0)
+            : getAutoRuleExactAssignedDurationMs(item.entries);
+    }
+
     for (const item of assignmentItems) {
+        if (Number.isFinite(item.durationMs)) continue;
         item.durationMs = item.entries.some(isAutoRuleExactTimeEntry)
             ? getAutoRuleExactAssignedDurationMs(item.entries)
             : getActivityStreamAssignedDurationMs(item.entries);
@@ -5523,7 +5696,14 @@ function summarizePopupActivityOverlaps(overlaps, rangeStart, rangeEnd) {
         const clippedEnd = Number.isFinite(overlap.end) && Number.isFinite(rangeEnd)
             ? Math.min(overlap.end, rangeEnd)
             : overlap.end;
-        const clippedDuration = getActivitySourceDuration(overlap, rangeStart, rangeEnd);
+        // Clip the breakdown duration to THIS block's span. Coarse canonical rows carry
+        // their whole-session assignedDurationMs/duration, so a session spanning two
+        // blocks would otherwise show its full time in BOTH popups (issue #1 — read as
+        // 2×). getCanonicalActivityStreamPlacementDuration sums each source clipped to
+        // [rangeStart, rangeEnd] (falling back to the row itself), so each block shows
+        // only its own portion. A session is still revealed wherever it reaches the
+        // visible threshold in-block (issue #63 preserved).
+        const clippedDuration = getCanonicalActivityStreamPlacementDuration(overlap, rangeStart, rangeEnd);
         const clippedMix = getActivityMixInRange(overlap, rangeStart, rangeEnd);
 
         if (sourceKey) {
@@ -6089,7 +6269,23 @@ function createActivityBlockHTML(block, rowLayout = null) {
         activeDurationMs: block.activeDurationMs,
         zoom: state.zoom
     });
-    const displayActivity = getTimelineBlockDisplayActivity(rawPrimaryActivity, popupDisplayModel);
+    let displayActivity = getTimelineBlockDisplayActivity(rawPrimaryActivity, popupDisplayModel);
+    // A coarse Activity Stream block represents one identity (its clipped primary).
+    // The shared title resolver can borrow a longer-titled CONCURRENT identity when
+    // the primary has a bare app-name title (e.g. "Codex" loses its label to a
+    // YouTube tab sharing the cells). Snap the label back to the block's own
+    // identity. We only block swaps to a different APP (so within-app page-title
+    // refinement, e.g. a blank native row borrowing its own meaningful document
+    // title, is preserved) so the title and the pill describe the same run.
+    const appIdentityKey = activity => `${normalizeActivityText(activity?.app).toLowerCase()}|||${normalizeActivityText(activity?.bundleId).toLowerCase()}`;
+    const primaryAppKey = appIdentityKey(rawPrimaryActivity);
+    if (preserveCanonicalRows && !isSessionBlock
+        && appIdentityKey(displayActivity) !== primaryAppKey) {
+        const primaryRowMatch = (popupDisplayModel.visibleRows || [])
+            .find(row => appIdentityKey(row) === primaryAppKey);
+        displayActivity = (primaryRowMatch && getSinglePopupDisplayActivity(primaryRowMatch))
+            || rawPrimaryActivity;
+    }
     const displayLabels = getPopupActivityDisplayLabels(displayActivity);
     const displayApp = normalizeActivityText(displayActivity.app || app);
     const displayTitleSource = normalizeActivityText(displayActivity.title || displayLabels.primary || title);
@@ -6159,8 +6355,18 @@ function createActivityBlockHTML(block, rowLayout = null) {
     const fallbackDurationMs = blockEnd - blockStart;
     const actualDurationMs = getActivityDurationTotalMs(summaryOverlaps) || fallbackDurationMs;
     const isMultipleActivityBlock = popupDisplayModel.isMultiple || detailOverlaps.length > 1;
+    // A coarse Activity Stream block represents one identity's contiguous run.
+    // Its pill is that identity's own deduped time across the block span — never
+    // the sum of concurrent secondary identities sharing the cells, and never a
+    // per-cell duplicate of a run that spans multiple cells. summarizeActivityOverlaps
+    // already dedupes by source and clips to [blockStart, blockEnd].
+    const primaryIdentityDurationMs = (preserveCanonicalRows && !isSessionBlock)
+        ? getCoarsePrimaryIdentityDurationMs(summaryOverlaps, block.summaryKey)
+        : 0;
     const displayDurationMs = Number.isFinite(block.activeDurationMs) && block.activeDurationMs > 0
         ? block.activeDurationMs
+        : primaryIdentityDurationMs > 0
+        ? primaryIdentityDurationMs
         : isMultipleActivityBlock
         ? (getBreakdownDisplayDurationMs(popupDisplayModel.visibleRows, summaryOverlaps) || actualDurationMs)
         : actualDurationMs;

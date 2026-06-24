@@ -475,6 +475,19 @@ function extractActivityStyles(html) {
     });
 }
 
+function extractActivityBlocks(html) {
+  return html.split(/<div class="activity-block /).slice(1).map(chunk => {
+    const app = (chunk.match(/data-app="([^"]*)"/) || [])[1] || '';
+    const startMs = Number((chunk.match(/data-start-ms="([^"]*)"/) || [])[1]);
+    const endMs = Number((chunk.match(/data-end-ms="([^"]*)"/) || [])[1]);
+    const title = (chunk.match(/class="activity-block__title">([^<]*)</) || [])[1] || '';
+    const pill = [...chunk.matchAll(/duration-pill[^"]*"[^>]*>\s*([^<]*?)\s*</g)]
+      .map(match => match[1].trim())
+      .find(value => value && !value.startsWith('+')) || '';
+    return { app, startMs, endMs, title, pill };
+  });
+}
+
 async function refreshActivities({ rawActivities, thresholdSeconds }) {
   const context = {
     window: {},
@@ -1216,6 +1229,50 @@ test('aggregated browser session with a short display page stays represented acr
     const title = String(row.title || '').trim().toLowerCase();
     assert.notEqual(title, 'shop.example.test', 'no host-only parent row');
   });
+});
+
+test('coarse Activity Stream popup clips a cell-spanning session to the block span', () => {
+  // Regression for issue #1: a canonical session that spans two coarse blocks
+  // carries its WHOLE-session assignedDurationMs/duration in each block's
+  // overlaps. The popup breakdown must show only the portion inside THAT block,
+  // so the same 15-min run is not reported as 15 + 15 (read as 2x). The clipped
+  // portions sum back to the session total, and each in-block portion still
+  // clears the visible threshold so the session stays represented (issue #63).
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const jazzStart = at(10, 23);
+  const jazzEnd = at(10, 38); // 15-min session crossing the 10:25 boundary
+  const jazzRow = {
+    app: 'Brave Browser',
+    title: 'quiet house jazz for deep concentration',
+    url: 'https://youtube.com/watch?v=jazz',
+    start: jazzStart,
+    end: jazzEnd,
+    duration: jazzEnd - jazzStart,
+    assignedDurationMs: jazzEnd - jazzStart
+  };
+  const sumVisibleRowDurations = popup => popup.visibleRows.reduce(
+    (total, row) => total + (Number(row.duration) || 0), 0
+  );
+
+  const popupA = context.buildActivityPopupDisplayModel({
+    overlaps: [jazzRow], rangeStart: at(10, 20), rangeEnd: at(10, 25),
+    primaryActivity: jazzRow, zoom: 5
+  });
+  const popupB = context.buildActivityPopupDisplayModel({
+    overlaps: [jazzRow], rangeStart: at(10, 25), rangeEnd: at(10, 40),
+    primaryActivity: jazzRow, zoom: 5
+  });
+
+  // 10:23-10:25 = 2 min in block A; 10:25-10:38 = 13 min in block B.
+  assert.equal(Math.round(sumVisibleRowDurations(popupA) / 60000), 2);
+  assert.equal(Math.round(sumVisibleRowDurations(popupB) / 60000), 13);
+  // The two clipped portions sum to the session total (15), not 2x15.
+  assert.equal(
+    Math.round((sumVisibleRowDurations(popupA) + sumVisibleRowDurations(popupB)) / 60000),
+    15
+  );
 });
 
 test('coarse Activity Stream popup preserves repeated canonical row units in timeline order', () => {
@@ -2777,6 +2834,47 @@ test('same project auto-rule entries merge across adjacent display rows', () => 
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
 });
 
+test('coarse auto-rule merge excludes sub-minute runs so totals match across zooms', () => {
+  // Mirrors the real "App Name contains Codex" auto-rule case: a continuous run
+  // (gaps < 15s) totalling 7 min, a separate >=60s entry (1 min), and several
+  // isolated sub-minute blips. 1-min zoom already hides the blips; coarse zoom
+  // and Work Times must do the same so every surface shows the same logged
+  // total (8 min), not the noise-inflated 10 min.
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const ranges = [
+    [at(10, 0, 0), at(10, 0, 30)], // isolated 30s blip -> dropped
+    [at(10, 1, 0), at(10, 4, 0)], // run A part 1 (180s)
+    [at(10, 4, 10), at(10, 6, 10)], // run A part 2 (120s, 10s gap)
+    [at(10, 6, 20), at(10, 8, 20)], // run A part 3 (120s, 10s gap) -> run total 420s
+    [at(10, 9, 0), at(10, 9, 40)], // isolated 40s blip -> dropped
+    [at(10, 10, 30), at(10, 11, 30)], // isolated 60s entry -> kept (1 min)
+    [at(10, 12, 0), at(10, 12, 35)] // isolated 35s blip -> dropped
+  ];
+  const timeEntries = ranges.map(([start, end], index) => (
+    makeAutoRuleEntry({ id: `entry-auto-${index + 1}`, start, end })
+  ));
+  const activities = ranges.map(([start, end]) => codexActivity(start, end));
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects,
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    // Run A (7 min) + the isolated 60s entry (1 min) = 8 min. The three
+    // sub-minute blips never count.
+    assert.equal(
+      sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)),
+      8,
+      `${zoom} min logged total`
+    );
+  }
+});
+
 test('auto-rule capture fragments at five-minute zoom render as a row summary', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const projects = [{ id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' }];
@@ -2858,7 +2956,10 @@ test('auto-rule coarse summaries do not bridge through hidden canonical row gaps
     end: dateStart + (13 * 60 + 45) * 60 * 1000,
     zoom: 5
   }), 'later canonical auto-rule summary');
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min', '1 min']);
+  // The later entry is logged 13:39:20–13:41:20 (2 min). Its block geometry is
+  // clipped to the visible 13:40–13:45 cell (the 13:35–13:40 cell is Oriel-owned),
+  // but the pill shows the full logged duration, not the clipped span (issue #60).
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min', '2 min']);
 });
 
 test('auto-rule projection skips one-minute rows without matching breakdown activity', () => {
@@ -3137,15 +3238,18 @@ test('auto-rule secondary snippets stay hidden until their row group reaches one
   assert.deepEqual(extractTimeEntryDurationLabels(visibleHtml), ['1 min']);
 });
 
-test('auto-rule secondary row aggregates separated visible snippets before threshold filtering', () => {
+test('auto-rule secondary row drops separated sub-minute snippets below the run threshold', () => {
+  // Scattered auto-rule captures that never form a continuous run reaching the
+  // minimum render duration are noise: 1 min zoom already hides them, and coarse
+  // zoom must do the same so totals stay consistent across zooms. None of these
+  // snippets is within 15s of another, so each is its own sub-minute run and all
+  // are dropped at every zoom.
   const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
   const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
   const rowStart = dateStart + (5 * 60 + 15) * 60 * 1000;
   const rowEnd = rowStart + 15 * 60 * 1000;
   const ranges = [
     [rowStart + 44 * 1000, rowStart + 57 * 1000],
-    [rowStart + 65 * 1000, rowStart + 70 * 1000],
-    [rowStart + 73 * 1000, rowStart + 81 * 1000],
     [rowStart + 2 * 60 * 1000 + 19 * 1000, rowStart + 2 * 60 * 1000 + 27 * 1000],
     [rowStart + 3 * 60 * 1000 + 41 * 1000, rowStart + 3 * 60 * 1000 + 51 * 1000],
     [rowStart + 4 * 60 * 1000 + 15 * 1000, rowStart + 4 * 60 * 1000 + 19 * 1000],
@@ -3162,33 +3266,17 @@ test('auto-rule secondary row aggregates separated visible snippets before thres
     projectId: project.id
   }));
 
-  const activityHtml = renderMemoryAidHtml({
-    zoom: 15,
-    projects: [project],
-    activities,
-    timeEntries,
-    currentDate: new Date(dateStart)
-  });
-  const entryHtml = renderLoggedTimeEntriesHtml({
-    zoom: 15,
-    projects: [project],
-    activities,
-    timeEntries,
-    currentDate: new Date(dateStart)
-  });
-  const activityStyles = extractActivityStyles(activityHtml);
-  const entryStyles = extractEntryStyles(entryHtml);
-
-  assert.equal(activityStyles.length, 1);
-  assert.equal(entryStyles.length, 1);
-  assertStyleMatchesRowGeometry(entryStyles[0], expectedRowGeometry({
-    dateStart,
-    start: rowStart,
-    end: rowEnd,
-    zoom: 15
-  }), 'secondary row-level auto-rule summary');
-  assert.deepEqual(extractTimeEntryDurationLabels(entryHtml), ['1 min']);
-  assert.deepEqual(extractGroupedEntryIds(entryHtml), timeEntries.map(entry => entry.id));
+  for (const zoom of [1, 5, 10, 15]) {
+    const entryHtml = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    assert.equal(extractEntryStyles(entryHtml).length, 0, `${zoom} min should render no auto-rule block`);
+    assert.deepEqual(extractTimeEntryDurationLabels(entryHtml), [], `${zoom} min duration labels`);
+  }
 });
 
 test('auto-rule row below visible threshold stays hidden and does not preserve compressed rows', () => {
@@ -3242,11 +3330,11 @@ test('adjacent visible secondary auto-rule rows merge after row-level aggregatio
   const firstRowStart = dateStart + (6 * 60) * 60 * 1000;
   const secondRowStart = firstRowStart + 15 * 60 * 1000;
   const secondRowEnd = secondRowStart + 15 * 60 * 1000;
+  // Each row carries one continuous >=60s auto-rule run so it survives the run
+  // threshold; the two adjacent secondary rows then merge into one block.
   const ranges = [
-    [firstRowStart + 60 * 1000, firstRowStart + 90 * 1000],
-    [firstRowStart + 4 * 60 * 1000, firstRowStart + 4 * 60 * 1000 + 35 * 1000],
-    [secondRowStart + 60 * 1000, secondRowStart + 90 * 1000],
-    [secondRowStart + 5 * 60 * 1000, secondRowStart + 5 * 60 * 1000 + 35 * 1000]
+    [firstRowStart + 60 * 1000, firstRowStart + 120 * 1000],
+    [secondRowStart + 60 * 1000, secondRowStart + 120 * 1000]
   ];
   const activities = [
     orielActivity(firstRowStart, secondRowStart),
@@ -3284,9 +3372,9 @@ test('secondary visible auto-rule rows align with Activity Stream row geometry',
   const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
   const rowStart = dateStart + (7 * 60 + 15) * 60 * 1000;
   const rowEnd = rowStart + 15 * 60 * 1000;
+  // One continuous >=60s run so the secondary row survives the run threshold.
   const ranges = [
-    [rowStart + 2 * 60 * 1000, rowStart + 2 * 60 * 1000 + 35 * 1000],
-    [rowStart + 9 * 60 * 1000, rowStart + 9 * 60 * 1000 + 35 * 1000]
+    [rowStart + 2 * 60 * 1000, rowStart + 2 * 60 * 1000 + 60 * 1000]
   ];
   const activities = [
     orielActivity(rowStart, rowEnd),
@@ -4062,7 +4150,7 @@ test('weak native summary assignments project to dominant same-app document rows
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
 });
 
-test('native popup summary assignments render the saved manual entry duration', () => {
+test('native popup summary assignments render the saved logged duration', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const atMs = (hours, minutes, seconds = 0, ms = 0) => (
     dateStart + (((hours * 60 + minutes) * 60 + seconds) * 1000) + ms
@@ -4262,7 +4350,8 @@ test('native popup summary assignments render the saved manual entry duration', 
     end: rangeEnd,
     zoom: 10
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['30 min']);
+  // Logged duration (assignedDurationMs 897674 -> 15 min), not the 30 min span.
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
 });
 
 test('cross-zoom assignment blocks use standard styling and never overlap at any zoom level', () => {
@@ -5315,7 +5404,7 @@ test('legacy activity-stream assignment envelopes render on display rows at ever
   }
 });
 
-test('manual summary assignments with stale auto-rule flags render saved manual duration', () => {
+test('manual summary assignments with stale auto-rule flags render saved logged duration', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const at = (hours, minutes) => dateStart + (hours * 60 + minutes) * 60 * 1000;
   const rangeStart = at(21, 40);
@@ -5387,7 +5476,8 @@ test('manual summary assignments with stale auto-rule flags render saved manual 
 
   const html = renderLoggedTimeEntriesHtml({ timeEntries, projects, zoom: 10, activities });
 
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['30 min']);
+  // Logged duration (14 min + 1 min assigned -> 15 min), not the 30 min span.
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
 });
 
 test('activity-stream assignment block without description renders project on the primary row', () => {
@@ -7344,6 +7434,64 @@ test('coarse Activity Stream same-app rows split when source activity is not con
   );
 });
 
+test('coarse Activity Stream merges a contiguous same-app run across a sub-row gap into one block', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  // One continuous Codex work run, internally split by a 60s gap (longer than
+  // the 15s session-merge gap, shorter than a 5-min row) and spanning four
+  // 5-min cells. The user assigns it as one block at coarse zoom.
+  const activities = [
+    codexActivity(at(13, 0), at(13, 10)),
+    codexActivity(at(13, 11), at(13, 20))
+  ];
+  const html = renderMemoryAidHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 4, 21),
+    activities,
+    timelineActivities: activities
+  });
+  const codexBlocks = extractActivityBlocks(html).filter(block => block.app === 'Codex');
+
+  assert.equal(codexBlocks.length, 1, 'contiguous Codex run renders as one merged block');
+  assert.equal(codexBlocks[0].pill, '19 min', 'merged pill is the deduped run total (10 + 9 min)');
+});
+
+test('coarse Activity Stream block keeps its own app label and duration when a longer-titled app shares its cells', () => {
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const braveTab = (start, end) => ({
+    app: 'Brave Browser',
+    title: 'extended deep focus playlist for long coding sessions',
+    url: 'https://www.youtube.com/watch?v=focusmix',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: end - start
+  });
+  // Codex (bare app-name title) runs first, then a longer-titled Brave tab whose
+  // whole session overlaps the boundary cell. The Codex block must keep its own
+  // label and its own duration — not borrow the Brave title nor sum Brave's time.
+  const activities = [
+    codexActivity(at(13, 0), at(13, 13)),
+    braveTab(at(13, 13), at(13, 30))
+  ];
+  const html = renderMemoryAidHtml({
+    zoom: 5,
+    currentDate: new Date(2026, 4, 21),
+    activities,
+    timelineActivities: activities
+  });
+  const blocks = extractActivityBlocks(html);
+  const codexBlock = blocks.find(block => block.app === 'Codex');
+  const braveBlock = blocks.find(block => block.app === 'Brave Browser');
+
+  assert.ok(codexBlock, 'a Codex-labeled block exists');
+  assert.equal(codexBlock.title, 'Codex', 'Codex block keeps its own label');
+  assert.equal(codexBlock.pill, '13 min', 'Codex pill is its own duration, not inflated by the concurrent Brave tab');
+  assert.ok(braveBlock, 'the Brave tab is still represented as its own block');
+});
+
 test('activity popup assigns exact foreground source duration instead of elapsed interruption envelope', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const firstStart = dateStart + (18 * 60 + 33) * 60 * 1000 + 10 * 1000;
@@ -8124,7 +8272,118 @@ test('saved Affinity Activity Stream row units render vertically and reproject w
     assert.equal(style.top, activityStyles[index].top, `5 min row ${index} top`);
     assert.equal(style.height, activityStyles[index].height, `5 min row ${index} height`);
   });
-  assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(fiveMinuteHtml)), 2);
+  assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(fiveMinuteHtml)), 3);
+});
+
+test('saved summary assignment with no source fragments shows logged duration, not span, across zooms', () => {
+  // Mirrors real saved data: activity-stream-summary activities persist with
+  // assignedDurationMs and NO sources[] array. When logged duration is less
+  // than the visual span, every zoom must show the logged duration, never the
+  // elapsed span. Captured activities are intentionally empty so this exercises
+  // the saved-range render path in isolation.
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const loggedMs = 17 * 60 * 1000 + 32 * 1000; // 17m32s logged -> rounds to 18 min
+  const activity = {
+    app: 'Brave Browser',
+    title: 'Order review',
+    url: 'https://shop.example.test/order',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(11, 40),
+    end: at(12, 0), // 20 min visual span
+    duration: loggedMs,
+    assignedDurationMs: loggedMs,
+    assignmentStart: at(11, 40),
+    assignmentEnd: at(12, 0),
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 5
+  };
+  const timeEntries = [{
+    id: 'entry-no-source-fragments',
+    start: at(11, 40),
+    end: at(12, 0),
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [activity]
+  }];
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities: [],
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    assert.deepEqual(extractTimeEntryDurationLabels(html), ['18 min'], `${zoom} min logged duration`);
+  }
+});
+
+test('saved multi-row summary assignment with no source fragments totals logged duration across zooms', () => {
+  // Two adjacent canonical rows in one entry, each logged less than its span,
+  // and again with NO sources[]. The combined logged duration is 7 min and must
+  // hold at every zoom for the duration pill and the assigned-duration total.
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+  const row = (start, end, loggedMs) => ({
+    app: 'Brave Browser',
+    title: 'Order review',
+    url: 'https://shop.example.test/order',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: loggedMs,
+    assignedDurationMs: loggedMs,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 5
+  });
+  const activities = [
+    row(at(11, 40), at(11, 45), 3 * 60 * 1000 + 18 * 1000), // 3m18s logged, 5 min span
+    row(at(11, 46), at(11, 52), 3 * 60 * 1000 + 13 * 1000) // 3m13s logged, 6 min span
+  ]; // total logged 6m31s -> rounds to 7 min
+  const timeEntries = [{
+    id: 'entry-multi-no-source-fragments',
+    start: at(11, 40),
+    end: at(11, 52),
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities
+  }];
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities: [],
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+    assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 7, `${zoom} min logged total`);
+  }
+
+  const context = loadTimelineContext();
+  context.state.zoom = 60;
+  context.state.projects = [project];
+  context.state.activities = [];
+  context.state.timeEntries = timeEntries;
+  const renderEntries = context.buildActivityStreamRenderEntries(
+    timeEntries[0],
+    dateStart,
+    60,
+    timeEntries
+  );
+  const totalMs = context.getActivityStreamAssignedDurationMs(renderEntries);
+  assert.equal(Math.round(totalMs / (60 * 1000)), 7, 'assigned-duration total');
 });
 
 test('saved Activity Stream row units use the primary visible row duration at coarse zoom', () => {
@@ -8320,7 +8579,7 @@ test('source-backed row units keep stable rounded labels when merged at 10 minut
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
 });
 
-test('coarse merged source-backed Time Entry opens edit with grouped canonical visits', () => {
+test('coarse merged source-backed Time Entry opens edit collapsed to one non-expandable row', () => {
   const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
   const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
   const at = (hour, minute, second = 0) => (
@@ -8418,15 +8677,248 @@ test('coarse merged source-backed Time Entry opens edit with grouped canonical v
     modalArgs[7]
   );
 
+  // Saved logged entries collapse to one non-expandable row per identity at the
+  // logged duration — no capture-fragment drill-down (issue #1).
   const listHtml = elements.get('modal-memory-aid-list').innerHTML;
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 1);
-  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
-  assert.match(listHtml, /2 visits/);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 0);
+  assert.doesNotMatch(listHtml, /\d+ visits/);
   assert.doesNotMatch(listHtml, /Source details/);
   assert.doesNotMatch(listHtml, /Checkout step one|Checkout step two|20s|40s/);
   assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 0);
-  assert.equal(modalContext.getSelectedModalActivities()[0].modalSourceActivities.length, 2);
+  const collapsedActivities = modalContext.getSelectedModalActivities();
+  assert.equal(collapsedActivities.length, 1);
+  assert.equal(collapsedActivities[0].modalSourceActivities, undefined);
+  assert.equal(collapsedActivities[0].assignedDurationMs, 3 * 60 * 1000);
   assert.equal(elements.get('modal-duration-lbl').innerText, '3 min');
+});
+
+test('source-backed Canonical Activity Row Units preserve selected seven-minute duration across zooms and edit', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => (
+    dateStart + ((hour * 60 + minute) * 60 + second) * 1000
+  );
+  const source = (start, end) => ({
+    app: 'Brave Browser',
+    title: 'Order review',
+    url: 'https://shop.example.test/order',
+    start,
+    end,
+    duration: end - start
+  });
+  const rowUnit = (key, start, end, durationMs, sources) => ({
+    ...source(start, end),
+    duration: durationMs,
+    assignedDurationMs: durationMs,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: start,
+    assignmentDisplayEnd: end,
+    assignmentDisplayGroupKey: key,
+    assignmentDisplayZoom: 1,
+    sources
+  });
+  const firstActivity = rowUnit('order-review-first-row', at(11, 52), at(11, 55), 3 * 60 * 1000, [
+    source(at(11, 52), at(11, 54, 20))
+  ]);
+  const secondActivity = rowUnit('order-review-second-row', at(11, 56), at(12, 0), 4 * 60 * 1000, [
+    source(at(11, 56), at(11, 58, 20))
+  ]);
+  const { context: assignContext, elements: assignElements } = loadModalsContext();
+  assignContext.openTimeEntryModal(
+    firstActivity.start,
+    secondActivity.end,
+    '',
+    null,
+    null,
+    true,
+    [firstActivity, secondActivity]
+  );
+
+  assert.equal(assignElements.get('modal-duration-lbl').innerText, '7 min');
+  assert.equal(assignContext.getSelectedModalActivities().reduce((total, activity) => (
+    total + activity.assignedDurationMs
+  ), 0), 7 * 60 * 1000);
+
+  const saveContext = loadTimeEntrySaveContext();
+  const payloads = saveContext.buildBulkTimeEntryPayloads({
+    start: firstActivity.start,
+    end: secondActivity.end,
+    description: '',
+    projectId: project.id,
+    taskId: '',
+    billable: true,
+    activities: assignContext.getSelectedModalActivities()
+  });
+  const timeEntries = payloads.map((payload, index) => ({
+    ...payload,
+    id: `entry-seven-minutes-${index + 1}`,
+    createdBy: 'manual'
+  }));
+  const savedActivities = timeEntries.flatMap(entry => entry.activities || []);
+  const activities = savedActivities.flatMap(activity => activity.sources || []);
+
+  assert.equal(payloads.length, 2);
+  assert.equal(savedActivities.reduce((total, activity) => total + activity.assignedDurationMs, 0), 7 * 60 * 1000);
+  assert.ok(savedActivities.reduce((total, activity) => (
+    total + (activity.sources || []).reduce((sourceTotal, source) => sourceTotal + source.assignedDurationMs, 0)
+  ), 0) < 7 * 60 * 1000);
+
+  const savedTimeEntry = {
+    id: 'entry-seven-minutes-saved',
+    start: firstActivity.start,
+    end: secondActivity.end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: savedActivities
+  };
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const html = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries,
+      currentDate: new Date(dateStart)
+    });
+
+    assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 7, `${zoom} min zoom`);
+  }
+
+  const { context, html } = renderLoggedTimeEntriesWithContext({
+    zoom: 60,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const [dataset] = extractTimeEntryBlockDatasets(html);
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  assert.equal(context.openTimeEntryBlockEditor({ dataset }), true);
+  assert.equal(modalArgs[6].reduce((total, activity) => total + activity.assignedDurationMs, 0), 7 * 60 * 1000);
+
+  const { context: modalContext, elements } = loadModalsContext();
+  modalContext.window.editingTimeEntryId = timeEntries[0].id;
+  modalContext.window.editingTimeEntryUsesSelectedActivityReview = true;
+  modalContext.openTimeEntryModal(
+    modalArgs[0],
+    modalArgs[1],
+    modalArgs[2],
+    modalArgs[3],
+    modalArgs[4],
+    modalArgs[5],
+    modalArgs[6],
+    modalArgs[7]
+  );
+
+  assert.equal(elements.get('modal-duration-lbl').innerText, '7 min');
+  assert.match(elements.get('modal-memory-aid-list').innerHTML, /<span class="duration-pill shrink-0">7 min<\/span>/);
+  assert.equal(modalContext.getSelectedModalActivities().reduce((total, activity) => (
+    total + activity.assignedDurationMs
+  ), 0), 7 * 60 * 1000);
+
+  for (const zoom of [1, 5, 10, 15, 30, 60]) {
+    const savedHtml = renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities,
+      timeEntries: [savedTimeEntry],
+      currentDate: new Date(dateStart)
+    });
+
+    const labels = extractTimeEntryDurationLabels(savedHtml);
+    if (zoom === 1) {
+      assert.equal(sumDurationLabelMinutes(labels), 7, `saved entry at ${zoom} min zoom`);
+    } else {
+      assert.deepEqual(labels, ['7 min'], `saved entry at ${zoom} min zoom`);
+    }
+  }
+});
+
+test('split source-backed Canonical Activity Row Unit opens edit with saved duration once', () => {
+  const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute, second = 0) => (
+    dateStart + ((hour * 60 + minute) * 60 + second) * 1000
+  );
+  const source = (start, end) => ({
+    app: 'Brave Browser',
+    title: 'Checkout review',
+    url: 'https://shop.example.test/checkout',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start
+  });
+  const savedActivity = {
+    ...source(at(11, 58), at(12, 5)),
+    duration: 7 * 60 * 1000,
+    assignedDurationMs: 7 * 60 * 1000,
+    assignmentStart: at(11, 58),
+    assignmentEnd: at(12, 5),
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: at(11, 58),
+    assignmentDisplayEnd: at(12, 5),
+    assignmentDisplayGroupKey: 'checkout-boundary-row',
+    assignmentDisplayZoom: 1,
+    sources: [
+      source(at(11, 58), at(12, 0)),
+      source(at(12, 0), at(12, 2))
+    ]
+  };
+  const timeEntries = [{
+    id: 'entry-seven-minute-boundary',
+    start: savedActivity.start,
+    end: savedActivity.end,
+    projectId: project.id,
+    createdBy: 'manual',
+    activities: [savedActivity]
+  }];
+  const activities = savedActivity.sources;
+  const { context, html } = renderLoggedTimeEntriesWithContext({
+    zoom: 60,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const labels = extractTimeEntryDurationLabels(html);
+  const [dataset] = extractTimeEntryBlockDatasets(html);
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => {
+    modalArgs = args;
+  };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  assert.equal(sumDurationLabelMinutes(labels), 7);
+  assert.equal(context.openTimeEntryBlockEditor({ dataset }), true);
+  assert.equal(modalArgs[6].reduce((total, activity) => total + activity.assignedDurationMs, 0), 7 * 60 * 1000);
+
+  const { context: modalContext, elements } = loadModalsContext();
+  modalContext.window.editingTimeEntryId = timeEntries[0].id;
+  modalContext.window.editingTimeEntryUsesSelectedActivityReview = true;
+  modalContext.openTimeEntryModal(
+    modalArgs[0],
+    modalArgs[1],
+    modalArgs[2],
+    modalArgs[3],
+    modalArgs[4],
+    modalArgs[5],
+    modalArgs[6],
+    modalArgs[7]
+  );
+
+  assert.equal(elements.get('modal-duration-lbl').innerText, '7 min');
 });
 
 test('source-backed row units saved at coarse zoom render exact visible rows at 1 minute zoom', () => {
@@ -8662,7 +9154,7 @@ test('dense sub-minute auto-rule fragments summarize at coarse zoom instead of r
   assert.deepEqual(extractTimeEntryDurationLabels(html), ['8 min']);
 });
 
-test('manual Activity Stream assignment renders as its saved range instead of current row projection', () => {
+test('manual Activity Stream assignment renders at its saved range geometry with logged duration', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
   const start = dateStart + (14 * 60 + 35) * 60 * 1000;
@@ -8712,7 +9204,72 @@ test('manual Activity Stream assignment renders as its saved range instead of cu
     end,
     zoom: 1
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
+  // Block keeps its saved-range geometry, but the pill shows logged duration
+  // (assignedDurationMs 789000 -> 13 min), not the 15 min span.
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min']);
+});
+
+test('drag-created manual entry pill shows summed logged duration, not the drag span', () => {
+  // Regression for issue #3 (#60 violation): a drag/Log-created manual entry
+  // persists its selected activity with assignedDurationMs but WITHOUT an
+  // activity-stream assignment tag. Its pill must show the summed logged duration
+  // (matching Work Times and the Edit modal), not the elapsed drag span.
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const start = dateStart + (10 * 60 + 10) * 60 * 1000;
+  const end = dateStart + (10 * 60 + 45) * 60 * 1000; // 35-min drag span
+  const codex = {
+    app: 'Codex',
+    title: 'Codex',
+    bundleId: 'com.openai.codex',
+    start,
+    end: start + 17 * 60 * 1000,
+    duration: 17 * 60 * 1000
+  };
+  const timeEntry = {
+    id: 'entry-drag-manual',
+    start,
+    end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [{ ...codex, assignedDurationMs: 17 * 60 * 1000 }]
+  };
+
+  [5, 10, 15, 30, 60].forEach(zoom => {
+    const labels = extractTimeEntryDurationLabels(renderLoggedTimeEntriesHtml({
+      zoom,
+      projects: [project],
+      activities: [codex],
+      timeEntries: [timeEntry]
+    }));
+    assert.deepEqual(labels, ['17 min'], `zoom ${zoom} pill = logged duration, not span`);
+  });
+});
+
+test('manual entry with no assigned activity durations still uses its span', () => {
+  // Boundary for issue #3: a plain manual block (no assignedDurationMs on its
+  // activities) keeps span-based duration.
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const start = dateStart + (9 * 60) * 60 * 1000;
+  const end = start + 20 * 60 * 1000;
+  const timeEntry = {
+    id: 'entry-plain-manual',
+    start,
+    end,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: 'Planning',
+    activities: []
+  };
+  const labels = extractTimeEntryDurationLabels(renderLoggedTimeEntriesHtml({
+    zoom: 5,
+    projects: [project],
+    activities: [],
+    timeEntries: [timeEntry]
+  }));
+  assert.deepEqual(labels, ['20 min']);
 });
 
 test('manual and auto-rule entries for the same project merge visually while preserving grouped metadata', () => {
@@ -11033,7 +11590,7 @@ test('edited time entry modal with explicit activity candidates sums selected ac
   assert.equal(elements.get('modal-duration-lbl').innerText, '14 min');
 });
 
-test('regular activity-stream edit uses grouped canonical review rows', () => {
+test('saved activity-stream edit collapses canonical rows to one non-expandable row per identity', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 21, 0).getTime();
   const first = {
@@ -11103,12 +11660,17 @@ test('regular activity-stream edit uses grouped canonical review rows', () => {
 
   context.openTimeEntryModal(startMs, startMs + 9 * 60 * 1000, '', 'project-1', true, false, null);
 
+  // first + second share one identity → collapse to a single 3-min row; `other`
+  // is a second identity → its own 1-min row. No expandable "visits" (issue #1).
   const listHtml = elements.get('modal-memory-aid-list').innerHTML;
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
-  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
-  assert.match(listHtml, /2 visits/);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 0);
+  assert.doesNotMatch(listHtml, /\d+ visits/);
   assert.doesNotMatch(listHtml, /Source details|Checkout step one|Checkout step two|20s|40s/);
-  assert.equal(context.getSelectedModalActivities()[0].modalSourceActivities.length, 2);
+  const collapsedReviewActivities = context.getSelectedModalActivities();
+  assert.equal(collapsedReviewActivities.length, 2);
+  assert.equal(collapsedReviewActivities[0].modalSourceActivities, undefined);
+  assert.equal(collapsedReviewActivities[0].assignedDurationMs, 3 * 60 * 1000);
   assert.equal(elements.get('modal-duration-lbl').innerText, '4 min');
 });
 
@@ -11524,7 +12086,7 @@ test('selected similar app-name assignment preserves aggregate row units', () =>
   assert.equal(elements.get('modal-duration-lbl').innerText, '8 min');
 });
 
-test('selected activities group exact browser visits while child selection preserves row units', () => {
+test('selected activities collapse identical exact rows into one non-expandable row', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 13, 30).getTime();
   const first = {
@@ -11594,35 +12156,24 @@ test('selected activities group exact browser visits while child selection prese
 
   context.openTimeEntryModal(startMs, startMs + 9 * 60 * 1000, '', null, null, true, [first, second, otherUrl]);
 
+  // Issue #6: identical exact rows collapse to a single, non-expandable row at the
+  // summed logged duration — no per-source "N visits" drill-down. The grouping data
+  // (modalSourceActivities) is still kept for the save path.
   const listHtml = elements.get('modal-memory-aid-list').innerHTML;
   assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
-  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 2);
-  assert.match(listHtml, /2 visits/);
-  assert.doesNotMatch(listHtml, /Source details/);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 0);
+  assert.doesNotMatch(listHtml, /\d+ visits|\d+ sessions|\d+ activities/);
+  assert.doesNotMatch(listHtml, /modal-activity-group/);
   assert.doesNotMatch(listHtml, /Checkout step one|Checkout step two|20s|40s/);
-  assert.doesNotMatch(listHtml, /modal-activity-group" open/);
-  assert.equal((listHtml.match(/modal-source-fragment-row/g) || []).length, 0);
 
   const selectedActivities = context.getSelectedModalActivities();
   assert.equal(selectedActivities.length, 2);
   assert.equal(selectedActivities[0].modalSourceActivities.length, 2);
   assert.equal(selectedActivities[0].assignedDurationMs, 3 * 60 * 1000);
   assert.equal(elements.get('modal-duration-lbl').innerText, '4 min');
-
-  context.setModalActivitySourceIncluded(0, 1, false);
-
-  const updatedSelection = context.getSelectedModalActivities();
-  assert.equal(updatedSelection.length, 2);
-  assert.equal(updatedSelection[0].modalSourceActivities.length, 1);
-  assert.equal(updatedSelection[0].modalSourceActivities[0].assignmentDisplayGroupKey, 'row-unit-1');
-  assert.equal(updatedSelection[0].assignedDurationMs, 60 * 1000);
-  assert.equal(elements.get('modal-duration-lbl').innerText, '2 min');
-  const updatedListHtml = elements.get('modal-memory-aid-list').innerHTML;
-  assert.match(updatedListHtml, /1 visit/);
-  assert.doesNotMatch(updatedListHtml, /2 visits/);
 });
 
-test('selected activities use sessions and activities metadata for native and mixed groups', () => {
+test('selected activities collapse native and mixed groups without a drill-down', () => {
   const { context, elements } = loadModalsContext();
   const startMs = new Date(2026, 4, 21, 13, 45).getTime();
   const nativeFirst = {
@@ -11668,9 +12219,13 @@ test('selected activities use sessions and activities metadata for native and mi
     nativeSource
   ]);
 
+  // Issue #6: native and mixed groups collapse to one flat row each — no
+  // "N sessions" / "N activities" drill-down label or expandable group.
   const listHtml = elements.get('modal-memory-aid-list').innerHTML;
-  assert.match(listHtml, /2 sessions/);
-  assert.match(listHtml, /2 activities/);
+  assert.equal((listHtml.match(/data-modal-activity-index/g) || []).length, 2);
+  assert.equal((listHtml.match(/data-modal-source-index/g) || []).length, 0);
+  assert.doesNotMatch(listHtml, /\d+ sessions|\d+ activities|\d+ visits/);
+  assert.doesNotMatch(listHtml, /modal-activity-group/);
 });
 
 test('selected activities modal marks logged rows and defaults to unlogged save state', () => {
@@ -13095,4 +13650,55 @@ test('bulk assignment modal renders aggregate rows while selected activities pre
 
   assert.equal(context.getSelectedModalActivities().length, 0);
   assert.equal(elements.get('modal-duration-lbl').innerText, '0 min');
+});
+
+// Activity Stream suppression (WS3) needs utils.js loaded alongside timeline.js so
+// filterIsolatedSubMinuteRuns is in scope (the default loadTimelineContext omits it).
+function loadTimelineWithUtilsContext() {
+  const context = {
+    window: {},
+    state: {
+      currentDate: new Date(2026, 4, 21),
+      zoom: 5,
+      activities: [],
+      timeEntries: [],
+      projects: [],
+      selectedActivities: new Set(),
+      settings: { minActivityThreshold: 60 }
+    },
+    DOM: {},
+    resizeState: {},
+    document: {},
+    URL,
+    cleanTitle: title => title,
+    getActivityIconHTML: () => '',
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
+  return context;
+}
+
+test('Activity Stream drops isolated sub-minute captures but keeps continuous and aggregated host runs', () => {
+  const context = loadTimelineWithUtilsContext();
+  const minute = 60 * 1000;
+  const activities = [
+    // Continuous Codex run (two captures <15s apart) -> kept.
+    { app: 'Codex', title: 'Codex', url: '', start: 0, end: minute },
+    { app: 'Codex', title: 'Codex', url: '', start: minute + 5 * 1000, end: minute + 5 * 1000 + minute },
+    // Browser host: two sub-minute pages within the merge gap aggregate to >60s -> kept (#63).
+    { app: 'Brave Browser', title: 'A', url: 'https://example.com/a', start: 10 * minute, end: 10 * minute + 40 * 1000 },
+    { app: 'Brave Browser', title: 'B', url: 'https://example.com/b', start: 10 * minute + 45 * 1000, end: 10 * minute + 45 * 1000 + 40 * 1000 },
+    // Isolated sub-minute Codex blip far from anything -> dropped.
+    { app: 'Codex', title: 'Codex', url: '', start: 20 * minute, end: 20 * minute + 30 * 1000 }
+  ];
+
+  const renderable = context.getActivityStreamRenderableActivities(activities);
+  assert.equal(renderable.length, 4);
+  assert.equal(renderable.some(a => a.start === 20 * minute), false, 'isolated sub-minute Codex blip is dropped');
+  assert.equal(renderable.filter(a => a.app === 'Brave Browser').length, 2, 'aggregated host pages are kept');
+  // Memoized: same source array returns the same filtered reference.
+  assert.equal(context.getActivityStreamRenderableActivities(activities), renderable);
 });

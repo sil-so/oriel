@@ -256,7 +256,10 @@ test('work times uses assigned activity duration instead of visual assignment sp
   assert.equal(logged.innerText, '5 min');
 });
 
-test('work times includes short auto-rule entries', () => {
+test('work times excludes isolated sub-minute auto-rule entries', () => {
+  // An isolated auto-rule capture under the minimum run duration is context-
+  // switch noise. The timeline hides it at every zoom, so Work Times totals
+  // must exclude it too, keeping the dashboard consistent with the timeline.
   const logged = { innerText: '' };
   const projectsList = { innerHTML: '' };
   const context = {
@@ -269,13 +272,14 @@ test('work times includes short auto-rule entries', () => {
         end: 2 * 60 * 1000
       }],
       timeEntries: [{
+        id: 'auto-short',
         start: 0,
         end: 45 * 1000,
         projectId: 'project-1',
         createdBy: 'auto-rule',
         autoRuleId: 'rule-1',
         billable: false,
-        activities: [{ assignedDurationMs: 45 * 1000, autoAssigned: true }]
+        activities: [{ app: 'Codex', assignedDurationMs: 45 * 1000, autoAssigned: true }]
       }],
       projects: [{ id: 'project-1', name: 'Project One', color: '#3b82f6' }]
     },
@@ -305,10 +309,9 @@ test('work times includes short auto-rule entries', () => {
 
   context.recalculateStatistics();
 
-  assert.equal(logged.innerText, '45s');
-  assert.equal(context.DOM.elBarProject.style.width, '38%');
-  assert.match(projectsList.innerHTML, /Project One/);
-  assert.doesNotMatch(projectsList.innerHTML, /No time entries logged/);
+  assert.equal(logged.innerText, '0s');
+  assert.equal(context.DOM.elBarProject.style.width, '0%');
+  assert.match(projectsList.innerHTML, /No time entries logged/);
 });
 
 test('project historical entry descriptions use auto-rule fallbacks', () => {
@@ -712,6 +715,192 @@ test('work times sidebar metrics use the shared selected-period calculation', ()
   assert.equal(billableHours.innerText, '1.0h of billable work');
   assert.equal(conversion.innerText, '50%');
   assert.equal(conversionBar.style.width, '50%');
+});
+
+test('work times metrics use saved Canonical Activity Row Unit duration', () => {
+  const logged = { innerText: '' };
+  const conversion = { innerText: '' };
+  const conversionBar = { style: {} };
+  const projectsList = { innerHTML: '' };
+  const context = {
+    window: {},
+    URL,
+    state: {
+      timelineActivities: [
+        { start: 0, end: 30 * 60 * 1000 }
+      ],
+      activities: [],
+      timeEntries: [{
+        start: 0,
+        end: 10 * 60 * 1000,
+        projectId: 'project-1',
+        billable: true,
+        activities: [
+          {
+            assignedDurationMs: 3 * 60 * 1000,
+            sources: [{ assignedDurationMs: 2 * 60 * 1000 + 20 * 1000 }]
+          },
+          {
+            assignedDurationMs: 4 * 60 * 1000,
+            sources: [{ assignedDurationMs: 2 * 60 * 1000 + 20 * 1000 }]
+          }
+        ]
+      }],
+      projects: [{
+        id: 'project-1',
+        name: 'Client Work',
+        color: '#3b82f6',
+        billable: true,
+        rateType: 'hourly',
+        hourlyRate: 120,
+        currency: '$'
+      }]
+    },
+    DOM: {
+      elStatCapturedActive: { innerText: '' },
+      elWorkStatCaptured: { innerText: '' },
+      elWorkStatLogged: logged,
+      elWorkStatEarnings: { innerText: '' },
+      elWorkStatBillableHours: { innerText: '' },
+      elWorkStatConversionPercent: conversion,
+      elWorkStatConversionBar: conversionBar,
+      getElStatBillable: { innerText: '' },
+      elStatNonbillable: { innerText: '' },
+      elBarProject: { style: {} },
+      elProjectsList: projectsList
+    },
+    document: { getElementById() { return null; } },
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/projects.js', 'utf8'), context);
+
+  const metrics = context.calculateSelectedPeriodMetrics({
+    activities: context.state.timelineActivities,
+    timeEntries: context.state.timeEntries,
+    projects: context.state.projects,
+    allTimeEntries: context.state.timeEntries
+  });
+
+  assert.equal(metrics.totalLoggedMs, 7 * 60 * 1000);
+  assert.equal(metrics.billableMs, 7 * 60 * 1000);
+  assert.equal(metrics.projectDurations['project-1'], 7 * 60 * 1000);
+  assert.equal(metrics.conversionPercent, 23);
+
+  context.recalculateStatistics();
+
+  assert.equal(logged.innerText, '7 min');
+  assert.equal(conversion.innerText, '23%');
+  assert.equal(conversionBar.style.width, '23%');
+  assert.match(projectsList.innerHTML, /Client Work/);
+  assert.match(projectsList.innerHTML, />0h 7m<\/span>/);
+});
+
+test('work times totals drop isolated sub-minute auto-rule runs but keep continuous ones', () => {
+  const context = { window: {}, URL, console };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+
+  const autoEntry = (id, start, end) => ({
+    id,
+    projectId: 'project-1',
+    start,
+    end,
+    createdBy: 'auto-rule',
+    autoRuleId: 'rule-1',
+    activities: [{
+      app: 'Codex',
+      assignedDurationMs: end - start,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'auto-assigned-capture',
+      autoAssigned: true,
+      autoAssignmentRuleId: 'rule-1'
+    }]
+  });
+  // A continuous run (two captures <15s apart) totalling 2 min, plus two
+  // isolated sub-minute blips that must not count.
+  const timeEntries = [
+    autoEntry('run-a', 0, 60 * 1000),
+    autoEntry('run-b', 60 * 1000 + 5 * 1000, 60 * 1000 + 5 * 1000 + 60 * 1000),
+    autoEntry('blip-1', 5 * 60 * 1000, 5 * 60 * 1000 + 30 * 1000),
+    autoEntry('blip-2', 9 * 60 * 1000, 9 * 60 * 1000 + 20 * 1000)
+  ];
+
+  const suppressed = context.getSuppressedAutoRuleEntryIds(timeEntries);
+  assert.deepEqual([...suppressed].sort(), ['blip-1', 'blip-2']);
+
+  const metrics = context.calculateSelectedPeriodMetrics({
+    activities: [{ start: 0, end: 30 * 60 * 1000 }],
+    timeEntries,
+    projects: [{ id: 'project-1', name: 'Client Work', color: '#3b82f6', billable: true }],
+    allTimeEntries: timeEntries
+  });
+
+  assert.equal(metrics.totalLoggedMs, 2 * 60 * 1000);
+  assert.equal(metrics.projectDurations['project-1'], 2 * 60 * 1000);
+});
+
+test('filterIsolatedSubMinuteRuns drops isolated sub-minute runs but keeps continuous and aggregated host runs', () => {
+  const context = { window: {}, URL, console };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+
+  const fragments = [
+    // Native app continuous run (two captures <15s apart) -> 2 min, kept.
+    { app: 'Codex', title: 'Codex', url: '', start: 0, end: 60 * 1000 },
+    { app: 'Codex', title: 'Codex', url: '', start: 60 * 1000 + 5 * 1000, end: 60 * 1000 + 5 * 1000 + 60 * 1000 },
+    // Browser host whose two sub-minute pages aggregate to a >=60s run, kept (#63).
+    { app: 'Brave Browser', title: 'Page A', url: 'https://example.com/a', start: 10 * 60 * 1000, end: 10 * 60 * 1000 + 40 * 1000 },
+    { app: 'Brave Browser', title: 'Page B', url: 'https://example.com/b', start: 10 * 60 * 1000 + 45 * 1000, end: 10 * 60 * 1000 + 45 * 1000 + 40 * 1000 },
+    // Isolated sub-minute native blips (gap > 15s from anything), dropped.
+    { app: 'Codex', title: 'Codex', url: '', start: 20 * 60 * 1000, end: 20 * 60 * 1000 + 30 * 1000 },
+    { app: 'Shottr', title: 'Shottr', url: '', start: 25 * 60 * 1000, end: 25 * 60 * 1000 + 20 * 1000 }
+  ];
+
+  const kept = context.filterIsolatedSubMinuteRuns(fragments);
+  const keptTitles = kept.map(fragment => `${fragment.app}:${fragment.title}`);
+  assert.deepEqual(keptTitles, ['Codex:Codex', 'Codex:Codex', 'Brave Browser:Page A', 'Brave Browser:Page B']);
+  // Ill-formed fragments (no usable range) are always kept.
+  assert.equal(context.filterIsolatedSubMinuteRuns([{ app: 'X' }]).length, 1);
+});
+
+test('total captured and conversion exclude isolated sub-minute captured runs', () => {
+  const context = { window: {}, URL, console };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+
+  const activities = [
+    // 10-minute continuous Codex run -> counts toward captured.
+    { app: 'Codex', title: 'Codex', url: '', start: 0, end: 10 * 60 * 1000 },
+    // Two isolated sub-minute Codex blips -> excluded from captured/conversion.
+    { app: 'Codex', title: 'Codex', url: '', start: 20 * 60 * 1000, end: 20 * 60 * 1000 + 30 * 1000 },
+    { app: 'Codex', title: 'Codex', url: '', start: 25 * 60 * 1000, end: 25 * 60 * 1000 + 20 * 1000 }
+  ];
+  const timeEntries = [{
+    id: 'entry-1',
+    start: 0,
+    end: 10 * 60 * 1000,
+    projectId: 'project-1',
+    billable: true,
+    activities: [{ assignedDurationMs: 5 * 60 * 1000 }]
+  }];
+
+  const metrics = context.calculateSelectedPeriodMetrics({
+    activities,
+    timeEntries,
+    projects: [{ id: 'project-1', name: 'Client Work', color: '#3b82f6', billable: true }],
+    allTimeEntries: timeEntries
+  });
+
+  // Captured = 10 min (the two sub-minute blips are dropped), not 10m50s.
+  assert.equal(metrics.totalCapturedMs, 10 * 60 * 1000);
+  assert.equal(metrics.totalLoggedMs, 5 * 60 * 1000);
+  assert.equal(metrics.conversionPercent, 50);
 });
 
 test('work times fixed-rate earnings refresh from all-time entries like Statistics', async () => {

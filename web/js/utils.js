@@ -403,13 +403,157 @@ function getSelectedPeriodTimeEntryDurationMs(entry) {
         : Math.max(0, (entry?.end || 0) - (entry?.start || 0));
 }
 
+// Auto-rule captures form gap-separated runs; a run shorter than the minimum
+// render duration is context-switch noise that the timeline hides at every
+// zoom. Totals must drop the same runs so Work Times, project totals, and
+// earnings match the timeline. Manual entries are never suppressed.
+const AUTO_RULE_RUN_MERGE_GAP_MS = 15 * 1000;
+const AUTO_RULE_RUN_MIN_DURATION_MS = 60 * 1000;
+
+function getCapturedFragmentDurationMs(fragment) {
+    if (Number.isFinite(fragment?.start) && Number.isFinite(fragment?.end) && fragment.end > fragment.start) {
+        return fragment.end - fragment.start;
+    }
+    const duration = Number(fragment?.duration);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+}
+
+// Group captured fragments by session identity (app + host), mirroring the
+// timeline's getActivitySimilarityKey. Keying by host (not exact url/title) keeps
+// a browser host whose sub-minute page visits aggregate to a >=60s run together,
+// so the captured metric drops the same isolated runs the Activity Stream does.
+function getDefaultCapturedRunKey(fragment) {
+    const app = String(fragment?.app || '').trim().toLowerCase();
+    const host = typeof normalizeWebsiteDomain === 'function'
+        ? normalizeWebsiteDomain(fragment?.url || '')
+        : String(fragment?.url || '').trim().toLowerCase();
+    return host ? `${app}|||${host}` : app;
+}
+
+// Captured fragments of one identity that form a gap-separated run shorter than
+// `minMs` are context-switch noise — the same sub-minute runs the logged side
+// already suppresses (getSuppressedAutoRuleEntryIds / filterAutoRuleEntriesToRender-
+// ableRuns). This drops them from any captured surface (Total Captured / conversion
+// denominator, Activity Stream sessions + popup breakdowns) so the captured side
+// matches what actually gets logged. Returns the kept fragments (order preserved);
+// ill-formed fragments (no usable range) are always kept.
+function filterIsolatedSubMinuteRuns(fragments, {
+    keyFn = getDefaultCapturedRunKey,
+    gapMs = AUTO_RULE_RUN_MERGE_GAP_MS,
+    minMs = AUTO_RULE_RUN_MIN_DURATION_MS
+} = {}) {
+    const list = Array.isArray(fragments) ? fragments : [];
+    if (list.length === 0) return [];
+
+    const groups = new Map();
+    list.forEach((fragment, index) => {
+        if (!Number.isFinite(fragment?.start) || !Number.isFinite(fragment?.end) || fragment.end <= fragment.start) {
+            return;
+        }
+        const key = keyFn(fragment) || '';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ fragment, index });
+    });
+
+    const dropped = new Set();
+    for (const items of groups.values()) {
+        items.sort((left, right) => left.fragment.start - right.fragment.start || left.fragment.end - right.fragment.end);
+
+        let current = null;
+        const flushCurrent = () => {
+            if (!current) return;
+            if (current.totalMs < minMs) {
+                current.items.forEach(item => dropped.add(item.index));
+            }
+            current = null;
+        };
+
+        for (const item of items) {
+            const gapToCurrent = current ? item.fragment.start - current.end : Number.POSITIVE_INFINITY;
+            if (!current || gapToCurrent > gapMs) {
+                flushCurrent();
+                current = {
+                    end: item.fragment.end,
+                    totalMs: getCapturedFragmentDurationMs(item.fragment),
+                    items: [item]
+                };
+                continue;
+            }
+            current.items.push(item);
+            current.totalMs += getCapturedFragmentDurationMs(item.fragment);
+            current.end = Math.max(current.end, item.fragment.end);
+        }
+        flushCurrent();
+    }
+
+    if (dropped.size === 0) return list.slice();
+    return list.filter((_, index) => !dropped.has(index));
+}
+
+function getSuppressedAutoRuleEntryIds(timeEntries) {
+    const suppressed = new Set();
+    if (typeof isAutoRuleTimeEntry !== 'function') return suppressed;
+
+    const groups = new Map();
+    for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
+        if (!isAutoRuleTimeEntry(entry)) continue;
+        if (!Number.isFinite(entry?.start) || !Number.isFinite(entry?.end) || entry.end <= entry.start) continue;
+        const app = (Array.isArray(entry.activities)
+            ? entry.activities.find(activity => activity?.app)?.app
+            : '') || '';
+        const key = `${entry.projectId || ''}|||${entry.taskId || ''}|||${app}|||${entry.autoRuleId || ''}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+    }
+
+    for (const list of groups.values()) {
+        const items = list
+            .map(entry => ({ entry, durationMs: getSelectedPeriodTimeEntryDurationMs(entry) }))
+            .sort((left, right) => left.entry.start - right.entry.start || left.entry.end - right.entry.end);
+
+        let current = null;
+        const flushCurrent = () => {
+            if (!current) return;
+            const totalMs = current.items.reduce((total, item) => total + item.durationMs, 0);
+            if (totalMs < AUTO_RULE_RUN_MIN_DURATION_MS) {
+                current.items.forEach(item => suppressed.add(item.entry.id));
+            }
+            current = null;
+        };
+
+        for (const item of items) {
+            const gapMs = current ? item.entry.start - current.end : Number.POSITIVE_INFINITY;
+            if (!current || gapMs > AUTO_RULE_RUN_MERGE_GAP_MS) {
+                flushCurrent();
+                current = { end: item.entry.end, items: [item] };
+                continue;
+            }
+            current.items.push(item);
+            current.end = Math.max(current.end, item.entry.end);
+        }
+        flushCurrent();
+    }
+
+    return suppressed;
+}
+
 function calculateSelectedPeriodMetrics({
     activities = [],
     timeEntries = [],
     projects = [],
     allTimeEntries = timeEntries
 } = {}) {
-    const totalCapturedMs = (Array.isArray(activities) ? activities : []).reduce((total, activity) => (
+    const suppressedEntryIds = getSuppressedAutoRuleEntryIds(timeEntries);
+    const suppressedAllEntryIds = allTimeEntries === timeEntries
+        ? suppressedEntryIds
+        : getSuppressedAutoRuleEntryIds(allTimeEntries);
+    // Total Captured (and the conversion denominator) must reflect the same
+    // active time the timeline can actually surface/log. Isolated sub-minute runs
+    // are context-switch noise the logged side already drops, so exclude them here
+    // too — otherwise conversion efficiency is dragged down by fragments that are
+    // invisible everywhere else.
+    const capturedActivities = filterIsolatedSubMinuteRuns(Array.isArray(activities) ? activities : []);
+    const totalCapturedMs = capturedActivities.reduce((total, activity) => (
         total + Math.max(0, (activity?.end || 0) - (activity?.start || 0))
     ), 0);
     const projectDurations = {};
@@ -417,6 +561,7 @@ function calculateSelectedPeriodMetrics({
     let totalLoggedMs = 0;
 
     for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
+        if (suppressedEntryIds.has(entry.id)) continue;
         const duration = getSelectedPeriodTimeEntryDurationMs(entry);
         if (duration <= 0) continue;
         totalLoggedMs += duration;
@@ -426,6 +571,7 @@ function calculateSelectedPeriodMetrics({
 
     const historicalHoursByProject = {};
     for (const entry of Array.isArray(allTimeEntries) ? allTimeEntries : []) {
+        if (suppressedAllEntryIds.has(entry.id)) continue;
         const duration = getSelectedPeriodTimeEntryDurationMs(entry);
         if (duration <= 0) continue;
         historicalHoursByProject[entry.projectId] = (historicalHoursByProject[entry.projectId] || 0) + duration / (3600 * 1000);
@@ -502,3 +648,6 @@ window.formatStatsDuration = formatStatsDuration;
 window.formatSidebarProjectDuration = formatSidebarProjectDuration;
 window.getSelectedPeriodTimeEntryDurationMs = getSelectedPeriodTimeEntryDurationMs;
 window.calculateSelectedPeriodMetrics = calculateSelectedPeriodMetrics;
+window.getSuppressedAutoRuleEntryIds = getSuppressedAutoRuleEntryIds;
+window.filterIsolatedSubMinuteRuns = filterIsolatedSubMinuteRuns;
+window.getCapturedFragmentDurationMs = getCapturedFragmentDurationMs;
