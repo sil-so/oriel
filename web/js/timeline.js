@@ -258,14 +258,24 @@ function getDayTimelineRenderModel({
             timeEntries,
             canonicalMembership: true
         });
-    const timeEntryRenderItems = buildLoggedTimeEntryRenderItems(timeEntries, renderZoom, dayStart);
+    const rowLayoutTimeEntryItems = buildLoggedTimeEntryRenderItems(timeEntries, renderZoom, dayStart);
     const rowLayout = buildDayTimelineRowLayout({
         dateStartOfDay: dayStart,
         zoom: renderZoom,
         activityCells,
         activitySessions,
-        timeEntryRenderItems,
+        timeEntryRenderItems: rowLayoutTimeEntryItems,
         hideEmptyRows
+    });
+    // The render path consumes block descriptors from the single seam; the
+    // legacy render items above are used only to keep occupied rows in the
+    // compressed row layout.
+    const timeEntryRenderItems = buildLoggedTimeEntryBlocks({
+        entries: timeEntries,
+        activities: visibleActivities,
+        zoom: renderZoom,
+        dateStartOfDay: dayStart,
+        rowLayout
     });
 
     rowLayout.activityBlockDetails = activityBlockDetails;
@@ -5567,13 +5577,16 @@ function mergeLoggedTimeEntryBlockSpecs(specs) {
             || left.displayStart - right.displayStart);
 }
 
-// Assign lanes so blocks whose display-row ranges overlap render side by side.
-// Same project/task runs are already merged, so only different project/task
-// overlaps produce extra lanes.
+// Assign lanes so blocks of DIFFERENT project/task that overlap rows render
+// side by side. Same project/task blocks never force a split: they share a lane
+// and stay full width (different project/task overlaps lane — contract). Exact
+// same project/task units that overlap at a row boundary therefore stay full
+// width rather than splitting into half-width lanes.
 function assignLoggedTimeEntryBlockLanes(blocks) {
     blocks.forEach(block => { block.laneIndex = 0; block.laneCount = 1; });
+    const laneKey = block => `${block.projectId ?? ''} ${block.taskId ?? ''}`;
     const intervals = blocks
-        .map((block, index) => ({ block, index, start: block.displayRowStart, end: block.displayRowEnd }))
+        .map((block, index) => ({ block, index, start: block.displayRowStart, end: block.displayRowEnd, key: laneKey(block) }))
         .filter(interval => Number.isFinite(interval.start) && Number.isFinite(interval.end) && interval.end > interval.start)
         .sort((left, right) => left.start - right.start || left.end - right.end || left.index - right.index);
 
@@ -5590,34 +5603,36 @@ function assignLoggedTimeEntryBlockLanes(blocks) {
 
     for (const current of components) {
         if (current.items.length <= 1) continue;
-        let activeLanes = [];
-        const availableLanes = [];
-        let nextLane = 0;
+        const lanes = []; // lanes[i] = still-active intervals occupying lane i
         for (const interval of current.items) {
-            const stillActive = [];
-            for (const lane of activeLanes) {
-                if (interval.start >= lane.end) availableLanes.push(lane.index);
-                else stillActive.push(lane);
+            let laneIndex = -1;
+            for (let i = 0; i < lanes.length; i++) {
+                lanes[i] = lanes[i].filter(active => active.end > interval.start);
+                const conflict = lanes[i].some(active => active.key !== interval.key);
+                if (laneIndex === -1 && !conflict) laneIndex = i;
             }
-            activeLanes = stillActive;
-            availableLanes.sort((left, right) => left - right);
-            const laneIndex = availableLanes.length > 0 ? availableLanes.shift() : nextLane++;
+            if (laneIndex === -1) {
+                laneIndex = lanes.length;
+                lanes.push([]);
+            }
+            lanes[laneIndex].push({ end: interval.end, key: interval.key });
             interval.block.laneIndex = laneIndex;
-            activeLanes.push({ index: laneIndex, end: interval.end });
         }
-        const laneCount = Math.max(1, nextLane);
+        const laneCount = Math.max(1, lanes.length);
         current.items.forEach(interval => { interval.block.laneCount = laneCount; });
     }
 }
 
 // Distribute each saved entry's zoom-invariant logged duration across the block
-// specs it appears in, so a split entry's blocks sum to the saved total and a
-// merged block sums its members. Proportional to each spec's weight, with the
-// last contribution taking the remainder so the sum stays exact.
+// specs it appears in, so a split entry's block pills sum to the saved total and
+// a merged block sums its members. Apportioned in whole display minutes by
+// largest remainder (proportional to each spec's weight) so the rounded pills
+// sum to the saved rounded minutes at every zoom — the duration contract — with
+// no rounding drift between fine and coarse zooms.
 function allocateLoggedTimeEntryBlockDurations(specs, sourceEntries) {
-    const savedDurationById = new Map();
+    const savedMsById = new Map();
     (Array.isArray(sourceEntries) ? sourceEntries : []).forEach(entry => {
-        if (entry?.id) savedDurationById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
+        if (entry?.id) savedMsById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
     });
 
     const contributionsByEntryId = new Map();
@@ -5633,16 +5648,35 @@ function allocateLoggedTimeEntryBlockDurations(specs, sourceEntries) {
 
     const durations = specs.map(() => 0);
     for (const [id, contributions] of contributionsByEntryId) {
-        const saved = savedDurationById.get(id) || 0;
+        const savedMs = savedMsById.get(id) || 0;
+        if (contributions.length === 1) {
+            // Whole entry in one block: contribute raw milliseconds so a block
+            // that merges several entries rounds their summed duration once
+            // (sub-minute auto-rule runs aggregate before rounding).
+            durations[contributions[0].index] += savedMs;
+            continue;
+        }
+        // Entry split across blocks: apportion its rounded minutes by largest
+        // remainder so the fragment pills sum to the saved rounded minutes at
+        // every zoom, with no rounding drift between fine and coarse zooms.
+        const savedMinutes = Math.round(savedMs / 60000);
         const totalWeight = contributions.reduce((total, contribution) => total + contribution.weight, 0);
-        let remaining = saved;
+        const rawShares = contributions.map(contribution => (
+            totalWeight > 0
+                ? savedMinutes * (contribution.weight / totalWeight)
+                : savedMinutes / contributions.length
+        ));
+        const floors = rawShares.map(Math.floor);
+        let leftover = savedMinutes - floors.reduce((total, value) => total + value, 0);
+        const byRemainder = rawShares
+            .map((share, position) => ({ position, remainder: share - floors[position] }))
+            .sort((left, right) => right.remainder - left.remainder || left.position - right.position);
+        const bonus = contributions.map(() => 0);
+        for (let rank = 0; rank < byRemainder.length && leftover > 0; rank++, leftover--) {
+            bonus[byRemainder[rank].position] = 1;
+        }
         contributions.forEach((contribution, position) => {
-            const isLast = position === contributions.length - 1;
-            const share = (isLast || totalWeight <= 0)
-                ? remaining
-                : Math.round(saved * (contribution.weight / totalWeight));
-            durations[contribution.index] += share;
-            remaining -= share;
+            durations[contribution.index] += (floors[position] + bonus[position]) * 60000;
         });
     }
     return durations;
@@ -7599,7 +7633,8 @@ function renderLoggedTimeEntries() {
         const task = Array.isArray(project.tasks)
             ? project.tasks.find(projectTask => projectTask.id === entry.taskId)
             : null;
-        const duration = Math.max(1, Math.round(item.durationMs / (60 * 1000)));
+        const blockDurationMs = Number.isFinite(item.loggedDurationMs) ? item.loggedDurationMs : item.durationMs;
+        const duration = Math.max(1, Math.round(blockDurationMs / (60 * 1000)));
         const sizeClass = naturalHeightPx < 20
             ? 'time-entry-block--tiny'
             : naturalHeightPx < 36

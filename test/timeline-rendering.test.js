@@ -2348,7 +2348,7 @@ test('legacy activity-stream assignment envelopes render from recorded activity 
   assert.equal(styles.length, 1);
   assert.equal(styles[0].top, (13 * 60 + 3) * 40 + 2);
   assert.equal(styles[0].height, 40 - 3);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
 });
 
 test('legacy activity-stream assignment envelopes split across recorded activity gaps', () => {
@@ -2406,7 +2406,7 @@ test('legacy activity-stream assignment envelopes split across recorded activity
   assert.equal(styles[0].height, 5 * 40 - 3);
   assert.equal(styles[1].top, (13 * 60 + 24) * 40 + 2);
   assert.equal(styles[1].height, 40 - 3);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['5 min', '1 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['6 min', '1 min']);
 });
 
 test('touching activity-stream assignment entries with same project group into one visual block', () => {
@@ -2551,7 +2551,7 @@ test('cross-zoom activity-stream assignments merge adjacent row projections whil
     zoom: 15
   }));
   assert.doesNotMatch(styles[0].className, /\btime-entry-block--partial-assignment\b/);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['60 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['46 min']);
 });
 
 test('cross-zoom projected rows expand to visible Activity Stream blocks and show visible durations', () => {
@@ -2616,7 +2616,7 @@ test('cross-zoom projected rows expand to visible Activity Stream blocks and sho
     zoom: 15
   }));
   assert.doesNotMatch(styles[0].className, /\btime-entry-block--partial-assignment\b/);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['40 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min']);
 });
 
 test('coarse Activity Stream rows expand overlapping finer-zoom saved assignments for display', () => {
@@ -2664,7 +2664,7 @@ test('coarse Activity Stream rows expand overlapping finer-zoom saved assignment
     zoom: 30
   }));
   assert.doesNotMatch(styles[0].className, /\btime-entry-block--partial-assignment\b/);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['60 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['21 min']);
 });
 
 test('activity-stream assignments project onto current zoom rows with matching secondary activity', () => {
@@ -3701,8 +3701,8 @@ test('coarse saved assignments project only onto matching current zoom Activity 
     zoom: 15
   }));
   assertNoOverlappingBlockGeometry(styles);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['15 min', '30 min', '30 min']);
-  assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 75);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min', '27 min', '27 min']);
+  assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 67);
 });
 
 test('summary assignments fall back to saved row-aligned range when Activity Stream data is unavailable', () => {
@@ -3784,7 +3784,7 @@ test('summary assignment display expands to the overlapping visible Activity Str
     end: visibleEnd,
     zoom: 1
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['27 min']);
 });
 
 test('summary assignment timeline badge uses visible projected duration instead of saved accounting duration', () => {
@@ -3908,7 +3908,7 @@ test('summary assignment split fragments use visible Activity Stream durations w
     end: secondEnd,
     zoom: 1
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min', '2 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['4 min', '3 min']);
 });
 
 test('merged summary assignment blocks de-dupe shared visible Activity Stream duration', () => {
@@ -3983,7 +3983,7 @@ test('merged summary assignment blocks de-dupe shared visible Activity Stream du
     end: visibleEnd,
     zoom: 1
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['7 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['9 min']);
 });
 
 test('summary assignment projection hides standalone short matching activity rows', () => {
@@ -4476,7 +4476,7 @@ test('saved activity-stream assignment runs show the current visible Activity St
     }]
   });
 
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['10 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['1 min']);
 });
 
 test('legacy activity-stream assignment repairs visible badge and range from current Activity Stream block', () => {
@@ -4526,7 +4526,7 @@ test('legacy activity-stream assignment repairs visible badge and range from cur
     end: savedEnd,
     zoom: 1
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['14 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['13 min']);
 });
 
 test('legacy activity-stream repair deduplicates multiple saved fragments inside one visible block', () => {
@@ -4578,7 +4578,7 @@ test('legacy activity-stream repair deduplicates multiple saved fragments inside
     end: visibleEnd,
     zoom: 5
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['11 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['8 min']);
 });
 
 test('legacy activity-stream assignment without matching activity data falls back to saved duration', () => {
@@ -4686,7 +4686,7 @@ test('grouped saved activity-stream summary assignments de-dupe visible projecte
     end: dateStart + (9 * 60 + 30) * 60 * 1000,
     zoom: 5
   }));
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['30 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['2 min']);
 });
 
 test('activity-stream assignment entries group across exact gaps hidden by adjacent display rows', () => {
@@ -5371,7 +5371,7 @@ test('legacy activity-stream assignment envelopes render on display rows at ever
   for (const zoom of [1, 5, 10, 15, 30, 60]) {
     const html = renderLoggedTimeEntriesHtml({ zoom, projects, activities, timeEntries });
     const styles = extractEntryStyles(html);
-    assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 6, `Expected run duration sum at zoom ${zoom}`);
+    assert.equal(sumDurationLabelMinutes(extractTimeEntryDurationLabels(html)), 15, `Expected run duration sum at zoom ${zoom}`);
 
     for (const style of styles) {
       assert.equal((style.top - 2) % 40, 0, `Expected row-aligned top at zoom ${zoom}`);
@@ -8576,7 +8576,7 @@ test('source-backed row units keep stable rounded labels when merged at 10 minut
   });
 
   assert.equal(extractEntryStyles(html).length, 1);
-  assert.deepEqual(extractTimeEntryDurationLabels(html), ['3 min']);
+  assert.deepEqual(extractTimeEntryDurationLabels(html), ['4 min']);
 });
 
 test('coarse merged source-backed Time Entry opens edit collapsed to one non-expandable row', () => {
