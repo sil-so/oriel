@@ -12,6 +12,9 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
 
+> [!WARNING]
+> Oriel is pre-alpha and not ready for daily use yet. The public repository is currently source-build only while core timeline/rendering bugs are stabilized before a signed release.
+
 ![Oriel Timeline workspace](./docs/images/oriel-hero.png)
 
 > [!NOTE]
