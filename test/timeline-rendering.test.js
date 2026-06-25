@@ -8655,11 +8655,15 @@ test('coarse merged source-backed Time Entry opens edit collapsed to one non-exp
   assert.equal(modalArgs[0], at(11, 52));
   assert.equal(modalArgs[1], at(11, 56));
   assert.equal(modalArgs[5], false);
-  assert.equal(modalArgs[6].length, 2);
-  assert.deepEqual(Array.from(modalArgs[6], activity => activity.sources?.[0]?.assignmentDisplayGroupKey), [
-    'entry-planning-first-display',
-    'entry-planning-second-display'
-  ]);
+  // The edit resolves from the saved entries, so same-identity members collapse
+  // to one logged-duration row (pill and Edit agree) rather than one render
+  // projection per member.
+  assert.equal(modalArgs[6].length, 1);
+  assert.equal(modalArgs[6][0].assignedDurationMs, 3 * 60 * 1000);
+  assert.deepEqual(
+    Array.from(modalArgs[6][0].sources || [], source => source.assignmentDisplayGroupKey),
+    ['entry-planning-first-display', 'entry-planning-second-display']
+  );
   modalArgs[6][0].sources[0].title = 'Checkout step one';
   modalArgs[6][0].sources[1].title = 'Checkout step two';
 

@@ -326,3 +326,136 @@ test('contract: a freehand manual block fills its saved range across blank rows'
     );
   }
 });
+
+// A visible amazon.nl browser activity (Brave), a second identity for the merge
+// regression so the two same project/task entries are not grouped as one.
+function amazonActivity(startMinute, endMinute) {
+  return {
+    app: 'Brave Browser',
+    title: 'amazon.nl',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    url: 'https://www.amazon.nl/',
+    start: at(startMinute),
+    end: at(endMinute),
+    duration: (endMinute - startMinute) * MINUTE
+  };
+}
+
+// An amazon summary entry saved at a given display zoom with full-row display
+// bounds, so it renders with exact (full-row) geometry when viewed at that zoom.
+function amazonSummaryEntryAtDisplayZoom({ id, startMinute, endMinute, assignedMinutes, displayStartMinute, displayEndMinute, displayZoom, projectId = 'project-1', taskId = 'task-1' }) {
+  const start = at(startMinute);
+  const end = at(endMinute);
+  return {
+    id, start, end, projectId, taskId, createdBy: 'manual', description: '',
+    activities: [{
+      app: 'Brave Browser',
+      title: 'amazon.nl',
+      appPath: '/Applications/Brave Browser.app',
+      bundleId: 'com.brave.Browser',
+      url: 'https://www.amazon.nl/',
+      start, end,
+      duration: assignedMinutes * MINUTE,
+      assignedDurationMs: assignedMinutes * MINUTE,
+      assignmentStart: start,
+      assignmentEnd: end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayStart: at(displayStartMinute),
+      assignmentDisplayEnd: at(displayEndMinute),
+      assignmentDisplayZoom: displayZoom
+    }]
+  };
+}
+
+// Regression (post-#67, real-data): an assignment saved at the current display
+// zoom renders with exact (full-row) geometry, but must still merge with a same
+// project/task block in the same row instead of stacking beside it. Real bug:
+// assigning amazon (saved at 15 min) into a 14:15-14:30 row that already held a
+// Codex block showed two 3-min blocks, not one 6-min block.
+test('contract: a display-zoom-exact assignment still merges with a same project/task block in its row', () => {
+  const context = loadHonestTimelineContext();
+  const ZOOM = 15;
+  // Both activities sit inside the same 15-min row (0-15 min).
+  context.state.activities = [codexActivity(0, 3), amazonActivity(5, 8)];
+  context.state.timelineActivities = context.state.activities;
+  context.state.timeEntries = [
+    summaryEntry({ id: 'entry-codex', startMinute: 0, endMinute: 3, assignedMinutes: 3 }),
+    amazonSummaryEntryAtDisplayZoom({
+      id: 'entry-amazon', startMinute: 5, endMinute: 8, assignedMinutes: 3,
+      displayStartMinute: 0, displayEndMinute: 15, displayZoom: ZOOM
+    })
+  ];
+  context.state.projects = PROJECTS;
+
+  const blocks = buildBlocksAtZoom(context, ZOOM)
+    .filter(b => b.projectId === 'project-1' && b.taskId === 'task-1');
+  assert.equal(blocks.length, 1, 'the same-row same-project blocks merge into one at 15 min');
+  assert.equal(blocks[0].loggedDurationMs, 6 * MINUTE, 'merged pill sums both saved durations');
+  assert.equal(blocks[0].laneCount, 1, 'merged block is not stacked into lanes');
+});
+
+// One Claude summary entry holding two sessions of different size at different
+// times, each backed by visible Claude so the entry occupies both runs.
+function twoSessionClaudeEntry({ id, first, second, projectId = 'project-1', taskId = 'task-1' }) {
+  const activity = ([startMinute, endMinute, assignedMinutes]) => {
+    const start = at(startMinute);
+    const end = at(endMinute);
+    return {
+      app: 'Claude', title: 'Claude', appPath: '/Applications/Claude.app',
+      bundleId: 'com.anthropic.claude', url: '',
+      start, end,
+      duration: assignedMinutes * MINUTE,
+      assignedDurationMs: assignedMinutes * MINUTE,
+      assignmentStart: start, assignmentEnd: end,
+      assignmentSource: 'activity-stream',
+      assignmentModel: 'activity-stream-summary',
+      assignmentDisplayZoom: 5
+    };
+  };
+  return {
+    id, start: at(first[0]), end: at(second[1]), projectId, taskId,
+    createdBy: 'manual', description: '',
+    activities: [activity(first), activity(second)]
+  };
+}
+
+// Regression (post-#67, real-data): one saved entry with several activities at
+// different times splits at 1 min into a block per activity run. Each block's
+// pill must show that activity's saved duration (matching the Activity Stream),
+// not an even share of the entry total by row count. Real bug: a 4-min Claude
+// segment showed 8 min at 1-min zoom. Here the runs span 3 and 20 rows but log
+// 3 and 9 minutes, so a row-count split (≈2/10) differs from the correct 3/9.
+test('contract: a split entry apportions each block by its activity duration, not row count', () => {
+  const context = loadHonestTimelineContext();
+  context.state.activities = [claudeVisible(0, 3), claudeVisible(30, 50)];
+  context.state.timelineActivities = context.state.activities;
+  context.state.timeEntries = [
+    twoSessionClaudeEntry({ id: 'entry-multi', first: [0, 3, 3], second: [30, 50, 9] })
+  ];
+  context.state.projects = PROJECTS;
+
+  const blocks = buildBlocksAtZoom(context, 1)
+    .filter(b => b.projectId === 'project-1' && b.taskId === 'task-1')
+    .sort((left, right) => left.displayRowStart - right.displayRowStart);
+
+  assert.equal(blocks.length, 2, 'entry splits into one block per session at 1 min');
+  assert.equal(blocks[0].loggedDurationMs, 3 * MINUTE, 'first block shows its 3-min session, not a row-count share');
+  assert.equal(blocks[1].loggedDurationMs, 9 * MINUTE, 'second block shows its 9-min session');
+  assert.equal(
+    blocks[0].loggedDurationMs + blocks[1].loggedDurationMs,
+    12 * MINUTE,
+    'split pills sum to the saved total'
+  );
+});
+
+// A visible Claude activity, used to give the split-apportionment entry rows.
+function claudeVisible(startMinute, endMinute) {
+  return {
+    app: 'Claude', title: 'Claude', appPath: '/Applications/Claude.app',
+    bundleId: 'com.anthropic.claude', url: '',
+    start: at(startMinute), end: at(endMinute),
+    duration: (endMinute - startMinute) * MINUTE
+  };
+}

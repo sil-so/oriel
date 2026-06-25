@@ -5538,12 +5538,21 @@ function expandLoggedTimeEntryOccupancySpecs(item, activities, dateStartOfDay, z
 // Merge same project/task occupancy specs whose display-row ranges are
 // consecutive or overlapping into one block (Slice 4), unioning entry ids and
 // summing weight, regardless of the saved displayGroupKey. A gap row between two
-// runs keeps them split. Exact (1 min) geometry specs are never merged so their
-// precise sub-row sessions stay distinct.
-function mergeLoggedTimeEntryBlockSpecs(specs) {
-    const exactSpecs = specs.filter(spec => spec.renderExactGeometry);
+// runs keeps them split.
+//
+// `mergeExact` controls exact-geometry specs. At the genuine sub-row session
+// zoom (1 min) they stay distinct so precise sub-row sessions are preserved
+// (mergeExact = false). At coarse zooms an "exact" spec only means the entry was
+// saved at the matching display zoom, so its geometry is full-row and it must
+// merge with a same project/task neighbour in the same row (mergeExact = true) —
+// otherwise it stacks beside it (e.g. a manual assignment saved at 15 min next
+// to an auto-rule block in the same row). A merged multi-spec block is no longer
+// a single precise session, so it renders row-aligned (renderExactGeometry off).
+function mergeLoggedTimeEntryBlockSpecs(specs, { mergeExact = false } = {}) {
+    const unmergeableExactSpecs = mergeExact ? [] : specs.filter(spec => spec.renderExactGeometry);
+    const mergeableSpecs = mergeExact ? specs.slice() : specs.filter(spec => !spec.renderExactGeometry);
     const mergeableByKey = new Map();
-    specs.filter(spec => !spec.renderExactGeometry).forEach(spec => {
+    mergeableSpecs.forEach(spec => {
         const key = `${spec.projectId ?? ''} ${spec.taskId ?? ''}`;
         if (!mergeableByKey.has(key)) mergeableByKey.set(key, []);
         mergeableByKey.get(key).push(spec);
@@ -5565,6 +5574,9 @@ function mergeLoggedTimeEntryBlockSpecs(specs) {
                 current.entries = [...current.entries, ...spec.entries];
                 current.weight += spec.weight;
                 current.isAssignedGroup = current.isAssignedGroup || spec.isAssignedGroup;
+                // A merged block spans multiple specs/rows: render it row-aligned,
+                // not at one spec's precise sub-row geometry.
+                current.renderExactGeometry = false;
             } else {
                 current = { ...spec, entryIds: [...spec.entryIds], entries: [...spec.entries] };
                 mergedSpecs.push(current);
@@ -5572,7 +5584,7 @@ function mergeLoggedTimeEntryBlockSpecs(specs) {
         }
     }
 
-    return [...exactSpecs, ...mergedSpecs]
+    return [...unmergeableExactSpecs, ...mergedSpecs]
         .sort((left, right) => left.displayRowStart - right.displayRowStart
             || left.displayStart - right.displayStart);
 }
@@ -5623,24 +5635,68 @@ function assignLoggedTimeEntryBlockLanes(blocks) {
     }
 }
 
+// The saved assignment activity ranges of an entry, each with the duration it
+// logged. Used to apportion a split entry's saved total to blocks by where its
+// activities actually fall, so split pills match the Activity Stream.
+function getLoggedTimeEntryActivityRanges(entry) {
+    return getActivityStreamAssignmentActivities(entry)
+        .map(activity => {
+            const range = getAssignmentActivityRange(entry, activity);
+            if (!range) return null;
+            const durationMs = getActivitySourceDuration(activity, range.start, range.end);
+            return {
+                start: range.start,
+                end: range.end,
+                durationMs: Number.isFinite(durationMs) && durationMs > 0 ? durationMs : (range.end - range.start)
+            };
+        })
+        .filter(Boolean);
+}
+
+// The saved activity time of an entry that falls inside a block's display range.
+// This is the entry's real logged duration in that block — not its row count —
+// so a split entry's block pills track each segment's actual size.
+function getLoggedTimeEntrySpecActivityWeight(activityRanges, spec) {
+    const rangeStart = Number(spec?.displayStart);
+    const rangeEnd = Number(spec?.displayEnd);
+    if (!Array.isArray(activityRanges) || !Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
+        return 0;
+    }
+    return activityRanges.reduce((total, activity) => {
+        const span = activity.end - activity.start;
+        if (!(span > 0)) return total;
+        const overlap = Math.max(0, Math.min(activity.end, rangeEnd) - Math.max(activity.start, rangeStart));
+        return total + activity.durationMs * (overlap / span);
+    }, 0);
+}
+
 // Distribute each saved entry's zoom-invariant logged duration across the block
 // specs it appears in, so a split entry's block pills sum to the saved total and
 // a merged block sums its members. Apportioned in whole display minutes by
-// largest remainder (proportional to each spec's weight) so the rounded pills
-// sum to the saved rounded minutes at every zoom — the duration contract — with
-// no rounding drift between fine and coarse zooms.
+// largest remainder, weighted by the entry's saved activity time that falls in
+// each block (so split pills match the Activity Stream), with a row-span
+// fallback. The rounded pills sum to the saved rounded minutes at every zoom —
+// the duration contract — with no rounding drift between fine and coarse zooms.
 function allocateLoggedTimeEntryBlockDurations(specs, sourceEntries) {
     const savedMsById = new Map();
+    const activityRangesById = new Map();
     (Array.isArray(sourceEntries) ? sourceEntries : []).forEach(entry => {
-        if (entry?.id) savedMsById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
+        if (!entry?.id) return;
+        savedMsById.set(entry.id, getRenderedTimeEntryDurationMs(entry));
+        activityRangesById.set(entry.id, getLoggedTimeEntryActivityRanges(entry));
     });
 
     const contributionsByEntryId = new Map();
     specs.forEach((spec, index) => {
         const ids = Array.isArray(spec.entryIds) ? spec.entryIds : [];
         if (ids.length === 0) return;
-        const weight = (Number.isFinite(spec.weight) && spec.weight > 0 ? spec.weight : 1) / ids.length;
+        const rowSpan = Math.max(1, (Number(spec.displayRowEnd) || 0) - (Number(spec.displayRowStart) || 0));
         ids.forEach(id => {
+            // Prefer the entry's real logged time inside this block; fall back to
+            // an even share of the block's row span when no activity range info
+            // is usable (e.g. freehand manual blocks).
+            const activityWeight = getLoggedTimeEntrySpecActivityWeight(activityRangesById.get(id), spec);
+            const weight = activityWeight > 0 ? activityWeight : rowSpan / ids.length;
             if (!contributionsByEntryId.has(id)) contributionsByEntryId.set(id, []);
             contributionsByEntryId.get(id).push({ index, weight });
         });
@@ -5702,7 +5758,12 @@ function buildLoggedTimeEntryBlocks({
 
     const renderItems = buildLoggedTimeEntryRenderItems(sourceEntries, renderZoom, dayStart);
     const occupancySpecs = renderItems.flatMap(item => expandLoggedTimeEntryOccupancySpecs(item, activities, dayStart, renderZoom, layout));
-    const specs = mergeLoggedTimeEntryBlockSpecs(occupancySpecs);
+    // At coarse zooms, "exact" specs (saved at the matching display zoom) are
+    // full-row and must merge with same project/task neighbours; only the 1 min
+    // sub-row sessions stay distinct.
+    const specs = mergeLoggedTimeEntryBlockSpecs(occupancySpecs, {
+        mergeExact: !shouldRenderExactActivityStreamSessions(renderZoom)
+    });
     assignLoggedTimeEntryBlockLanes(specs);
     const loggedDurations = allocateLoggedTimeEntryBlockDurations(specs, sourceEntries);
 
@@ -5826,11 +5887,34 @@ function getTimeEntryBlockRenderActivities(item) {
     });
 }
 
+// The saved activity breakdown for a block, resolved from its entries' ids
+// against state.timeEntries and summarized the same way the Edit modal groups a
+// multi-entry selection. Summing these equals the block's logged duration, so
+// the pill and the Edit modal agree (contract Invariant 4) instead of the modal
+// showing a render projection (one segment's duration, not the saved total).
+function getSavedTimeEntryBlockBreakdown(item) {
+    const entryIds = [...new Set((Array.isArray(item?.entries) ? item.entries : [])
+        .map(entry => entry?.id)
+        .filter(Boolean))];
+    const entries = entryIds
+        .map(id => (Array.isArray(state.timeEntries) ? state.timeEntries : []).find(entry => entry.id === id))
+        .filter(Boolean);
+    if (entries.length === 0) return [];
+    return getGroupedTimeEntryActivities(entries);
+}
+
 function registerTimeEntryBlockDetail(model, item) {
     const detailMap = model?.timeEntryBlockDetails;
     if (!detailMap || !isSourceBackedTimeEntryRenderItem(item)) return null;
 
-    const renderActivities = getTimeEntryBlockRenderActivities(item);
+    // The render projection (one segment's clipped duration) is only correct for
+    // a genuine 1 min sub-row scoped edit. Every other block must show the saved
+    // breakdown so the Edit total equals the duration pill.
+    const useScopedProjection = shouldRenderExactActivityStreamSessions(model?.zoom)
+        && item.renderExactGeometry === true;
+    const renderActivities = useScopedProjection
+        ? getTimeEntryBlockRenderActivities(item)
+        : getSavedTimeEntryBlockBreakdown(item);
     if (renderActivities.length === 0) return null;
 
     const originalEntry = getTimeEntryBlockOriginalEntry(item);
