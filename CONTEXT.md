@@ -74,3 +74,20 @@ Hands-on versus hands-off captured-time metadata for an activity. It is useful
 internal metadata, but hidden from normal user-facing timeline, popup,
 breakdown, Assign, and Edit UI unless a future product decision re-enables it.
 _Avoid_: Primary activity identity, assignment signal
+
+**Logged Time Entry Block**:
+The assembled visual unit in the Time Entries timeline for a saved entry at the
+active zoom: a maximal run of consecutive occupied display rows for one
+project/task, broken at empty or nonmatching rows and merged across same
+project/task adjacency. Its duration pill shows Logged Duration, not its elapsed
+visual span. Source-backed blocks occupy only rows with matching visible
+Activity Stream activity; freehand manual blocks occupy the rows their saved
+range covers.
+_Avoid_: Elapsed envelope, displayGroupKey block, projected range
+
+**Logged Duration**:
+The saved, zoom-invariant duration of a canonical assignment: the sum of its
+canonical assignment activities' `assignedDurationMs`, fixed at save time. It is
+the duration contract for Time Entry pills, Edit, Work Times, and project totals
+at every zoom, and is never derived from elapsed span or per-zoom projection.
+_Avoid_: Elapsed duration, projected duration, visual span

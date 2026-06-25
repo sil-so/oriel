@@ -361,6 +361,62 @@ function shouldBuildBulkModalDisplayActivities(activities) {
         && activities.some(activity => Boolean(getBulkModalGroupingKey(activity)));
 }
 
+// A saved logged entry stores its assignment as a snapshot that can hold many
+// capture fragments (auto-rule, e.g. 6 "sessions" including 1-second blips) or
+// summary sources. When editing, the review list must present each identity as a
+// single, non-expandable row at its logged duration — never a drill-down into
+// capture fragments (which expose sub-second noise and can drift from the logged
+// total). Collapse per identity, summing assignedDurationMs, and drop
+// modalSourceActivities/sources so renderModalActivityReviewItem renders a flat row
+// (sources.length <= 1 branch). Save is unaffected: it persists
+// editingTimeEntryPersistedActivities, this only changes what is shown.
+function buildCollapsedSavedEntryDisplayActivities(activities) {
+    const order = [];
+    const groups = new Map();
+
+    for (const activity of Array.isArray(activities) ? activities : []) {
+        const key = getBulkModalGroupingKey(activity);
+        if (!key) {
+            order.push({ activity });
+            continue;
+        }
+
+        if (!groups.has(key)) {
+            const { modalSourceActivities, sources, children, modalGroupedReviewRow, ...base } = activity;
+            const group = {
+                ...base,
+                start: Number.isFinite(activity?.start) ? activity.start : undefined,
+                end: Number.isFinite(activity?.end) ? activity.end : undefined,
+                duration: 0,
+                assignedDurationMs: 0
+            };
+            groups.set(key, group);
+            order.push({ key });
+        }
+
+        const group = groups.get(key);
+        const duration = getModalActivityDurationMs(activity);
+        group.duration += duration;
+        group.assignedDurationMs += duration;
+        if (Number.isFinite(activity?.start)) {
+            group.start = Number.isFinite(group.start) ? Math.min(group.start, activity.start) : activity.start;
+        }
+        if (Number.isFinite(activity?.end)) {
+            group.end = Number.isFinite(group.end) ? Math.max(group.end, activity.end) : activity.end;
+        }
+    }
+
+    return order
+        .map(item => {
+            if (Object.prototype.hasOwnProperty.call(item, 'activity')) {
+                return { activity: item.activity, standalone: true };
+            }
+            return { activity: groups.get(item.key), standalone: false };
+        })
+        .filter(({ activity, standalone }) => standalone || getModalActivityDurationMs(activity) > 0)
+        .map(({ activity }) => activity);
+}
+
 function shouldUseSelectedModalActivityDuration(isBulk = window.isBulkAllocation) {
     return Boolean(isBulk)
         || state.currentModalDurationMode === MODAL_DURATION_MODE_SELECTED_ACTIVITIES;
@@ -449,34 +505,6 @@ function refreshModalActivitySelectionEffects() {
     refreshModalLoggedActivityControls();
 }
 
-function isModalBrowserActivity(activity) {
-    const app = String(activity?.app || '').trim().toLowerCase();
-    const bundleId = String(activity?.bundleId || '').trim().toLowerCase();
-    const appPath = String(activity?.appPath || '').trim().toLowerCase();
-    const browserPattern = /(^|[^a-z])(brave|chrome|chromium|safari|firefox|edge|arc|opera|vivaldi|orion|dia|zen|floorp|librewolf|waterfox|tor browser|duckduckgo|mullvad)([^a-z]|$)/;
-    return browserPattern.test(app)
-        || browserPattern.test(bundleId)
-        || browserPattern.test(appPath);
-}
-
-function getModalGroupedActivityCountLabel(activity, selectedSourceIndexes = null) {
-    const sources = Array.isArray(activity?.modalSourceActivities)
-        ? activity.modalSourceActivities.filter(Boolean)
-        : [];
-    if (sources.length <= 1) return '';
-
-    const selectedSources = selectedSourceIndexes instanceof Set
-        ? sources.filter((_, sourceIndex) => selectedSourceIndexes.has(sourceIndex))
-        : sources;
-    if (selectedSources.length === 0) return '';
-
-    const allBrowser = selectedSources.every(isModalBrowserActivity);
-    const allNative = !allBrowser && selectedSources.every(source => !isModalBrowserActivity(source) && String(source?.app || '').trim());
-    const singularNoun = allBrowser ? 'visit' : (allNative ? 'session' : 'activity');
-    const pluralNoun = allBrowser ? 'visits' : (allNative ? 'sessions' : 'activities');
-    return `${selectedSources.length} ${selectedSources.length === 1 ? singularNoun : pluralNoun}`;
-}
-
 function renderModalActivityMainRow(activity, index, { childIndex = null, selected = true, countLabel = '' } = {}) {
     const displayTitle = escapeModalText(cleanTitle(activity.title || '', activity));
     const app = escapeModalText(activity.app || '');
@@ -518,34 +546,15 @@ function renderModalActivityReviewItem(activity, index) {
     const sources = Array.isArray(activity?.modalSourceActivities)
         ? activity.modalSourceActivities.filter(Boolean)
         : [];
-    const selectedSourceIndexes = getSelectedModalActivitySourceIndexes(activity, index);
     const selected = state.modalActivitySelection?.has(index) !== false;
+    // Collapse a grouped identity to a single, non-expandable row at its summed
+    // logged duration (issue #6) — matching the Edit modal. The grouping data
+    // (modalSourceActivities) stays on the activity for the save path, but the
+    // Assign modal no longer renders a per-source "N sessions" drill-down.
     const parentActivity = selected && sources.length > 1
         ? (buildSelectedModalActivity(activity, index) || activity)
         : activity;
-    const parentRow = renderModalActivityMainRow(parentActivity, index, {
-        selected,
-        countLabel: getModalGroupedActivityCountLabel(activity, selectedSourceIndexes)
-    });
-
-    if (sources.length <= 1) {
-        return parentRow;
-    }
-
-    const childRows = sources.map((source, sourceIndex) => {
-        const childSelected = selected && selectedSourceIndexes.has(sourceIndex);
-        return renderModalActivityMainRow(source, index, {
-            childIndex: sourceIndex,
-            selected: childSelected
-        });
-    }).join('');
-
-    return `
-        <details class="modal-activity-group" data-modal-activity-group-index="${index}">
-            <summary class="list-none">${parentRow}</summary>
-            <div class="modal-activity-children">${childRows}</div>
-        </details>
-    `;
+    return renderModalActivityMainRow(parentActivity, index, { selected });
 }
 
 function renderModalActivityReviewList() {
@@ -743,10 +752,10 @@ function openTimeEntryModal(startMs, endMs, defaultDescription = '', defaultProj
         finalActivities = summarizeModalActivities(scanOverlaps);
     }
 
-    if (!isBulk
-        && window.editingTimeEntryId
-        && shouldBuildBulkModalDisplayActivities(finalActivities)) {
-        finalActivities = buildBulkModalDisplayActivities(finalActivities);
+    if (!isBulk && window.editingTimeEntryId) {
+        // Saved logged entries collapse to one non-expandable row per identity at
+        // the logged duration (no capture-fragment drill-down).
+        finalActivities = buildCollapsedSavedEntryDisplayActivities(finalActivities);
     } else if (!isBulk) {
         finalActivities = summarizeModalActivities(finalActivities);
     } else if (shouldBuildBulkModalDisplayActivities(finalActivities)) {
