@@ -93,6 +93,18 @@ class FakeElement {
   }
 }
 
+// Assemble the module-under-test the way index.html does: utils.js loads before
+// timeline.js, so utils-backed helpers (filterIsolatedSubMinuteRuns, the real
+// cleanTitle / getActivityIconHTML, …) are actually in scope instead of silently
+// no-op'ing behind `typeof … !== 'function'` guards (issue #76). utils.js exports
+// itself onto `window` (=== context), overwriting the cleanTitle / getActivityIconHTML
+// fallbacks below with the production implementations.
+//
+// state.js is intentionally NOT loaded: it reads localStorage at load time and
+// defines DOM as accessor-only getters, both of which fight the test harness
+// (no localStorage stub; tests assign DOM.elX directly). The `state` / `DOM`
+// stubs below stand in for it, mirroring index.html's load order for the seam
+// that matters here — utils.js → timeline.js.
 function loadTimelineContext() {
   const context = {
     window: {},
@@ -111,15 +123,37 @@ function loadTimelineContext() {
     resizeState: {},
     document: {},
     URL,
+    URLSearchParams,
     cleanTitle: title => title,
     getActivityIconHTML: () => '',
     console
   };
   context.window = context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
   vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
   return context;
 }
+
+// Guard the harness contract: loadTimelineContext must compose the module the way
+// index.html does (utils.js alongside timeline.js), so utils-backed helpers are in
+// scope instead of silently no-op'ing behind `typeof … !== 'function'` (issue #76).
+// If this fails, the ~80 tests built on this context have quietly stopped crossing
+// the production seam.
+test('loadTimelineContext assembles timeline.js over utils.js like index.html', () => {
+  const context = loadTimelineContext();
+  assert.equal(typeof context.filterIsolatedSubMinuteRuns, 'function',
+    'utils.js must load before timeline.js so filterIsolatedSubMinuteRuns is in scope');
+  assert.equal(typeof context.getActivityStreamRenderableActivities, 'function');
+  // The real utils.js exports replace the fallback stubs, so the no-op guard at the
+  // getActivityStreamRenderableActivities call site no longer short-circuits.
+  const minute = 60 * 1000;
+  const isolatedSubMinute = [{ app: 'Codex', title: 'Codex', url: '', start: 0, end: 30 * 1000 }];
+  assert.deepEqual(context.getActivityStreamRenderableActivities(isolatedSubMinute), [],
+    'isolated sub-minute run is dropped, proving the utils-backed filter actually ran');
+  const continuous = [{ app: 'Codex', title: 'Codex', url: '', start: 0, end: 2 * minute }];
+  assert.equal(context.getActivityStreamRenderableActivities(continuous).length, 1);
+});
 
 function createSimilarActivityBlock({
   startCell,
@@ -9694,18 +9728,21 @@ test('day timeline render model reuses exact Activity Stream sessions across ren
 test('exact Activity Stream blocks keep popup detail overlaps out of DOM payloads', () => {
   const context = loadTimelineContext();
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
-  const ownershipActivity = codexActivity(dateStart + 10 * 60 * 60 * 1000, dateStart + (10 * 60 + 2) * 60 * 1000);
+  const ownershipActivity = codexActivity(dateStart + 10 * 60 * 60 * 1000, dateStart + (10 * 60 + 6) * 60 * 1000);
+  // Each fragment is a >=60s run so the honest harness's filterIsolatedSubMinuteRuns
+  // keeps it (sub-minute isolated runs are dropped as context-switch noise, #76); the
+  // Brave interruption then survives to populate the exact block's lazy overlap detail.
   const visibleActivities = [
-    codexActivity(ownershipActivity.start, ownershipActivity.start + 45 * 1000),
+    codexActivity(ownershipActivity.start, ownershipActivity.start + 120 * 1000),
     {
       app: 'Brave Browser',
-      title: 'Short interruption',
+      title: 'Interruption',
       url: 'https://example.com/interrupt',
-      start: ownershipActivity.start + 45 * 1000,
-      end: ownershipActivity.start + 75 * 1000,
-      duration: 30 * 1000
+      start: ownershipActivity.start + 120 * 1000,
+      end: ownershipActivity.start + 210 * 1000,
+      duration: 90 * 1000
     },
-    codexActivity(ownershipActivity.start + 75 * 1000, ownershipActivity.end)
+    codexActivity(ownershipActivity.start + 210 * 1000, ownershipActivity.end)
   ];
   let renderedHtml = '';
 
@@ -13657,36 +13694,10 @@ test('bulk assignment modal renders aggregate rows while selected activities pre
 });
 
 // Activity Stream suppression (WS3) needs utils.js loaded alongside timeline.js so
-// filterIsolatedSubMinuteRuns is in scope (the default loadTimelineContext omits it).
-function loadTimelineWithUtilsContext() {
-  const context = {
-    window: {},
-    state: {
-      currentDate: new Date(2026, 4, 21),
-      zoom: 5,
-      activities: [],
-      timeEntries: [],
-      projects: [],
-      selectedActivities: new Set(),
-      settings: { minActivityThreshold: 60 }
-    },
-    DOM: {},
-    resizeState: {},
-    document: {},
-    URL,
-    cleanTitle: title => title,
-    getActivityIconHTML: () => '',
-    console
-  };
-  context.window = context;
-  vm.createContext(context);
-  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
-  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
-  return context;
-}
-
+// filterIsolatedSubMinuteRuns is in scope. The default loadTimelineContext now
+// dual-loads utils.js (issue #76), so it is the honest harness for this too.
 test('Activity Stream drops isolated sub-minute captures but keeps continuous and aggregated host runs', () => {
-  const context = loadTimelineWithUtilsContext();
+  const context = loadTimelineContext();
   const minute = 60 * 1000;
   const activities = [
     // Continuous Codex run (two captures <15s apart) -> kept.

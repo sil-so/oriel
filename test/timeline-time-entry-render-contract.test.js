@@ -32,8 +32,8 @@ const ZOOMS = [1, 5, 10, 15, 30, 60];
 const MINUTE = 60 * 1000;
 const DATE_START = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
 
-// Mirror of loadTimelineWithUtilsContext: dual-load utils.js then timeline.js so
-// the activity-identity / occupancy code paths actually run.
+// Mirror of timeline-rendering's loadTimelineContext: dual-load utils.js then
+// timeline.js so the activity-identity / occupancy code paths actually run.
 function loadHonestTimelineContext() {
   const context = {
     window: {},
