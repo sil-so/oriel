@@ -52,7 +52,11 @@ const UNLOGGED_WORK_MIN_REVIEW_FRAGMENT_DURATION_MS = 1000;
 const UNLOGGED_WORK_MIN_REVIEW_GROUP_DURATION_MS = 60 * 1000;
 const TIME_ENTRY_FLOATING_LABEL_MIN_HEIGHT_PX = 120;
 const TIME_ENTRY_FLOATING_LABEL_PADDING_PX = 6;
-const POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS = 60 * 1000;
+// The single visible floor for a user-facing canonical breakdown row. Below it a
+// canonical row is a Captured Fragment (capture noise: short page/app blips) and is
+// hidden from Activity Breakdown, Assign, and Edit. See isCapturedFragmentBreakdownRow
+// — the one place the rule lives (issue #75).
+const BREAKDOWN_MIN_VISIBLE_DURATION_MS = 60 * 1000;
 let visibleActivityCellsCache = null;
 let floatingTimeEntryLabelScrollPane = null;
 let floatingTimeEntryLabelFramePending = false;
@@ -2381,7 +2385,7 @@ function getTimelineBlockFallbackDisplayActivity(primaryActivity, popupDisplayMo
     if (primaryTitle) return primaryActivity;
 
     const visibleRows = (popupDisplayModel?.visibleRows || [])
-        .filter(row => Number(row?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS);
+        .filter(isVisibleCanonicalBreakdownRow);
     for (const row of visibleRows) {
         const labels = getPopupActivityDisplayLabels(row);
         const rowTitle = normalizeActivityText(labels?.primary).trim();
@@ -2389,8 +2393,7 @@ function getTimelineBlockFallbackDisplayActivity(primaryActivity, popupDisplayMo
 
         const children = Array.isArray(row?.children) ? row.children : [];
         for (const child of children) {
-            const childDuration = Number(child?.duration);
-            if (!Number.isFinite(childDuration) || childDuration < POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS) continue;
+            if (isCapturedFragmentBreakdownRow(child)) continue;
 
             const childLabels = getPopupActivityDisplayLabels(child);
             const childTitle = normalizeActivityText(childLabels?.primary).trim();
@@ -3054,7 +3057,7 @@ function getActivityBlockCandidateSimilarityActivities(blockEl, options = {}) {
         addActivity(row);
         if (includeBreakdown && Array.isArray(row?.children)) {
             row.children.forEach(child => {
-                if (Number(child?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS) {
+                if (isVisibleCanonicalBreakdownRow(child)) {
                     addActivity(child);
                 }
             });
@@ -4875,10 +4878,7 @@ function getVisibleLoggedTimeEntryRenderItems(renderItems) {
 }
 
 function getVisiblePopupBreakdownOverlaps(overlaps) {
-    return (Array.isArray(overlaps) ? overlaps : []).filter(overlap => {
-        const duration = Number(overlap?.duration);
-        return Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
-    });
+    return (Array.isArray(overlaps) ? overlaps : []).filter(isVisibleCanonicalBreakdownRow);
 }
 
 function getVisibleMultiActivityBreakdownOverlaps(overlaps, rangeStart, rangeEnd) {
@@ -5821,12 +5821,7 @@ function sortActivitySummaries(groupedOverlaps) {
             summary.assignedDurationMs = summary.duration;
         }
         return summary;
-    }).sort((a, b) => {
-        const startA = Number.isFinite(a.start) ? a.start : Number.MAX_SAFE_INTEGER;
-        const startB = Number.isFinite(b.start) ? b.start : Number.MAX_SAFE_INTEGER;
-        if (startA !== startB) return startA - startB;
-        return b.duration - a.duration;
-    });
+    }).sort(compareBreakdownRowsByTimelineOrder);
 }
 
 function registerActivityBlockDetailOverlaps(rowLayout, overlaps) {
@@ -6447,12 +6442,7 @@ function getBestMeaningfulPopupPrimaryRow(rows) {
 }
 
 function sortPopupDisplayRows(rows) {
-    return [...(Array.isArray(rows) ? rows : [])].sort((left, right) => {
-        const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
-        const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
-        if (startA !== startB) return startA - startB;
-        return right.duration - left.duration;
-    });
+    return [...(Array.isArray(rows) ? rows : [])].sort(compareBreakdownRowsByTimelineOrder);
 }
 
 function buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryActivity = null) {
@@ -6464,10 +6454,7 @@ function buildTopLevelPopupDisplayRows(exactRows, rangeStart, rangeEnd, primaryA
             popupContextKey: getPopupActivityExactGroupingKey(row),
             children: []
         }));
-    const visibleRows = rows.filter(row => {
-        const duration = Number(row?.duration);
-        return Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
-    });
+    const visibleRows = rows.filter(isVisibleCanonicalBreakdownRow);
 
     if (visibleRows.length > 0) return sortPopupDisplayRows(visibleRows);
 
@@ -6492,13 +6479,13 @@ function buildPrimaryPopupDisplayRow(primaryActivity, exactRows, rangeStart, ran
         .find(row => getPopupActivityExactGroupingKey(row) === primaryKey);
     const fallbackExactRow = !exactRow && isGenericPopupPrimaryActivity(primaryActivity)
         ? (Array.isArray(exactRows) ? exactRows : [])
-            .find(row => Number(row?.duration) >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS)
+            .find(isVisibleCanonicalBreakdownRow)
         : null;
     const sourceExactRow = exactRow || fallbackExactRow;
     const exactDuration = Number(sourceExactRow?.duration);
     const activeDuration = Number(activeDurationMs);
     const shouldUseExactRow = Number.isFinite(exactDuration)
-        && exactDuration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+        && exactDuration >= BREAKDOWN_MIN_VISIBLE_DURATION_MS;
     const duration = shouldUseExactRow
         ? exactDuration
         : Number.isFinite(activeDuration) && activeDuration > 0
@@ -6561,12 +6548,7 @@ function buildActivityPopupDisplayModel({
         || (isGenericPrimary ? topLevelRows[0] : null)
         || fallbackPrimaryRow;
     const secondaryRows = topLevelRows.filter(row => row !== primaryRow)
-        .sort((left, right) => {
-            const startA = Number.isFinite(left.start) ? left.start : Number.MAX_SAFE_INTEGER;
-            const startB = Number.isFinite(right.start) ? right.start : Number.MAX_SAFE_INTEGER;
-            if (startA !== startB) return startA - startB;
-            return right.duration - left.duration;
-        });
+        .sort(compareBreakdownRowsByTimelineOrder);
     const timelineRows = sortPopupDisplayRows(topLevelRows);
     const visibleRows = timelineRows.length > 1 ? timelineRows : [primaryRow];
 
@@ -6580,23 +6562,92 @@ function buildActivityPopupDisplayModel({
     };
 }
 
-function getInlineBadgePopupRows(rows) {
-    return (Array.isArray(rows) ? rows : []).filter(row => {
-        const duration = Number(row?.duration);
-        return Number.isFinite(duration) && duration >= POPUP_BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+// The duration a canonical breakdown row reads as in the UI: a saved assignment's
+// logged time, else the row's own (already range-clipped) duration, else its span.
+// Mirrors getModalActivityDurationMs so the popup and the modal classify a row the
+// same way.
+function getBreakdownRowDurationMs(row) {
+    const assigned = Number(row?.assignedDurationMs);
+    if (Number.isFinite(assigned) && assigned > 0) return assigned;
+    const duration = Number(row?.duration);
+    if (Number.isFinite(duration) && duration > 0) return duration;
+    const start = Number(row?.start);
+    const end = Number(row?.end);
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) return end - start;
+    return 0;
+}
+
+// The ONE place a canonical row is judged to be a Captured Fragment — capture noise
+// (short page/app blips) that must never surface in Activity Breakdown, Assign, or
+// Edit (issue #75). Every surface routes its visible floor through this predicate
+// instead of repeating a 60s threshold, so the rule cannot drift between surfaces.
+function isCapturedFragmentBreakdownRow(row) {
+    return getBreakdownRowDurationMs(row) < BREAKDOWN_MIN_VISIBLE_DURATION_MS;
+}
+
+function isVisibleCanonicalBreakdownRow(row) {
+    return !isCapturedFragmentBreakdownRow(row);
+}
+
+// Canonical breakdown rows always read in timeline order — earliest start first,
+// longer run first on ties — across Activity Breakdown, Assign, and Edit (issue #75).
+// The popup row sort and the similarity-summary sort the modal uses share this one
+// comparator so their order cannot drift.
+function compareBreakdownRowsByTimelineOrder(left, right) {
+    const startA = Number.isFinite(left?.start) ? left.start : Number.MAX_SAFE_INTEGER;
+    const startB = Number.isFinite(right?.start) ? right.start : Number.MAX_SAFE_INTEGER;
+    if (startA !== startB) return startA - startB;
+    return right.duration - left.duration;
+}
+
+// breakdownModel(row, context) is the single builder for the canonical breakdown
+// hierarchy shared by Activity Breakdown, Assign, and Edit (issue #75). It returns
+// the canonical rows and their grouped visits/sessions in timeline order, with
+// Captured Fragments already hidden by isCapturedFragmentBreakdownRow. `row` is the
+// thing being broken down — its `overlaps` over [rangeStart, rangeEnd] plus the
+// primaryActivity and activeDurationMs that orient the breakdown; `context` carries
+// the active `zoom`. The legacy popup/assign/edit return shape is preserved so the
+// three surfaces render this one model instead of re-deriving the hierarchy.
+function breakdownModel(row = {}, context = {}) {
+    const model = buildActivityPopupDisplayModel({
+        overlaps: row.overlaps,
+        rangeStart: row.rangeStart,
+        rangeEnd: row.rangeEnd,
+        primaryActivity: row.primaryActivity,
+        activeDurationMs: row.activeDurationMs,
+        zoom: Number.isFinite(context.zoom) ? context.zoom : state.zoom
     });
+    // `rows` are the canonical breakdown rows in timeline order; `groups` is the
+    // parallel view pairing each row with its canonical visit/session children
+    // (never Captured Fragments — children come from buildPopupSessionSummaryRow).
+    const rows = Array.isArray(model.visibleRows) ? model.visibleRows : [];
+    return {
+        ...model,
+        rows,
+        groups: rows.map(canonicalRow => ({
+            row: canonicalRow,
+            children: Array.isArray(canonicalRow?.children) ? canonicalRow.children : []
+        }))
+    };
+}
+
+function getInlineBadgePopupRows(rows) {
+    return (Array.isArray(rows) ? rows : []).filter(isVisibleCanonicalBreakdownRow);
 }
 
 function buildActivityBlockPopupDisplayModel(blockEl) {
     const { start: startMs, end: endMs } = getActivityBlockTimeRange(blockEl);
-    return buildActivityPopupDisplayModel({
-        overlaps: getActivityBlockDetailOverlaps(blockEl),
-        rangeStart: startMs,
-        rangeEnd: endMs,
-        primaryActivity: getActivityBlockData(blockEl),
-        activeDurationMs: Number(blockEl?.dataset?.activeDurationMs),
-        zoom: state.zoom
-    });
+    // Activity Breakdown renders the one shared breakdownModel (issue #75).
+    return breakdownModel(
+        {
+            overlaps: getActivityBlockDetailOverlaps(blockEl),
+            rangeStart: startMs,
+            rangeEnd: endMs,
+            primaryActivity: getActivityBlockData(blockEl),
+            activeDurationMs: Number(blockEl?.dataset?.activeDurationMs)
+        },
+        { zoom: state.zoom }
+    );
 }
 
 function getSelectedActivityScopeStore() {

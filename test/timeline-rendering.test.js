@@ -1309,6 +1309,74 @@ test('coarse Activity Stream popup clips a cell-spanning session to the block sp
   );
 });
 
+test('breakdownModel is the one builder Activity Breakdown, Assign, and Edit share', () => {
+  // Issue #75: a single breakdownModel(row, context) returns the canonical rows
+  // and groups in timeline order, and Captured Fragments are hidden in exactly
+  // one place — isCapturedFragmentBreakdownRow — instead of a per-surface 60s
+  // gate. This guards both the seam's existence and the single fragment rule.
+  const context = loadTimelineContext();
+  const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
+  const at = (hour, minute, second = 0) => dateStart + ((hour * 60 + minute) * 60 + second) * 1000;
+
+  assert.equal(typeof context.breakdownModel, 'function',
+    'breakdownModel(row, context) is the shared canonical breakdown builder');
+  assert.equal(typeof context.isCapturedFragmentBreakdownRow, 'function',
+    'Captured Fragments are classified in one named place');
+
+  const visibleCanonical = {
+    app: 'Code', title: 'main.js', url: '',
+    start: at(12, 0), end: at(12, 3), duration: 3 * 60 * 1000
+  };
+  const capturedFragment = {
+    app: 'Slack', title: 'general', url: 'https://app.slack.com/general',
+    start: at(12, 3, 10), end: at(12, 3, 40), duration: 30 * 1000
+  };
+
+  const model = context.breakdownModel(
+    {
+      overlaps: [visibleCanonical, capturedFragment],
+      rangeStart: at(12, 0),
+      rangeEnd: at(12, 4),
+      primaryActivity: visibleCanonical,
+      activeDurationMs: 3 * 60 * 1000
+    },
+    { zoom: 5 }
+  );
+
+  // The builder returns canonical rows (and a parallel groups view) in timeline order.
+  assert.ok(Array.isArray(model.rows), 'breakdownModel returns rows');
+  assert.ok(Array.isArray(model.groups), 'breakdownModel returns groups');
+  assert.equal(model.groups.length, model.rows.length, 'groups parallel rows');
+  const rowStarts = Array.from(model.rows, row => row.start);
+  assert.deepEqual(rowStarts, Array.from(rowStarts).sort((a, b) => a - b), 'rows in timeline order');
+
+  // The sub-minute Slack capture is a fragment: hidden from the shared model, and
+  // identified by the one predicate (not a duplicated per-surface threshold).
+  assert.ok(
+    model.rows.every(row => String(row.title || '').toLowerCase() !== 'general'),
+    'Captured Fragment is hidden from the shared breakdown model'
+  );
+  assert.equal(context.isCapturedFragmentBreakdownRow(capturedFragment), true,
+    'a sub-minute canonical row is a Captured Fragment');
+  assert.equal(context.isCapturedFragmentBreakdownRow(visibleCanonical), false,
+    'a canonical row above the visible floor is not a fragment');
+
+  // The legacy popup adapter still resolves to the same model (Activity Breakdown).
+  const popup = context.buildActivityPopupDisplayModel({
+    overlaps: [visibleCanonical, capturedFragment],
+    rangeStart: at(12, 0),
+    rangeEnd: at(12, 4),
+    primaryActivity: visibleCanonical,
+    activeDurationMs: 3 * 60 * 1000,
+    zoom: 5
+  });
+  assert.deepEqual(
+    Array.from(popup.visibleRows, row => row.title),
+    Array.from(model.rows, row => row.title),
+    'buildActivityPopupDisplayModel renders the same rows as breakdownModel'
+  );
+});
+
 test('coarse Activity Stream popup preserves repeated canonical row units in timeline order', () => {
   const dateStart = new Date(2026, 4, 21).setHours(0, 0, 0, 0);
   const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
