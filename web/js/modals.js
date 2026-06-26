@@ -200,6 +200,13 @@ function formatModalActivityDurationLabel(durationMs) {
 }
 
 function isVisibleModalActivityCandidate(activity) {
+    // Defer to the one shared Captured-Fragment rule (timeline.js, issue #75) so the
+    // modal's visible floor cannot drift from Activity Breakdown. The local constant
+    // is the identical fallback for the standalone modals test harness, which loads
+    // modals.js without timeline.js.
+    if (typeof isVisibleCanonicalBreakdownRow === 'function') {
+        return isVisibleCanonicalBreakdownRow(activity);
+    }
     return getModalActivityDurationMs(activity) >= MODAL_ACTIVITY_MIN_VISIBLE_DURATION_MS;
 }
 
