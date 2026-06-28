@@ -8488,6 +8488,86 @@ test('saved multi-row summary assignment with no source fragments totals logged 
   assert.equal(Math.round(totalMs / (60 * 1000)), 7, 'assigned-duration total');
 });
 
+test('clicking a coarse fan-out fragment scopes Edit to that block while preserving the whole entry', () => {
+  // Issue #60 / Bug B: a single saved entry that fans into several blocks at a
+  // zoom (the activity dips below the visible floor in some rows) must open Edit
+  // scoped to the CLICKED block — its duration pill resembles the Edit modal's
+  // duration — instead of every fragment opening the whole entry. The whole
+  // entry stays preserved for save (persisted range + activities), so no data is
+  // lost and the saved entry is not split.
+  const dateStart = new Date(2026, 5, 23).setHours(0, 0, 0, 0);
+  const project = { id: 'project-1', name: 'Oriel Time Tracker', color: '#3b82f6' };
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const claude = (start, end) => ({
+    app: 'Claude',
+    title: 'Claude',
+    appPath: '/Applications/Claude.app',
+    bundleId: 'com.anthropic.claude',
+    start,
+    end,
+    duration: end - start
+  });
+  // Claude present in rows 16:00-16:05 and 16:10-16:15, gap row at 16:05-16:10,
+  // so the entry fans into two blocks at 5 min.
+  const activities = [claude(at(16, 0), at(16, 4)), claude(at(16, 10), at(16, 14))];
+  const summary = {
+    app: 'Claude',
+    title: 'Claude',
+    appPath: '/Applications/Claude.app',
+    bundleId: 'com.anthropic.claude',
+    start: at(16, 0),
+    end: at(16, 15),
+    duration: 7 * 60 * 1000,
+    assignedDurationMs: 7 * 60 * 1000, // 7 min logged over a 15 min span
+    assignmentStart: at(16, 0),
+    assignmentEnd: at(16, 15),
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayZoom: 5
+  };
+  const timeEntries = [{
+    id: 'entry-fanout',
+    start: at(16, 0),
+    end: at(16, 15),
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: [summary]
+  }];
+
+  const { context, html } = renderLoggedTimeEntriesWithContext({
+    zoom: 5,
+    projects: [project],
+    activities,
+    timeEntries,
+    currentDate: new Date(dateStart)
+  });
+  const pills = extractTimeEntryDurationLabels(html);
+  const datasets = extractTimeEntryBlockDatasets(html);
+  assert.ok(pills.length >= 2, 'entry fans into multiple blocks at 5 min');
+  assert.equal(datasets.length, pills.length, 'each block is clickable');
+
+  let modalArgs = null;
+  context.openTimeEntryModal = (...args) => { modalArgs = args; };
+  context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+  datasets.forEach((dataset, index) => {
+    modalArgs = null;
+    assert.equal(context.openTimeEntryBlockEditor({ dataset }), true, `block ${index} opens editor`);
+    const editActivities = Array.isArray(modalArgs[6]) ? modalArgs[6] : [];
+    const editMinutes = Math.round(editActivities.reduce(
+      (total, activity) => total + (Number(activity.assignedDurationMs ?? activity.duration) || 0),
+      0
+    ) / (60 * 1000));
+    assert.equal(`${editMinutes} min`, pills[index], `block ${index} Edit duration resembles its pill`);
+    assert.equal(context.window.editingTimeEntryId, 'entry-fanout', `block ${index} edits the saved entry`);
+    assert.ok(
+      Array.isArray(context.window.editingTimeEntryPersistedActivities),
+      `block ${index} preserves the whole entry's activities for save`
+    );
+  });
+});
+
 test('saved Activity Stream row units use the primary visible row duration at coarse zoom', () => {
   const dateStart = new Date(2026, 5, 16).setHours(0, 0, 0, 0);
   const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
