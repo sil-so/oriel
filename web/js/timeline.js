@@ -5898,19 +5898,54 @@ function getSavedTimeEntryBlockBreakdown(item) {
     return getGroupedTimeEntryActivities(entries);
 }
 
+// A single saved entry fans into several blocks when its activity dips below the
+// visible floor in some rows, so each block carries only its apportioned share
+// of the logged duration (allocateLoggedTimeEntryBlockDurations). Such a fragment
+// block's logged minutes are strictly fewer than the whole entry's, which is how
+// we tell a fragment from a block that represents the whole entry.
+function isFannedFragmentTimeEntryBlock(item, originalEntry) {
+    const blockMs = Number(item?.loggedDurationMs);
+    if (!Number.isFinite(blockMs) || blockMs <= 0) return false;
+    const entry = originalEntry || getTimeEntryBlockOriginalEntry(item);
+    const savedMs = entry ? getRenderedTimeEntryDurationMs(entry) : 0;
+    return Math.round(savedMs / 60000) - Math.round(blockMs / 60000) >= 1;
+}
+
+// The clicked fragment's share of a fanned entry's saved activities: the whole
+// saved breakdown scaled so its durations sum to the block's apportioned logged
+// duration (its pill). The whole entry is still restored on save through the
+// persisted activities, so this only changes what the Edit modal shows.
+function getScopedFragmentTimeEntryBlockActivities(item) {
+    const saved = getSavedTimeEntryBlockBreakdown(item);
+    const blockMs = Number(item?.loggedDurationMs);
+    if (saved.length === 0 || !Number.isFinite(blockMs) || blockMs <= 0) return saved;
+
+    const rangeStart = Number(item?.displayStart);
+    const rangeEnd = Number(item?.displayEnd);
+    const weightOf = activity => {
+        const durationMs = Number(activity?.assignedDurationMs ?? activity?.duration) || 0;
+        const start = Number(activity?.assignmentStart ?? activity?.start);
+        const end = Number(activity?.assignmentEnd ?? activity?.end);
+        if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd)
+            || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+            return durationMs;
+        }
+        const overlap = Math.max(0, Math.min(end, rangeEnd) - Math.max(start, rangeStart));
+        return (end - start) > 0 ? durationMs * (overlap / (end - start)) : durationMs;
+    };
+    const weights = saved.map(weightOf);
+    const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+    return saved.map((activity, index) => {
+        const share = totalWeight > 0
+            ? blockMs * (weights[index] / totalWeight)
+            : blockMs / saved.length;
+        return { ...activity, duration: share, assignedDurationMs: share };
+    });
+}
+
 function registerTimeEntryBlockDetail(model, item) {
     const detailMap = model?.timeEntryBlockDetails;
-    if (!detailMap || !isSourceBackedTimeEntryRenderItem(item)) return null;
-
-    // The render projection (one segment's clipped duration) is only correct for
-    // a genuine 1 min sub-row scoped edit. Every other block must show the saved
-    // breakdown so the Edit total equals the duration pill.
-    const useScopedProjection = shouldRenderExactActivityStreamSessions(model?.zoom)
-        && item.renderExactGeometry === true;
-    const renderActivities = useScopedProjection
-        ? getTimeEntryBlockRenderActivities(item)
-        : getSavedTimeEntryBlockBreakdown(item);
-    if (renderActivities.length === 0) return null;
+    if (!detailMap) return null;
 
     const originalEntry = getTimeEntryBlockOriginalEntry(item);
     const firstEntry = item.firstEntry || item.entries?.[0] || originalEntry;
@@ -5919,12 +5954,46 @@ function registerTimeEntryBlockDetail(model, item) {
         .filter(Boolean))];
     if (!firstEntry?.id) return null;
 
+    // The render projection (one segment's clipped duration) is only correct for
+    // a genuine 1 min sub-row scoped edit.
+    const useScopedProjection = shouldRenderExactActivityStreamSessions(model?.zoom)
+        && item.renderExactGeometry === true;
+    // One saved entry split across several coarse blocks: scope Edit to the
+    // clicked fragment so its duration pill resembles the Edit modal's duration,
+    // instead of every fragment opening the whole entry (issue #60 / Bug B).
+    const isCoarseFragment = !useScopedProjection
+        && entryIds.length === 1
+        && isFannedFragmentTimeEntryBlock(item, originalEntry);
+
+    // Whole-entry and merged coarse blocks still show the saved breakdown so the
+    // Edit total equals the pill; only source-backed or fanned-fragment blocks
+    // need a registered detail.
+    if (!isSourceBackedTimeEntryRenderItem(item) && !isCoarseFragment) return null;
+
+    let renderActivities;
+    let blockStart = item.start;
+    let blockEnd = item.end;
+    if (useScopedProjection) {
+        renderActivities = getTimeEntryBlockRenderActivities(item);
+    } else if (isCoarseFragment) {
+        renderActivities = getScopedFragmentTimeEntryBlockActivities(item);
+        // Show the fragment's own slot, not the whole saved range.
+        if (Number.isFinite(item.displayStart) && Number.isFinite(item.displayEnd)
+            && item.displayEnd > item.displayStart) {
+            blockStart = item.displayStart;
+            blockEnd = item.displayEnd;
+        }
+    } else {
+        renderActivities = getSavedTimeEntryBlockBreakdown(item);
+    }
+    if (renderActivities.length === 0) return null;
+
     const key = `time-entry-detail-${detailMap.size + 1}`;
     detailMap.set(key, {
         entryId: firstEntry.id,
         entryIds,
-        start: item.start,
-        end: item.end,
+        start: blockStart,
+        end: blockEnd,
         description: firstEntry.description || '',
         projectId: firstEntry.projectId,
         taskId: firstEntry.taskId || '',
