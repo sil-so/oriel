@@ -400,6 +400,27 @@ function normalizeSelectedModalActivityForTimeEntrySave(activity) {
     };
 }
 
+// Resolve which saved activities to persist when re-saving an edited entry whose
+// Edit modal was opened from a registered block detail. The persisted set is the
+// whole saved breakdown (carrying each row's captured-fragment sources). Scoped
+// views (the exact 1 min projection and the coarse fan-out fragment) restore it
+// verbatim, because their modal rows are projections. A whole block shows the
+// real, editable saved breakdown, so we keep only the rows the user left selected
+// — dropping a deselected row while preserving the kept rows' sources (Bug A).
+function resolveEditedTimeEntrySaveActivities(persistedActivities, selectedModalActivities) {
+    if (!Array.isArray(persistedActivities)) return persistedActivities;
+    if (!Array.isArray(selectedModalActivities)) return persistedActivities;
+    const groupingKey = typeof getBulkModalGroupingKey === 'function'
+        ? getBulkModalGroupingKey
+        : (activity => getActivitySummaryKey(activity));
+    const selectedKeys = new Set(selectedModalActivities.map(groupingKey).filter(Boolean));
+    if (selectedKeys.size === 0) return persistedActivities;
+    const filtered = persistedActivities.filter(activity => selectedKeys.has(groupingKey(activity)));
+    // If nothing matched, the selection could not be mapped onto the saved set;
+    // restore the whole entry rather than persisting an empty activity list.
+    return filtered.length > 0 ? filtered : persistedActivities;
+}
+
 function normalizeModalActivitiesForTimeEntrySave(activities) {
     const normalizer = shouldSaveSelectedModalActivityDurations()
         ? normalizeSelectedModalActivityForTimeEntrySave
@@ -682,7 +703,8 @@ function clipAssignmentSourceToRange(source, rangeStart, rangeEnd) {
     });
 }
 
-function buildVisibleRowUnitAssignmentActivity(blockData, sourceActivities, rangeStart, rangeEnd) {
+function buildVisibleRowUnitAssignmentActivity(blockData, sourceActivities, rangeStart, rangeEnd, options = {}) {
+    const preferSourceIdentity = options?.preferSourceIdentity === true;
     const clippedSources = [];
     const seenSources = new Set();
 
@@ -707,12 +729,24 @@ function buildVisibleRowUnitAssignmentActivity(blockData, sourceActivities, rang
     if (duration <= 0) return null;
 
     const firstSource = clippedSources[0] || {};
+    // When a Similar scope drove the selection, the matched sources — not the
+    // coarse block's primary identity — define the assign row's identity (Bug C).
+    // Otherwise (a visible-session row unit) the block identity stays canonical.
+    const identitySource = preferSourceIdentity
+        ? clippedSources.reduce(
+            (best, source) => (getActivityDurationMs(source) > getActivityDurationMs(best) ? source : best),
+            firstSource
+        )
+        : firstSource;
+    const identityField = (field) => preferSourceIdentity
+        ? (identitySource[field] || blockData?.[field] || '')
+        : (blockData?.[field] || firstSource[field] || '');
     const rowActivity = {
-        app: blockData?.app || firstSource.app || '',
-        title: blockData?.title || firstSource.title || '',
-        url: blockData?.url || firstSource.url || '',
-        appPath: blockData?.appPath || firstSource.appPath || '',
-        bundleId: blockData?.bundleId || firstSource.bundleId || '',
+        app: identityField('app'),
+        title: identityField('title'),
+        url: identityField('url'),
+        appPath: identityField('appPath'),
+        bundleId: identityField('bundleId'),
         start: rangeStart,
         end: rangeEnd,
         duration,
@@ -3511,7 +3545,11 @@ function setupMainEventListeners() {
                         payload.start = persistedRange.start;
                         payload.end = persistedRange.end;
                     }
-                    payload.activities = window.editingTimeEntryPersistedActivities.map(normalizeActivityForTimeEntrySave);
+                    const savedActivities = resolveEditedTimeEntrySaveActivities(
+                        window.editingTimeEntryPersistedActivities,
+                        window.editingTimeEntryFilterPersistedBySelection ? selectedModalActivities : null
+                    );
+                    payload.activities = savedActivities.map(normalizeActivityForTimeEntrySave);
                 }
                 if (window.editingTimeEntryId) {
                     payload.createdBy = 'manual';
@@ -4135,7 +4173,9 @@ function setupMainEventListeners() {
                     || (selectedSimilarityKeys.length === 0 && Boolean(blockSessionKey))
                 );
                 const rowUnitActivity = shouldUseVisibleRowUnit
-                    ? buildVisibleRowUnitAssignmentActivity(blockData, matchingOverlaps, blockStart, blockEnd)
+                    ? buildVisibleRowUnitAssignmentActivity(blockData, matchingOverlaps, blockStart, blockEnd, {
+                        preferSourceIdentity: selectedSimilarityKeys.length > 0
+                    })
                     : null;
                 if (rowUnitActivity) {
                     overlaps.push(applySimilarityScopeToAssignmentActivity(rowUnitActivity, similarityScope));

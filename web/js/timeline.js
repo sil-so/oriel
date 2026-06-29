@@ -2208,6 +2208,7 @@ function draftUnloggedRecordedWorkGroup(groupId) {
     window.editingTimeEntryGroupIds = null;
     window.editingTimeEntryPersistedRange = null;
     window.editingTimeEntryPersistedActivities = null;
+    window.editingTimeEntryFilterPersistedBySelection = false;
     openTimeEntryModal(start, end, '', null, null, true, activities);
 }
 
@@ -5988,6 +5989,14 @@ function registerTimeEntryBlockDetail(model, item) {
     }
     if (renderActivities.length === 0) return null;
 
+    // The save always restores the whole saved breakdown (with its captured
+    // fragment sources), but how the modal selection is applied to it differs:
+    //  - scoped views (exact 1 min projection, coarse fan-out fragment) show
+    //    projection rows, so the whole entry is restored verbatim;
+    //  - a whole block shows the real, directly-editable saved breakdown, so a
+    //    deselected row must drop from the save while the kept rows keep their
+    //    sources. Filtering the persisted set by the selection does both (Bug A).
+    const filterActivitiesBySelection = !(useScopedProjection || isCoarseFragment);
     const key = `time-entry-detail-${detailMap.size + 1}`;
     detailMap.set(key, {
         entryId: firstEntry.id,
@@ -5999,6 +6008,7 @@ function registerTimeEntryBlockDetail(model, item) {
         taskId: firstEntry.taskId || '',
         billable: firstEntry.billable,
         activities: renderActivities,
+        filterActivitiesBySelection,
         persistedStart: entryIds.length <= 1 ? originalEntry?.start : undefined,
         persistedEnd: entryIds.length <= 1 ? originalEntry?.end : undefined,
         persistedActivities: entryIds.length <= 1 && Array.isArray(originalEntry?.activities) ? originalEntry.activities : null
@@ -7997,6 +8007,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
         window.editingTimeEntryPersistedActivities = Array.isArray(detail.persistedActivities)
             ? detail.persistedActivities
             : null;
+        window.editingTimeEntryFilterPersistedBySelection = detail.filterActivitiesBySelection === true;
         window.editingTimeEntryUsesSelectedActivityReview = true;
         openTimeEntryModal(
             detail.start,
@@ -8024,6 +8035,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
         window.editingTimeEntryGroupIds = groupEntries.map(entry => entry.id);
         window.editingTimeEntryPersistedRange = null;
         window.editingTimeEntryPersistedActivities = null;
+        window.editingTimeEntryFilterPersistedBySelection = false;
         window.editingTimeEntryUsesSelectedActivityReview = false;
         openTimeEntryModal(
             Number.isFinite(groupStart) ? groupStart : Math.min(...groupEntries.map(entry => entry.start)),
@@ -8046,6 +8058,7 @@ function openTimeEntryBlockEditor(blockEl, sourceEntries = state.timeEntries) {
     window.editingTimeEntryGroupIds = null;
     window.editingTimeEntryPersistedRange = null;
     window.editingTimeEntryPersistedActivities = null;
+    window.editingTimeEntryFilterPersistedBySelection = false;
     window.editingTimeEntryUsesSelectedActivityReview = false;
     openTimeEntryModal(entry.start, entry.end, entry.description, entry.projectId, entry.billable, false, null, entry.taskId || '');
     return true;

@@ -254,6 +254,7 @@ window.isBulkAllocation = false;
 window.editingTimeEntryId = null;
 window.editingTimeEntryPersistedRange = null;
 window.editingTimeEntryPersistedActivities = null;
+window.editingTimeEntryFilterPersistedBySelection = false;
 
 const browserPatterns = [
     /^Brave Browser\s*-\s*/i,

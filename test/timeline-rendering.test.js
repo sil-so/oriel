@@ -445,6 +445,43 @@ function loadTimeEntrySaveContext() {
   return context;
 }
 
+// Assemble the assignment seam the way index.html does: utils.js -> timeline.js
+// -> main.js. main.js's assignment helpers (buildVisibleRowUnitAssignmentActivity,
+// …) call utils/timeline-backed helpers, so loading main.js alone would silently
+// no-op them. document carries readyState/addEventListener so main.js's load-time
+// init defers instead of throwing.
+function loadAssignmentContext() {
+  const context = {
+    window: {},
+    state: {
+      currentDate: new Date(2026, 5, 15),
+      zoom: 5,
+      activities: [],
+      timeEntries: [],
+      projects: [],
+      selectedActivities: new Set(),
+      selectedActivityScopes: new Map(),
+      settings: { minActivityThreshold: 60 }
+    },
+    DOM: {},
+    resizeState: {},
+    document: { readyState: 'loading', addEventListener() {} },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    URL,
+    URLSearchParams,
+    cleanTitle: title => title,
+    getActivityIconHTML: () => '',
+    console
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync('web/js/utils.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/timeline.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/modals.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('web/js/main.js', 'utf8'), context);
+  return context;
+}
+
 function renderMemoryAidHtml({
   activities,
   timelineActivities,
@@ -2335,6 +2372,214 @@ test('source-backed popup row assignments keep saved duration and scoped exact e
     modalArgs[6].map(activity => activity.title),
     savedActivities.map(activity => activity.title)
   );
+});
+
+// Shared fixture for the Bug A pair: one whole source-backed entry whose three
+// browser rows each carry several captured-fragment sources.
+function shoppingEntryFixture() {
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const project = { id: 'project-personal', name: 'Personal', color: '#ef4444' };
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const displayStart = at(12, 0);
+  const displayEnd = at(12, 15);
+  const source = (title, url, start, end) => ({
+    app: 'Brave Browser',
+    title,
+    url,
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start,
+    end,
+    duration: end - start,
+    assignedDurationMs: end - start,
+    assignmentStart: start,
+    assignmentEnd: end,
+    assignmentSource: 'activity-stream',
+    assignmentModel: 'activity-stream-summary',
+    assignmentDisplayStart: displayStart,
+    assignmentDisplayEnd: displayEnd,
+    assignmentDisplayZoom: 5
+  });
+  // Each saved row aggregates several captured-fragment page sources.
+  const row = (host, sources) => ({
+    ...source(host, `https://${host}`, sources[0].start, sources[sources.length - 1].end),
+    assignmentStart: displayStart,
+    assignmentEnd: displayEnd,
+    assignmentDisplayGroupKey: `row-${host}`,
+    sources
+  });
+  const savedActivities = [
+    row('bol.com', [
+      source('bol basket', 'https://bol.com/basket', at(12, 0), at(12, 2)),
+      source('bol checkout', 'https://bol.com/checkout', at(12, 3), at(12, 6))
+    ]),
+    row('buurs.nl', [
+      source('buurs home', 'https://buurs.nl', at(12, 7), at(12, 9))
+    ]),
+    row('amazon.nl', [
+      source('amazon search', 'https://amazon.nl/s', at(12, 12), at(12, 13)),
+      source('amazon item', 'https://amazon.nl/item', at(12, 13), at(12, 14))
+    ])
+  ];
+  const timeEntry = {
+    id: 'entry-shopping',
+    start: displayStart,
+    end: displayEnd,
+    projectId: project.id,
+    createdBy: 'manual',
+    description: '',
+    activities: savedActivities
+  };
+  const visibleActivities = savedActivities.flatMap(activity => activity.sources);
+  return { project, dateStart, timeEntry, savedActivities, visibleActivities };
+}
+
+test('a whole source-backed Logged Time Entry Block opens Edit marked to save the selection', () => {
+  // Bug A (render seam): editing a whole (non-fanned) source-backed block at coarse
+  // zoom shows the real saved breakdown as editable Selected Activities. The block
+  // is marked so the save applies the modal selection to the saved breakdown
+  // (editingTimeEntryFilterPersistedBySelection), instead of force-restoring the
+  // whole entry the way the scoped 1 min projection / coarse fan-out fragment must.
+  const { project, dateStart, timeEntry, visibleActivities } = shoppingEntryFixture();
+
+  [5, 10].forEach(zoom => {
+    const { context, html } = renderLoggedTimeEntriesWithContext({
+      zoom,
+      projects: [project],
+      activities: visibleActivities,
+      timeEntries: [timeEntry],
+      currentDate: new Date(dateStart)
+    });
+    const datasets = extractTimeEntryBlockDatasets(html);
+    assert.equal(datasets.length, 1, `${zoom} min renders one whole source-backed block`);
+
+    let modalArgs = null;
+    context.openTimeEntryModal = (...args) => { modalArgs = args; };
+    context.window.openTimeEntryModal = context.openTimeEntryModal;
+
+    assert.equal(context.openTimeEntryBlockEditor({ dataset: datasets[0] }), true);
+    assert.equal(context.window.editingTimeEntryId, 'entry-shopping');
+    // The editor receives the real saved breakdown as editable Selected Activities.
+    assert.equal(modalArgs[6].length, 3, `${zoom} min Edit shows all three saved rows`);
+    // The whole block applies the selection to the save (so a deselection persists)...
+    assert.equal(
+      context.window.editingTimeEntryFilterPersistedBySelection,
+      true,
+      `${zoom} min whole source-backed block saves the modal selection`
+    );
+    // ...while still carrying the source-bearing saved set so kept rows keep evidence.
+    assert.ok(
+      Array.isArray(context.window.editingTimeEntryPersistedActivities)
+        && context.window.editingTimeEntryPersistedActivities.length === 3,
+      `${zoom} min keeps the full saved breakdown available for save`
+    );
+  });
+});
+
+test('saving an edited whole block drops a deselected row but keeps the kept rows’ sources', () => {
+  // Bug A (save resolution): deselecting amazon.nl and saving must drop only that
+  // row, while bol.com and buurs.nl keep their captured-fragment sources. A scoped
+  // edit (selection = null) restores the whole saved breakdown verbatim.
+  const context = loadAssignmentContext();
+  const { savedActivities } = shoppingEntryFixture();
+  context.window.editingTimeEntryId = 'entry-shopping';
+
+  // The Edit modal collapses the saved rows for display and drops their sources;
+  // the save must still recover them from the persisted set.
+  const collapsed = context.buildCollapsedSavedEntryDisplayActivities(savedActivities);
+  assert.ok(collapsed.every(activity => !activity.sources), 'display rows are collapsed without sources');
+  const selectionMinusAmazon = collapsed.filter(activity => !/amazon/i.test(`${activity.url || ''} ${activity.title || ''}`));
+
+  const saved = context.resolveEditedTimeEntrySaveActivities(savedActivities, selectionMinusAmazon);
+  const titles = saved.map(activity => activity.title);
+  assert.deepEqual(titles, ['bol.com', 'buurs.nl'], 'deselected amazon row is dropped');
+  assert.equal(saved.find(a => a.title === 'bol.com').sources.length, 2, 'kept bol.com row keeps its sources');
+  assert.equal(saved.find(a => a.title === 'buurs.nl').sources.length, 1, 'kept buurs.nl row keeps its sources');
+
+  // A scoped edit (no selection filter) restores the whole saved breakdown.
+  const restored = context.resolveEditedTimeEntrySaveActivities(savedActivities, null);
+  assert.equal(restored.length, 3, 'scoped/fragment edits restore the whole entry');
+  assert.deepEqual(restored.map(a => a.title), ['bol.com', 'buurs.nl', 'amazon.nl']);
+});
+
+test('Similar-scoped Assign rows take the matched identity, not the coarse block primary', () => {
+  // Bug C: at coarse zoom a single visible Coarse Activity Row can bundle several
+  // identities. Similar Selection on a non-primary unit (e.g. the Codex run inside
+  // an Oriel-primary block) correctly scopes the matched overlaps to Codex, but the
+  // assign-row builder labelled the row with the block's PRIMARY identity (Oriel),
+  // so the Selected Activities list filled with non-matching apps. The row must
+  // carry the matched identity when a Similar scope is active.
+  const context = loadAssignmentContext();
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const rangeStart = at(9, 0);
+  const rangeEnd = at(9, 5);
+  const blockData = {
+    app: 'Oriel',
+    title: 'Oriel',
+    url: '',
+    appPath: '/Applications/Oriel.app',
+    bundleId: 'so.sil.oriel'
+  };
+  const codex = {
+    app: 'Codex',
+    title: 'Codex',
+    url: '',
+    appPath: '/Applications/Codex.app',
+    bundleId: 'com.openai.codex',
+    start: at(9, 1),
+    end: at(9, 4),
+    duration: 3 * 60 * 1000,
+    assignedDurationMs: 3 * 60 * 1000
+  };
+
+  const row = context.buildVisibleRowUnitAssignmentActivity(
+    blockData,
+    [codex],
+    rangeStart,
+    rangeEnd,
+    { preferSourceIdentity: true }
+  );
+  assert.ok(row, 'builds an assign row for the matched overlaps');
+  assert.equal(row.app, 'Codex', 'row app is the matched identity, not the block primary');
+  assert.equal(row.title, 'Codex', 'row title is the matched identity');
+  assert.equal(row.bundleId, 'com.openai.codex', 'row bundle id is the matched identity');
+  assert.equal(row.appPath, '/Applications/Codex.app', 'row app path is the matched identity');
+});
+
+test('visible-session Assign rows keep the block identity when no Similar scope is active', () => {
+  // Guard the other path: assigning a visible session (no Similar scope) must keep
+  // the block's canonical identity (the session host), not collapse onto a single
+  // captured page source. Only the Similar-scoped path overrides identity.
+  const context = loadAssignmentContext();
+  const dateStart = new Date(2026, 5, 15).setHours(0, 0, 0, 0);
+  const at = (hour, minute) => dateStart + (hour * 60 + minute) * 60 * 1000;
+  const rangeStart = at(9, 0);
+  const rangeEnd = at(9, 5);
+  const blockData = {
+    app: 'Brave Browser',
+    title: 'github.com',
+    url: 'https://github.com',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser'
+  };
+  const pageSource = {
+    app: 'Brave Browser',
+    title: 'sil-so/oriel · Pull Request',
+    url: 'https://github.com/sil-so/oriel/pull/79',
+    appPath: '/Applications/Brave Browser.app',
+    bundleId: 'com.brave.Browser',
+    start: at(9, 1),
+    end: at(9, 4),
+    duration: 3 * 60 * 1000,
+    assignedDurationMs: 3 * 60 * 1000
+  };
+
+  const row = context.buildVisibleRowUnitAssignmentActivity(blockData, [pageSource], rangeStart, rangeEnd);
+  assert.ok(row, 'builds an assign row for the session overlaps');
+  assert.equal(row.app, 'Brave Browser', 'session row keeps the block app');
+  assert.equal(row.title, 'github.com', 'session row keeps the block (host) title, not a page title');
+  assert.equal(row.url, 'https://github.com', 'session row keeps the block host url');
 });
 
 test('logged time entries render at least one full row high for short entries', () => {
@@ -8564,6 +8809,14 @@ test('clicking a coarse fan-out fragment scopes Edit to that block while preserv
     assert.ok(
       Array.isArray(context.window.editingTimeEntryPersistedActivities),
       `block ${index} preserves the whole entry's activities for save`
+    );
+    // A fan-out fragment restores the whole entry verbatim on save; it must not
+    // filter the saved breakdown by the projected selection (that is the whole-
+    // block behavior), or editing one fragment would delete the entry's other rows.
+    assert.equal(
+      context.window.editingTimeEntryFilterPersistedBySelection,
+      false,
+      `block ${index} restores the whole entry rather than filtering by selection`
     );
   });
 });
