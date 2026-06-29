@@ -912,6 +912,7 @@ function closeTimeEntryModal() {
     window.editingTimeEntryGroupIds = null;
     window.editingTimeEntryPersistedRange = null;
     window.editingTimeEntryPersistedActivities = null;
+    window.editingTimeEntryFilterPersistedBySelection = false;
     window.editingTimeEntryUsesSelectedActivityReview = false;
     window.isBulkAllocation = false;
     window.pendingAiSuggestionCompletion = null;
